@@ -1,0 +1,62 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.openaikey
+.qwenkey
+configs/secrets.env
+configs/local/
+
+# Generated experiment artifacts
+runs/
+outputs/
+artifacts/
+cache/
+logs/
+audit/
+backups/
+camera_probe/
+demo_evidence/
+oracle/
+*.log
+*.pid
+*.mp4
+
+# Models, datasets, environments, and vendored repositories
+models/
+weights/
+checkpoints/
+data/
+vendor/
+repos/
+.venv*/
+venv/
+knowin-world/
+knowin-world-data/
+
+# Python and test caches
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local editor and backup files
+.DS_Store
+**/._*
+.idea/
+.vscode/
+.codex_backups/
+*.bak
+*.bak.*
+*~
+
+# Build products
+build/
+dist/
+*.egg-info/
+
