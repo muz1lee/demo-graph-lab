@@ -1,0 +1,13 @@
+robot-subtask-seg
+
+This project is an independent reproduction of the public robot-video subtask
+segmentation workflow described by Macrodata Labs.
+
+Design references:
+- Macrodata Labs, "Segmenting Robot Video into Actionable Subtasks"
+- macrodata-labs/refiner, Apache License 2.0
+
+Some prompt wording and contact-sheet implementation choices are adapted from
+the public Refiner subtask annotation module. Refiner itself is licensed under
+Apache-2.0.
+

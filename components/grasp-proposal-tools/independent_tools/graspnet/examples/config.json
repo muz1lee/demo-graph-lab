@@ -1,0 +1,11 @@
+{
+  "service_url": "http://127.0.0.1:8088",
+  "endpoint_path": "/predict",
+  "timeout_s": 30.0,
+  "request_format": "json_paths",
+  "coordinate_frame": "camera_frame",
+  "max_candidates": 20,
+  "preserve_raw": true,
+  "preserve_order": true,
+  "field_map": {}
+}

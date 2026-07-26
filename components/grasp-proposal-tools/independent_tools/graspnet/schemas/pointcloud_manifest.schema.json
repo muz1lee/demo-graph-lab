@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kw_independent.graspnet.pointcloud_manifest.v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "source_policy",
+    "output_point_cloud_path",
+    "input_reference",
+    "stats",
+    "warnings"
+  ],
+  "properties": {
+    "schema": {
+      "const": "kw_independent.graspnet.pointcloud_manifest.v1"
+    },
+    "source_policy": {
+      "type": "string"
+    },
+    "output_point_cloud_path": {
+      "type": "string"
+    },
+    "coordinate_frame": {
+      "type": "string"
+    },
+    "saved_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "input_reference": {
+      "type": "object"
+    },
+    "stats": {
+      "type": "object"
+    },
+    "evidence_source": {
+      "type": "object"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

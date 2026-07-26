@@ -1,0 +1,21 @@
+[
+  {
+    "score": 0.88,
+    "translation": [0.2, 0.1, 0.42],
+    "rotation_matrix": [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
+    "width": 0.04,
+    "depth": 0.03,
+    "approach": [0, 0, -1],
+    "coordinate_frame": "camera_left",
+    "object_id": "candidate_object",
+    "collision_free": true
+  },
+  {
+    "score": 0.74,
+    "translation": [0.22, 0.08, 0.41],
+    "quaternion": [0, 0, 0, 1],
+    "width": 0.05,
+    "approach": [0, -1, 0],
+    "object_id": "candidate_object"
+  }
+]

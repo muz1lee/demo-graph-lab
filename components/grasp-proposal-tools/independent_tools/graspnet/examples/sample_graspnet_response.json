@@ -1,0 +1,15 @@
+{
+  "scores": [0.93, 0.81],
+  "translations": [
+    [0.12, -0.04, 0.35],
+    [0.11, -0.05, 0.34]
+  ],
+  "rotation_matrices": [
+    [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
+    [[0, 1, 0], [-1, 0, 0], [0, 0, 1]]
+  ],
+  "widths": [0.045, 0.052],
+  "depths": [0.02, 0.018],
+  "object_ids": ["target_object", "target_object"],
+  "collision_free": [true, false]
+}

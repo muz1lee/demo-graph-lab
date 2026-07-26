@@ -28,7 +28,7 @@ oracle/
 models/
 weights/
 checkpoints/
-data/
+/data/
 vendor/
 repos/
 .venv*/
@@ -59,4 +59,3 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-

@@ -1,0 +1,19 @@
+provider:
+  name: openai
+  model: gpt-5.5
+  temperature: 0.1
+  max_retries: 3
+
+segmentation:
+  sample_sec: 0.5
+  frame_width: 224
+  frames_per_sheet: 20
+  columns: 5
+  jpeg_quality: 95
+  prompt: completed_events_duration_prior_v1
+
+output:
+  save_contact_sheets: true
+  save_raw_responses: true
+  overwrite: false
+

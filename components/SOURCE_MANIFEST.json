@@ -1,0 +1,865 @@
+{
+  "schema_version": "1.0",
+  "imported_at_utc": "2026-07-26T04:13:14.677Z",
+  "source_note": "Public-safe, allowlist-only snapshot of WHT-authored components. Imported source files are byte-for-byte unchanged except for the single documented endpoint sanitization; host identity and credentials are intentionally omitted.",
+  "verification": {
+    "transport": "rsync over the user-authorized SSH endpoint",
+    "byte_exact_check": "Post-import rsync checksum verification produced no differences for all allowlisted files before sanitization; after sanitization it produced exactly one expected difference at robot-subtask-seg/src/robot_subtask_seg/cli.py.",
+    "aggregate_input_format": "For each component: sorted <relative_path>\\t<file_sha256>\\n; global: sorted <component_name>\\t<component_aggregate_sha256>\\n. SOURCE_MANIFEST.json is excluded from all digests."
+  },
+  "global_aggregate_sha256": "4dc0b82ed46522ec6696cf814e9bb46e3fc0344fbaed1b3fb6372462e49ac4b8",
+  "component_count": 4,
+  "file_count": 136,
+  "components": {
+    "knowin-skill-manager": {
+      "source": {
+        "kind": "authorized_remote_snapshot",
+        "path": "/mnt/data/wht/kw-aspire-robodojo/knowin-skill-manager"
+      },
+      "target": "components/knowin-skill-manager",
+      "import_policy": "allowlist_only_byte_exact",
+      "allowlist": [
+        "README.md",
+        "pyproject.toml",
+        "ksm/*.py",
+        "tests/test_*.py",
+        "aspire_skill_library/*.md",
+        "robodojo_stage_guides/*.yaml",
+        "docs/README.md",
+        "docs/agent_controller_migration.md"
+      ],
+      "exclusions": [
+        "configs/** (including local_1021.yaml and local_1024.yaml)",
+        "runs/**",
+        "experiments/**",
+        "tasks/**",
+        "suites/**",
+        "demo_artifacts/**",
+        "manual_skills/**",
+        "mock_llm_responses/**",
+        "archive/**",
+        "backups/**",
+        "logs/**",
+        "cache/**",
+        "*.pyc"
+      ],
+      "file_count": 66,
+      "aggregate_sha256": "d5a09fa287cbd0dc4a5266569ac215149d9ec10ef54426271c3af0a3916ec559",
+      "files": [
+        {
+          "path": "aspire_skill_library/feedback_repair.md",
+          "size_bytes": 1502,
+          "sha256": "9096f7fedc5f0d9c7b3e6fed759e897c70c06e39267493e4b632e1b2d4e98b6c"
+        },
+        {
+          "path": "aspire_skill_library/kw_yaml_contract.md",
+          "size_bytes": 1085,
+          "sha256": "31998d6399ca0907cbf4141c41af1ff9732de8f1869beb28d3299d2100cf8b28"
+        },
+        {
+          "path": "aspire_skill_library/multi_step_workflow.md",
+          "size_bytes": 1073,
+          "sha256": "da26320dbc7a8c2d1caaeb45dfa26e0b886989ad6dd97309310d3dba5f92406e"
+        },
+        {
+          "path": "aspire_skill_library/pickplace_patterns.md",
+          "size_bytes": 961,
+          "sha256": "5aca05fb821d48a0e08fc748ccc4d708c2d0f6b202880a3a13fdaf4116c9d36b"
+        },
+        {
+          "path": "aspire_skill_library/skill_boundary.md",
+          "size_bytes": 2685,
+          "sha256": "602cecd6da51bb3ea52b9be8ec0fa39c76e8314a8c43713c403bdbc0de437020"
+        },
+        {
+          "path": "docs/agent_controller_migration.md",
+          "size_bytes": 5275,
+          "sha256": "863e56ddab51ecda127a8c9f27dc06e456514c22eef4faaa8c039ef7b51043ae"
+        },
+        {
+          "path": "docs/README.md",
+          "size_bytes": 1432,
+          "sha256": "08a1cc4ac2d123c67655358006de48a0bf8c9329f23cecd653ff8774d3e99bae"
+        },
+        {
+          "path": "ksm/__init__.py",
+          "size_bytes": 115,
+          "sha256": "bf49ce99d7e2c7ffa0c50314400a68faeed9afcda5785aa184692a1d1628a04c"
+        },
+        {
+          "path": "ksm/agent_nodes.py",
+          "size_bytes": 4974,
+          "sha256": "9fb2d8ef70c218b3f3bb5e0727e5b33458b4182447cef5d3a96b7af935cf65ef"
+        },
+        {
+          "path": "ksm/agent_skill_spec.py",
+          "size_bytes": 19325,
+          "sha256": "ae3887f09b95ed7d8e2f06dc5bf144b1336f1be04fd59e36c022b34004ba1a2d"
+        },
+        {
+          "path": "ksm/agent_state.py",
+          "size_bytes": 19131,
+          "sha256": "a3defd6fdbe23b904573500182e24b2017c9afaa53d0819a29fa6d4f1d56d853"
+        },
+        {
+          "path": "ksm/artifacts.py",
+          "size_bytes": 507,
+          "sha256": "6bbd705968dc120cf12664147c6963d27de1811a6c92b56582d04d97e8e1a4d7"
+        },
+        {
+          "path": "ksm/aspire_loop.py",
+          "size_bytes": 10472,
+          "sha256": "ee69de5374d89f504d65e45e278ba676722598ff170ab3c52b6d868eecbba7a5"
+        },
+        {
+          "path": "ksm/aspire.py",
+          "size_bytes": 31046,
+          "sha256": "855577ac4b329cb285767ab3e75fef3d5543bff259c60063ca01e4f8b409074c"
+        },
+        {
+          "path": "ksm/candidate.py",
+          "size_bytes": 7041,
+          "sha256": "f409591f5db75f3f361a6261a80fecb4758396c2ff8ee23cb42b7fda934116c9"
+        },
+        {
+          "path": "ksm/capture.py",
+          "size_bytes": 3417,
+          "sha256": "77183213bdbbc449c8c2805e36e205526557cef4536d3d1eac7ae6442b27bc69"
+        },
+        {
+          "path": "ksm/cli.py",
+          "size_bytes": 22054,
+          "sha256": "4674f550b5cc48bf8ba57edca8ec6abb7dc172079088581896127717c48ccf70"
+        },
+        {
+          "path": "ksm/config.py",
+          "size_bytes": 4116,
+          "sha256": "320b90c679e9cc5ab583da5ce06bc926b9f7fa80cb112f0943ad946a1dda4249"
+        },
+        {
+          "path": "ksm/evaluation.py",
+          "size_bytes": 7705,
+          "sha256": "d35de4e600857a9c2c880875a00133411d6c7f723d485ff5900fff028480a225"
+        },
+        {
+          "path": "ksm/failure.py",
+          "size_bytes": 2176,
+          "sha256": "2e3884a960dbba2ebef8145c38b8076cbff3309435bdca9add8b67535b08fb72"
+        },
+        {
+          "path": "ksm/feedback_attribution.py",
+          "size_bytes": 49646,
+          "sha256": "6a0e7d32b7a980e2c85c15c21b18dab9e6333c183d579c1e96e6b31c8892825b"
+        },
+        {
+          "path": "ksm/generator.py",
+          "size_bytes": 5403,
+          "sha256": "2bde8a92f01f40e26ea13f6620ad23f7d67d343d5ce89e107dcf03b5ac70b6a6"
+        },
+        {
+          "path": "ksm/grounding.py",
+          "size_bytes": 13932,
+          "sha256": "a1b7d0846158efffd2c05b71e2baa8202604e7d67a7f6e9ff1edf125d4040710"
+        },
+        {
+          "path": "ksm/io.py",
+          "size_bytes": 1627,
+          "sha256": "a19b1e658910ed4dc33cbaa493928b644e694c40ec0303ae8b1a9cc11e5bb3f7"
+        },
+        {
+          "path": "ksm/leaderboard.py",
+          "size_bytes": 5906,
+          "sha256": "baf89bba31e4f7d4283c46328c3d1af71226747cf0afa4072d05bdaf6999bf27"
+        },
+        {
+          "path": "ksm/llm_generator.py",
+          "size_bytes": 21411,
+          "sha256": "f1d89961a50152239ef999435b9d147db51bd88af2af850492cf147a5a341c38"
+        },
+        {
+          "path": "ksm/llm.py",
+          "size_bytes": 6688,
+          "sha256": "f6a528396f853cb05485795cb03a5c655d30325552f37a5d21a1006a13d61ebc"
+        },
+        {
+          "path": "ksm/policy.py",
+          "size_bytes": 9720,
+          "sha256": "c85a713fcb98e2bc44958512811843c8e041308708a81fbd85b6f3515071feeb"
+        },
+        {
+          "path": "ksm/predicate.py",
+          "size_bytes": 17108,
+          "sha256": "7b956fd67f111b78a0e42bf776e18c34788249fb30ab9b55066eabead4a103c1"
+        },
+        {
+          "path": "ksm/prompt_contract.py",
+          "size_bytes": 6391,
+          "sha256": "12c3fc6c8e4299b21bc5c81b1a16cff4e822a0d31188ec98de95549ca3098422"
+        },
+        {
+          "path": "ksm/publisher.py",
+          "size_bytes": 2102,
+          "sha256": "e096da9eee8efcf534034156d2fb9adc4acf4d3a471889991c4c0208fe45a2fb"
+        },
+        {
+          "path": "ksm/reflection.py",
+          "size_bytes": 1874,
+          "sha256": "adfb1b78d6cf757e9b7cc6014d939b2730e2ec7aa12c97398753cb5253c48714"
+        },
+        {
+          "path": "ksm/registry.py",
+          "size_bytes": 4869,
+          "sha256": "a864a82eab2d0b04a6184a7936b7c727229026f51149b3b5c74a3b5689984fa6"
+        },
+        {
+          "path": "ksm/robodojo_auto.py",
+          "size_bytes": 92205,
+          "sha256": "1972ca2f62f837438c8cda221da9544b76192fd81b71062f39d8e4b337ab5829"
+        },
+        {
+          "path": "ksm/robodojo_decision.py",
+          "size_bytes": 16458,
+          "sha256": "a7300bcff12a6b631a602327be040f46f785807757c0efb0ef09e33ed2c095f7"
+        },
+        {
+          "path": "ksm/runner.py",
+          "size_bytes": 6071,
+          "sha256": "57107d32755d2d885340728520687a31112f973a8a534419a6153e7fa272eccf"
+        },
+        {
+          "path": "ksm/sanitize.py",
+          "size_bytes": 1074,
+          "sha256": "d87d93f26aebdcaa60be817a8014d371388868cf30e612f6e2eb1f005081eada"
+        },
+        {
+          "path": "ksm/skill_candidates.py",
+          "size_bytes": 14161,
+          "sha256": "36a73c58bd76dcd0482336c897351c2532ca7a7bb46a07004194b273e408ef6c"
+        },
+        {
+          "path": "ksm/skill_ir.py",
+          "size_bytes": 4643,
+          "sha256": "cb92a7ea12d087fdd3e8c1d16939e89d676309396c6e5bd9ca7baf03d516e803"
+        },
+        {
+          "path": "ksm/skill_library.py",
+          "size_bytes": 7978,
+          "sha256": "0a19a6681c6820b25e9c6639c79f5912a0daae50aa1f7a29d3f39e6a5e5960e0"
+        },
+        {
+          "path": "ksm/stage_decision.py",
+          "size_bytes": 4856,
+          "sha256": "0860dca8fd9be331303329a2efeb76b59adfa197c9ac6e4c9f759b405ad8d6fc"
+        },
+        {
+          "path": "ksm/staged_experiment.py",
+          "size_bytes": 30925,
+          "sha256": "5f9ff9889c6910cd90b675a530eadaf6bcfb9a309a604cc8dd2edc63be38d6b6"
+        },
+        {
+          "path": "ksm/staged_state.py",
+          "size_bytes": 17212,
+          "sha256": "6dc3b21010b102bdeda307eecf0382884cc60f0eb2ae52cfe538eda355e67eb9"
+        },
+        {
+          "path": "ksm/suite_runner.py",
+          "size_bytes": 24115,
+          "sha256": "e4431db0dc047a5c60713908e97e7a66ff28f4489868014afb2f502ab6969df8"
+        },
+        {
+          "path": "ksm/suite.py",
+          "size_bytes": 4845,
+          "sha256": "9cfa08843382ad8dbbcd26dec7e6433b6978052950d3136aa6388c4da05ba3b1"
+        },
+        {
+          "path": "ksm/trace_analysis.py",
+          "size_bytes": 12323,
+          "sha256": "5575b4d649edcb4f3bd8a0eda2be411df4c523f4ae0ad991321917f24ed03792"
+        },
+        {
+          "path": "ksm/trace.py",
+          "size_bytes": 4779,
+          "sha256": "b99b97458ef24f118232ee81794d2492fdf1dcb46c656a1f3f3536a8df15d7ad"
+        },
+        {
+          "path": "ksm/visual_feedback.py",
+          "size_bytes": 13833,
+          "sha256": "590d178246993c5419c1b374c24cacbc8c7486b29a10ecbd8a51931ae964bc70"
+        },
+        {
+          "path": "pyproject.toml",
+          "size_bytes": 230,
+          "sha256": "81bc878a76f5c32f66a081a7818eecdc8974d80f1dffc59cabcd897fd2697582"
+        },
+        {
+          "path": "README.md",
+          "size_bytes": 4136,
+          "sha256": "502cb52cfa2b463f1a6f7afe0601f2a389f8c2e80a4af36f66046895c5308125"
+        },
+        {
+          "path": "robodojo_stage_guides/put_single_object_into_container.yaml",
+          "size_bytes": 5043,
+          "sha256": "26f256133685f831c3275f5293311feacb0f3b9215f8fd63b312c41d169e4c9e"
+        },
+        {
+          "path": "tests/test_agent_controller.py",
+          "size_bytes": 15079,
+          "sha256": "18ad0e2edcf23e9eeb6691fb0b7b3e55a9b73aebc5cd2d6885aff22e67e1d167"
+        },
+        {
+          "path": "tests/test_aspire_prompt.py",
+          "size_bytes": 2751,
+          "sha256": "c687823e7b08a7737dcd615eef6631ab984dbb2686230a78d343728511c1859d"
+        },
+        {
+          "path": "tests/test_feedback_attribution.py",
+          "size_bytes": 27117,
+          "sha256": "0ad60d99a420bebc1e36c6fe773834bdcd6c780070aa24d1ca6f62251bed5de0"
+        },
+        {
+          "path": "tests/test_native_skill_policy_compatibility.py",
+          "size_bytes": 2636,
+          "sha256": "1c58b298092309c06359317ec45a4e7ab29454ecb536ce7abda75bbbff4e863d"
+        },
+        {
+          "path": "tests/test_policy_generator.py",
+          "size_bytes": 54864,
+          "sha256": "096ca5eb3063e619c94c58935e6d7505734aee8857cb726f0299bc8e07eeb231"
+        },
+        {
+          "path": "tests/test_predicate.py",
+          "size_bytes": 4673,
+          "sha256": "6addddc4b3837b7fc94bc5af3bd859a652cb8cf41d3250a4e44fdb8283274daf"
+        },
+        {
+          "path": "tests/test_publisher.py",
+          "size_bytes": 1976,
+          "sha256": "146153596346a784539bd13d7f316e7474101e11199f16c2d36a8693a1c2f2dd"
+        },
+        {
+          "path": "tests/test_robodojo_auto_selection.py",
+          "size_bytes": 11772,
+          "sha256": "3e6df85d12913da01e06a14164a50170b187d12a9f3658bc010afae6ab6c5239"
+        },
+        {
+          "path": "tests/test_robodojo_decision.py",
+          "size_bytes": 6858,
+          "sha256": "a02116912be4030a66aaa0a98e46e6bea1086022272a44ee3f00959ca239c697"
+        },
+        {
+          "path": "tests/test_runner_reset.py",
+          "size_bytes": 4129,
+          "sha256": "d1b7fe840dee9dbf40787a3a91af32310c5c23ecfc9a3b5c5ee662df599959ca"
+        },
+        {
+          "path": "tests/test_skill_candidates.py",
+          "size_bytes": 5003,
+          "sha256": "446961a27b11db5f6afab8a0f7dd129586f6fc9edc166decc0611a8e1f01efb8"
+        },
+        {
+          "path": "tests/test_staged_experiment.py",
+          "size_bytes": 9292,
+          "sha256": "f1d5a8fa01cbaff92f52a9c89b01a7c91834a7c8a2b17a31a4f789f6ae3495c4"
+        },
+        {
+          "path": "tests/test_staged_state.py",
+          "size_bytes": 5256,
+          "sha256": "2554a8c6b5ef8964886f67a88d2a5bdc939e35af0d2665e7d651dd5496ce5881"
+        },
+        {
+          "path": "tests/test_suite_runner.py",
+          "size_bytes": 15858,
+          "sha256": "a25ff77b8b960ad1e43e1f01a3bd20e08158d06d1962e6fba5d455aaa46305e8"
+        },
+        {
+          "path": "tests/test_trace_analysis.py",
+          "size_bytes": 2376,
+          "sha256": "21fc64d957bf851df1594d370392067f1871670f2949655a342e150ee993faf5"
+        }
+      ]
+    },
+    "robot-subtask-seg": {
+      "source": {
+        "kind": "authorized_remote_snapshot",
+        "path": "/mnt/data/wht/robot-subtask-seg"
+      },
+      "target": "components/robot-subtask-seg",
+      "import_policy": "allowlist_only_byte_exact_except_documented_public_sanitization",
+      "allowlist": [
+        "README.md",
+        "NOTICE",
+        "pyproject.toml",
+        ".gitignore",
+        "src/**",
+        "tests/test_*.py",
+        "configs/*.yaml",
+        "data/README.md"
+      ],
+      "exclusions": [
+        "data/** except data/README.md",
+        "outputs/**",
+        "docs/**",
+        "cache/**",
+        "AppleDouble files (._*)",
+        "*.pyc"
+      ],
+      "file_count": 46,
+      "aggregate_sha256": "e021e95ca9e9cd62c277a6cf547dfe5d52b5a8421b2d7e5cc6663f47f018dea6",
+      "files": [
+        {
+          "path": ".gitignore",
+          "size_bytes": 170,
+          "sha256": "7a22b1ddeb342954248c90ee24aca3501e70f66df3d058141cf9cffa5e7b2117"
+        },
+        {
+          "path": "configs/default.yaml",
+          "size_bytes": 449,
+          "sha256": "4ea8e4afe407dfa07f2731c1591b2dd3ac864debf30d7ac55afc8139265dbdd3"
+        },
+        {
+          "path": "configs/openai_high_quality.yaml",
+          "size_bytes": 314,
+          "sha256": "3ffec8b15d782f5b56dca2772c7a50d500117a9a3785ddfd3cab93daac7e6e1a"
+        },
+        {
+          "path": "configs/robodojo_1024_filtered.yaml",
+          "size_bytes": 319,
+          "sha256": "7cf58e3a581ffd55562bd3c9726bca78b4507cc21f2be96d4557364b703f1950"
+        },
+        {
+          "path": "data/README.md",
+          "size_bytes": 276,
+          "sha256": "f5b004ba4fc629a3218ea5a805dc37e68c07e0921270e112fe970d797c096942"
+        },
+        {
+          "path": "NOTICE",
+          "size_bytes": 452,
+          "sha256": "a6f01207e15d75e6fdb053771e59de4d39fbe0cc187a91677b2854084a7a570e"
+        },
+        {
+          "path": "pyproject.toml",
+          "size_bytes": 731,
+          "sha256": "a5e29933b20f28530dc835e95c5af230ac0344dfc37e50f67106b37010a1847d"
+        },
+        {
+          "path": "README.md",
+          "size_bytes": 5972,
+          "sha256": "a295a08d5b006a09be19688d825a98c3915370480bb07638dbaf17dddc670eea"
+        },
+        {
+          "path": "src/robot_subtask_seg/__init__.py",
+          "size_bytes": 77,
+          "sha256": "6d8cbe6b0238d2c7fe81a662ee958f218f29625f38515d66eef2d400c6eb1133"
+        },
+        {
+          "path": "src/robot_subtask_seg/action_trace.py",
+          "size_bytes": 6870,
+          "sha256": "ffb4bf3d978168059c27763404b87ff7de1d7d81a5a9d5837c53f52c20359208"
+        },
+        {
+          "path": "src/robot_subtask_seg/archive.py",
+          "size_bytes": 826,
+          "sha256": "46c0a708c1335942bc4cad72e0f9ad3a6fa5b6fe05e36b9c4ee2d30127a48868"
+        },
+        {
+          "path": "src/robot_subtask_seg/audit.py",
+          "size_bytes": 2790,
+          "sha256": "ea15e63c10b744695c81b6b71fbbf638cc1c7c68651450fc3fb9061c23e8f353"
+        },
+        {
+          "path": "src/robot_subtask_seg/cli.py",
+          "size_bytes": 17551,
+          "sha256": "fda08dd787284fdf875d3036895bbb94db300ee0145974d512dbb672c0d5cb21",
+          "provenance": {
+            "upstream_sha256": "11de5cf51cf9594464c3432cc296bd1d0e049e50970b00b0894b81f0e4759d33",
+            "sanitized_sha256": "fda08dd787284fdf875d3036895bbb94db300ee0145974d512dbb672c0d5cb21",
+            "patch_reason": "remove internal default endpoint",
+            "patch_scope": "Replace only the CLI default SAM service URL with a localhost placeholder; runtime override behavior is unchanged."
+          }
+        },
+        {
+          "path": "src/robot_subtask_seg/config.py",
+          "size_bytes": 2324,
+          "sha256": "343441d1b388af48c4c9c0a0c2192f3f011bb1b508fc665ced7c60b537b9dc96"
+        },
+        {
+          "path": "src/robot_subtask_seg/contact_sheet.py",
+          "size_bytes": 5464,
+          "sha256": "dd9a8538b19a56b64e3dff12b5c1c00998c0935cd65f9a87bffad25367798fa4"
+        },
+        {
+          "path": "src/robot_subtask_seg/demonstration_bundle.py",
+          "size_bytes": 8303,
+          "sha256": "d3259b69f10233d9b3157fe1bb5d20cabde779e96e5b3cc94ebc02dd9a5f33f5"
+        },
+        {
+          "path": "src/robot_subtask_seg/dense_tracking.py",
+          "size_bytes": 26133,
+          "sha256": "6a0e633c06ed429eadde1a934424d97476f427f35c2854a77c06a793b09c0675"
+        },
+        {
+          "path": "src/robot_subtask_seg/eval.py",
+          "size_bytes": 1533,
+          "sha256": "e6e0b163d93add693201c7e53d0e0639ebbc32279916bdfa865dbfcc1116f1d8"
+        },
+        {
+          "path": "src/robot_subtask_seg/manifest.py",
+          "size_bytes": 2394,
+          "sha256": "1c72b575e9844346b70dd6f0070360e9e1cb4e8b9bad3f61ae5c4346b796886d"
+        },
+        {
+          "path": "src/robot_subtask_seg/normalize.py",
+          "size_bytes": 6034,
+          "sha256": "0b79c25434269b9494d2625076cfb61903abac150dcd93ede89ce7f964b9d4fc"
+        },
+        {
+          "path": "src/robot_subtask_seg/operation_structure.py",
+          "size_bytes": 10565,
+          "sha256": "5d955fc6aefb17b3f5beb156df1247a902386c2633e1c16d5bd9e0627777bc78"
+        },
+        {
+          "path": "src/robot_subtask_seg/prompts.py",
+          "size_bytes": 17372,
+          "sha256": "b5392d0f13f085681f979b5a30b3da0eb49414bb614f772e8498e92708140e5b"
+        },
+        {
+          "path": "src/robot_subtask_seg/providers/__init__.py",
+          "size_bytes": 1123,
+          "sha256": "52ff127fc2ea9526c82c4a9d5264d16faded84b55ac695b93964007374e1bafa"
+        },
+        {
+          "path": "src/robot_subtask_seg/providers/base.py",
+          "size_bytes": 355,
+          "sha256": "dafdb3a94004c12f5066de6fd8f4563b49b18b4fbf575ba2510c5c1c6e28a2ab"
+        },
+        {
+          "path": "src/robot_subtask_seg/providers/fake.py",
+          "size_bytes": 8016,
+          "sha256": "becbdf45515639b0fe0fe6b09b7d09e908dd782de62deeb4297a0ff464c38047"
+        },
+        {
+          "path": "src/robot_subtask_seg/providers/google_gemini.py",
+          "size_bytes": 2206,
+          "sha256": "f25d1c295c97f97944087919d76eb93bc774c1e23657fb729e063a73004fc5ba"
+        },
+        {
+          "path": "src/robot_subtask_seg/providers/openai_provider.py",
+          "size_bytes": 2790,
+          "sha256": "035b1c8d847eb985eb8ba235688a96e34058ce799b403ecb4a5090f70a8aae87"
+        },
+        {
+          "path": "src/robot_subtask_seg/quality.py",
+          "size_bytes": 12039,
+          "sha256": "37b48ad4af66c86ab71166cf277429b3b39567c17dd0391a494994fb14b3fc20"
+        },
+        {
+          "path": "src/robot_subtask_seg/refinement.py",
+          "size_bytes": 10002,
+          "sha256": "09879d42df5966a990a74c0836c2a7f32658312278a67a5933d13386e8d076d1"
+        },
+        {
+          "path": "src/robot_subtask_seg/schema.py",
+          "size_bytes": 7923,
+          "sha256": "2bc42e7ef70a9de5e04bba6a3d9f039fd8b80260c0011de7cccefcc231dddff5"
+        },
+        {
+          "path": "src/robot_subtask_seg/segmentation.py",
+          "size_bytes": 6700,
+          "sha256": "ef66e477404e3e8b58a26d37504269aa5aa04658706677b5b7d086d91009b497"
+        },
+        {
+          "path": "src/robot_subtask_seg/video_evidence.py",
+          "size_bytes": 18349,
+          "sha256": "98c9ded967708a2dc41de8d0f2976e7640c909c9cd3a7ac0f4b1b7ac3b1dbeb6"
+        },
+        {
+          "path": "src/robot_subtask_seg/video.py",
+          "size_bytes": 4590,
+          "sha256": "9a070525994e8718ea684fd7e725bcce09c5a259dcbd45939f39a9a06e03ab98"
+        },
+        {
+          "path": "tests/test_action_trace.py",
+          "size_bytes": 3313,
+          "sha256": "7ea7d55dc42b3546f619063540d40b2d26eb5526a2e9abef242e2827fffa1db7"
+        },
+        {
+          "path": "tests/test_audit.py",
+          "size_bytes": 1073,
+          "sha256": "53e1635bccb1c717a28fdc6b61a610069e4143d3338fdaad0290f4bd2a240e2b"
+        },
+        {
+          "path": "tests/test_contact_sheet.py",
+          "size_bytes": 1589,
+          "sha256": "02652ee4f6bec7d3c87bc98eeb3fbabbc5a334261e44fb515ac84ce6a1385ab3"
+        },
+        {
+          "path": "tests/test_demonstration_bundle.py",
+          "size_bytes": 4098,
+          "sha256": "26e6568be9f175378a55cc803b27a88de72b0f59f2d530913f3cd2ace3ad5755"
+        },
+        {
+          "path": "tests/test_dense_tracking.py",
+          "size_bytes": 3729,
+          "sha256": "3278f567b1e2001063a1f37705b499704dcce3a150ade69099911cd5b53f24e8"
+        },
+        {
+          "path": "tests/test_eval.py",
+          "size_bytes": 489,
+          "sha256": "6cbeb46a19dcb6593efdc270f67f396d9dd8684dbd6b74dc1a55d934a6ecce7a"
+        },
+        {
+          "path": "tests/test_manifest.py",
+          "size_bytes": 496,
+          "sha256": "71eed7197a3a1cf9eea84b1853952b50e57305fc2261a95d378b7bc9bb3b8706"
+        },
+        {
+          "path": "tests/test_normalize.py",
+          "size_bytes": 2841,
+          "sha256": "28e3152e177bd3ccce73e884a5b56102bdde7199db381cd9a260d6685c2ac346"
+        },
+        {
+          "path": "tests/test_openai_provider.py",
+          "size_bytes": 344,
+          "sha256": "0418e9f4fa35572554157da4a6456f324022fe2426f6d436d61c5efcf19ed093"
+        },
+        {
+          "path": "tests/test_operation_structure.py",
+          "size_bytes": 5721,
+          "sha256": "9d88aee96c5fb2d8c3c1f009648c3423be4fa38a01d2ad50097f38211ed52069"
+        },
+        {
+          "path": "tests/test_quality.py",
+          "size_bytes": 4287,
+          "sha256": "5af2587d05e4a73dbd85148b617df5d8855e05d2fd64b146e1b9cb7e4bb4b07a"
+        },
+        {
+          "path": "tests/test_refinement.py",
+          "size_bytes": 3481,
+          "sha256": "c2fd4a9db2da8d12008b1bcf7c9b00bf8885030b617079c206df087714bdb138"
+        },
+        {
+          "path": "tests/test_video_evidence.py",
+          "size_bytes": 3441,
+          "sha256": "1d22e2291c144b62bfc9b1b1371c29223bce75841ebc37f8b5f377c60c806e23"
+        }
+      ]
+    },
+    "video-perception-service": {
+      "source": {
+        "kind": "authorized_remote_snapshot",
+        "path": "/mnt/data/wht/robot-video-perception-service"
+      },
+      "target": "components/video-perception-service",
+      "import_policy": "allowlist_only_byte_exact",
+      "allowlist": [
+        "README.md",
+        "pyproject.toml",
+        "src/**",
+        "tests/test_*.py"
+      ],
+      "exclusions": [
+        "models/**",
+        "vendor/**",
+        "logs/**",
+        "cache/**",
+        "*.pyc"
+      ],
+      "file_count": 7,
+      "aggregate_sha256": "477abd2d3652ac1cfbfcb9cae988d790e28999c4242a15db8ff8fd6021fc002d",
+      "files": [
+        {
+          "path": "pyproject.toml",
+          "size_bytes": 545,
+          "sha256": "9f101cdbedc22b6f5c301b26aaf51c7b4f85a35f73bfcbc7c1368c4e665f0517"
+        },
+        {
+          "path": "README.md",
+          "size_bytes": 1016,
+          "sha256": "e179ead005bdbea05abf9cf4d7b90f2f2e9176fbb7cb749cec1dd0c99ef7e9ce"
+        },
+        {
+          "path": "src/video_perception_service/__init__.py",
+          "size_bytes": 38,
+          "sha256": "a6a47eb6a7abd62f2f59df13284dcd7524c9e91a263a45c34d20be9f50ef0c16"
+        },
+        {
+          "path": "src/video_perception_service/app.py",
+          "size_bytes": 1084,
+          "sha256": "f65c9f8304a17a0a1d0cbcae2438988d84deafc514cb4ff6a7a3786b68e99d26"
+        },
+        {
+          "path": "src/video_perception_service/contracts.py",
+          "size_bytes": 1067,
+          "sha256": "310bef1062795aae17c7ee803eb4791f719fc320b0b8eda622817ad75bf1966f"
+        },
+        {
+          "path": "src/video_perception_service/cotracker_backend.py",
+          "size_bytes": 9638,
+          "sha256": "547f32d3c31cacbb70b826e971101e1f1f35abe695a2464610f292d98b14e157"
+        },
+        {
+          "path": "tests/test_contracts.py",
+          "size_bytes": 1132,
+          "sha256": "9134d7ae397722bc242a6badc77355ecc6f55b36a8cfbc7c8ee6585b67600008"
+        }
+      ]
+    },
+    "grasp-proposal-tools": {
+      "source": {
+        "kind": "authorized_remote_snapshot",
+        "path": "/mnt/data/wht/graspnet_service"
+      },
+      "target": "components/grasp-proposal-tools",
+      "import_policy": "allowlist_only_byte_exact",
+      "allowlist": [
+        "independent_tools/graspnet/**"
+      ],
+      "exclusions": [
+        "independent_tools/graspnet/service/config.graspnet_baseline.example.json (contains obsolete internal absolute paths)",
+        "repos/**",
+        "weights/**",
+        "outputs/**",
+        "logs/**",
+        "smoke/**",
+        ".venv*/**",
+        "cache/**",
+        "*.pyc"
+      ],
+      "file_count": 17,
+      "aggregate_sha256": "fb301cf13e0601ef4152b2f1739caa299ba3bbdee0f55ffc4bc117b7a9035c1e",
+      "files": [
+        {
+          "path": "independent_tools/graspnet/__init__.py",
+          "size_bytes": 937,
+          "sha256": "6e9fced2d90bf9535e9035f08839799bf7f479e792b5265f165501ff1d0a3df0"
+        },
+        {
+          "path": "independent_tools/graspnet/cli.py",
+          "size_bytes": 8637,
+          "sha256": "38a5a0f6f4f9d06a3e7faab4bfffe7cae4a6d5e464e18fbe5c0b497401517271"
+        },
+        {
+          "path": "independent_tools/graspnet/client.py",
+          "size_bytes": 3370,
+          "sha256": "8a284676d4a95975850de96ff83c91951fb69d7ffc6a15d9c29f41b9086b8e9a"
+        },
+        {
+          "path": "independent_tools/graspnet/contract.py",
+          "size_bytes": 3725,
+          "sha256": "67dc4a54ab54d904e556d5ff1ad0260a1caef3894c63f7e2485c9e3c8d6a965a"
+        },
+        {
+          "path": "independent_tools/graspnet/examples/config.json",
+          "size_bytes": 262,
+          "sha256": "674a725d2855b98df9524b86ac4a3f008658f8dde52c74056c469b6a8ecb876d"
+        },
+        {
+          "path": "independent_tools/graspnet/examples/sample_anygrasp_response.json",
+          "size_bytes": 478,
+          "sha256": "d4e7a56b58ada188f0bf287ffb45f98d226c00a2c3ab935806c1d42f503bd7ab"
+        },
+        {
+          "path": "independent_tools/graspnet/examples/sample_graspnet_response.json",
+          "size_bytes": 354,
+          "sha256": "217aba34d21bb62fec4b529650b99f2db31f0916d14ac69a8557476eabf9690f"
+        },
+        {
+          "path": "independent_tools/graspnet/normalizer.py",
+          "size_bytes": 9612,
+          "sha256": "7a56d4024ee5dbaef9c9ba0c6cb8aef27adf8d6357e868966e1aca0a76cb7a9a"
+        },
+        {
+          "path": "independent_tools/graspnet/pointcloud.py",
+          "size_bytes": 13555,
+          "sha256": "5aa26c3566aaceeba5e9416619be97a36d2bf2689fb4271c6a6fc18b6e938ee2"
+        },
+        {
+          "path": "independent_tools/graspnet/README.md",
+          "size_bytes": 3727,
+          "sha256": "edda82e6359e19d11efe40a2c46978a921535e5fe8e060d835f1f3911ad28760"
+        },
+        {
+          "path": "independent_tools/graspnet/schemas/graspnet_proposals.schema.json",
+          "size_bytes": 3062,
+          "sha256": "587fefaf734fcef04fb2e3c9c7ef4b03541296826c97c32cad3e6941628e4424"
+        },
+        {
+          "path": "independent_tools/graspnet/schemas/graspnet_request.schema.json",
+          "size_bytes": 979,
+          "sha256": "9bc1de3198cd84f9ecca3bec8da4a1c0bab173b7c0e85f4d5d8e7f11ea7b28cc"
+        },
+        {
+          "path": "independent_tools/graspnet/schemas/pointcloud_manifest.schema.json",
+          "size_bytes": 949,
+          "sha256": "7a9b27ed282388bf12d2ffb2ea79ac2852dac9936ba8f72a32d34107d416d39e"
+        },
+        {
+          "path": "independent_tools/graspnet/service/app.py",
+          "size_bytes": 8741,
+          "sha256": "fc2541b955c05446ef0462c033f58b60b09ff94ae068a518a053e1a73a7bf181"
+        },
+        {
+          "path": "independent_tools/graspnet/service/config.fixture.json",
+          "size_bytes": 340,
+          "sha256": "fec020061e06163b270641b67a19796b9727f224f5400a3f63dca93c991f045a"
+        },
+        {
+          "path": "independent_tools/graspnet/service/README.md",
+          "size_bytes": 1871,
+          "sha256": "17c0473d1214ec4c1f2d0d5a9644a2513d4473a1d7509beadca4b9b15b823195"
+        },
+        {
+          "path": "independent_tools/graspnet/tests/test_graspnet_tools.py",
+          "size_bytes": 6784,
+          "sha256": "788754899c155a13a1c2bb941724892c378feff2c54a08c56208f6dc87ca3e44"
+        }
+      ]
+    }
+  },
+  "known_upstream_references": [
+    {
+      "component": "knowin-skill-manager",
+      "files": [
+        "README.md",
+        "tests/test_robodojo_auto_selection.py"
+      ],
+      "classification": "historical upstream mount paths used in documentation or synthetic tests",
+      "policy": "retained byte-for-byte as provenance; not runtime configuration"
+    },
+    {
+      "component": "robot-subtask-seg",
+      "files": [
+        "src/robot_subtask_seg/cli.py"
+      ],
+      "classification": "upstream default SAM service URL embedded in CLI source",
+      "policy": "the imported file was sanitized at the default-value boundary; both hashes and the patch reason are recorded"
+    },
+    {
+      "component": "video-perception-service",
+      "files": [
+        "src/video_perception_service/cotracker_backend.py",
+        "tests/test_contracts.py"
+      ],
+      "classification": "historical upstream mount defaults and test fixtures",
+      "policy": "retained byte-for-byte as provenance; no model, vendor tree, or live config was imported"
+    },
+    {
+      "component": "grasp-proposal-tools",
+      "files": [
+        "independent_tools/graspnet/service/README.md"
+      ],
+      "classification": "historical upstream mount paths in documentation",
+      "policy": "retained byte-for-byte as provenance; the path-bearing baseline example config was excluded"
+    }
+  ],
+  "public_sanitizations": [
+    {
+      "component": "robot-subtask-seg",
+      "path": "src/robot_subtask_seg/cli.py",
+      "upstream_sha256": "11de5cf51cf9594464c3432cc296bd1d0e049e50970b00b0894b81f0e4759d33",
+      "sanitized_sha256": "fda08dd787284fdf875d3036895bbb94db300ee0145974d512dbb672c0d5cb21",
+      "patch_reason": "remove internal default endpoint",
+      "behavior_boundary": "default configuration only; no algorithm or call flow changed"
+    }
+  ]
+}
