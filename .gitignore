@@ -8,6 +8,7 @@
 .qwenkey
 configs/secrets.env
 configs/local/
+/configs/env.sh
 
 # Generated experiment artifacts
 runs/
@@ -42,6 +43,9 @@ repos/
 venv/
 knowin-world/
 knowin-world-data/
+/kw-aspire-robodojo/
+/task_specs/
+/venvs/
 
 # Python and test caches
 **/__pycache__/
