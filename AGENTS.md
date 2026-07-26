@@ -241,6 +241,19 @@ subagent 不直接编辑 `PROGRESS.md`，只向主 agent 返回证据，避免�
 数据（如 `knowin-world-data`）与既有 venv；**禁止**写入、部署、改配置或启停其服务。历史上
 曾误把工作副本放进该树的路径已作废，操作指引不得再指向那里。
 
+### Git 同步工作流（1022 ↔ macOS ↔ GitHub）
+
+**1022 无法自己 push**：出向 22 端口到 GitHub 被阻断，且无 HTTPS push 凭据。同步必须走：
+
+1. **在 1022 改代码**（唯一工作树）；
+2. **rsync 回本地 mac**（排除 `.git`、`runs/`、`knowin-world/`、`venvs/`、密钥与
+   `configs/local/`；真同步时不要对本地用 `--delete` 盲目删文件）；
+3. **在本地 `git commit` + `git push origin main`**；
+4. **1022 用 `git fetch origin` 拉取并对齐**（`git checkout -B main origin/main`，对齐前先做
+   内容比对，确认无未推送工作）。
+
+GitHub `main` 是唯一权威历史。本地 mac 是 push 网关；1022 只负责开发与（可行时）fetch。
+
 具体主机、路径、端口和密钥只写入被忽略的 `configs/local/`，不写进公开文档或 example
 config。若存在独立 runtime checkout，必须与本仓使用同一 Git commit，且仍不得落在上述 1024
 基础仓路径内作为可写部署。
