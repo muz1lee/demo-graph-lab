@@ -20,6 +20,13 @@ backups/
 camera_probe/
 demo_evidence/
 oracle/
+/tools/
+/DIRECTION_AUDIT_*.md
+/PRIMITIVE_API_AUDIT.md
+/PREDICATE_AUDIT.md
+/PROVENANCE_CORRECTION.md
+/*.jpg
+/*.png
 *.log
 *.pid
 *.mp4
