@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from ._json import content_digest, jsonable, require_mapping
+from .._json import content_digest, jsonable, require_mapping
 
 
 _SKILL_PATH_RE = re.compile(r"^knowin_skills/[A-Za-z0-9_./-]+\.ya?ml$")

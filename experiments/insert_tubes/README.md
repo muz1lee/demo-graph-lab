@@ -1,35 +1,38 @@
-# Insert tubes: M1 vertical slice
+# insert_tubes：M1 垂直切片
 
-M1 validates the reusable execution method before scaling to the full
-benchmark. It handles one visually perceived tube and one visually perceived
-holder opening. No simulator entity identifier, asset geometry, exact pose,
-task predicate, or oracle target may enter the method-visible run.
+工作边界固定在 **1022** 的 `demo-graph-lab`（`/mnt/data/wenqian/demo-graph-lab`）。  
+**禁止**改写、部署或驱动 1024 `/mnt/nas/knowin_sim/sim_workspace/`。
 
-The node sequence is:
+## 节点顺序
 
 ```text
-observe
--> propose/select grasp
--> pick
--> verify attachment
--> reorient only when the observable goal is not already satisfied
--> align
--> servo insert
--> method-visible verification
+观察 → 提出/选择抓取 → pick → 验证附着
+→ 需要时再转向 → 对准 → 伺服插入 → 方法可见验证
 ```
 
-The runnable example keeps this sequence in one small graph file and one
-Python entrypoint. Numeric poses and contact thresholds remain typed holes
-resolved from runtime perception or trusted, task-agnostic controller limits.
+## 模块
 
-## Milestone gates
+| 路径 | 职责 |
+|---|---|
+| `run_m1.py` | CLI 入口 |
+| `runtime.py` | `M1Runtime` + Broker 绑定 |
+| `perception/` | qwen 响应解析、轴推导、place 错误归因 |
+| `m1_graph.json` | 非特权约束图 |
+| `m1_contract.json` | 里程碑契约与禁区声明 |
 
-1. Run the graph-to-Python path end to end without privileged input.
-2. Obtain one physical-simulation success, not a dry run.
-3. On 20 fixed layouts/seeds, reach pre-insert alignment in at least 16 runs
-   and inserted+upright in at least 12 runs.
-4. Freeze code/configuration and evaluate all 100 benchmark layouts.
+## 运行（1022）
 
-Method-visible stage metrics are used for online recovery. Official task
-success is computed only by the isolated oracle evaluator after the policy
-finishes and is never fed back into the policy.
+```bash
+# 只读 probe（默认）
+python3 experiments/insert_tubes/run_m1.py --mode probe --pipeline-url http://127.0.0.1:8000
+
+# 单元测试（无需机器人）
+python3 -m pytest -q experiments/insert_tubes
+```
+
+`grasp` / `full` 会发控制指令，仅在用户明确允许且 pipeline 仍在 1022 侧时使用。
+
+## 感知洞
+
+- `tube_axis`：优先从响应嵌套字段提取；否则由抓取 xquat 推导水平轴（`derived:grasp_xquat_horizontal`）。
+- `holder_pose`：`qwen_dof_xquat_place` 失败时记录 `holder_pose_error`（如 point cloud insufficient），**不**用 GT 孔位兜底。

@@ -1,51 +1,39 @@
-# KSM: Demo2Graph2Code
+# demo-graph-lab：演示约束图 → Python Policy
 
-KSM studies how a coding agent can learn the structure of a manipulation task
-from a demonstration, compile that structure into executable code, and recover
-locally when a constraint fails.
-
-The project deliberately separates relational task knowledge from metric
-execution:
+本仓库研究 coding agent 如何从演示中得到可执行的操作约束，再编译为可验证、可局部恢复的 Python 节点策略。
 
 ```text
-demonstration video
-  -> temporal/keyframe evidence
-  -> constraint graph with typed holes
-  -> generated Python node policy
-  -> runtime perception fills holes
-  -> reactive execution and trusted servo controllers
+演示视频
+  → 时序 / 关键帧证据
+  → 带 typed holes 的约束图
+  → 生成 Python node policy
+  → 运行时感知填洞
+  → 反应式执行与可信伺服
 ```
 
-The simulator is an execution and evaluation backend, not an answer database.
-Generated policies cannot access scene libraries, exact simulator state, task
-predicates, or evaluator targets. See [SECURITY.md](SECURITY.md).
+## 工作边界（硬约束）
 
-## Repository layout
+| 允许 | 禁止 |
+|---|---|
+| 1022：`/mnt/data/wenqian/demo-graph-lab` | 1024：`/mnt/nas/knowin_sim/sim_workspace/` |
+| 本仓内模块化技能迭代与只读 probe | 向 `services/ksm` 部署 / 改配置 / 启停基础仓服务 |
 
-- `components/`: byte-preserved WHT harness and perception components.
-- `method/demo_graph/`: constraint graph, code-policy, candidate, and reactive
-  execution contracts developed in this repository.
-- `adapters/`: sanitized demonstration, grasp proposal, observability, and
-  Knowin World integration boundaries.
-- `experiments/insert_tubes/`: non-privileged M1 contract and experiment
-  matrix.
-- `AGENTS.md`, `ALGORITHM_PLAN.md`, `PROGRESS.md`: stable project contract,
-  method design, and current status respectively.
+Knowin World 是**外部**运行时依赖，不 vendoring 进本仓。
 
-Knowin World, task data, model repositories, checkpoints, and experiment runs
-are external runtime dependencies and are never vendored here.
+## 仓库结构
 
-## Development checks
+- `components/`：字节保留的 WHT 组件快照
+- `method/demo_graph/`：约束图、状态机、候选、后端、伺服、隔离、RunManifest
+- `adapters/`：`knowin_world` / `demo_bundle` / `grasp_proposals` / `observability`
+- `experiments/insert_tubes/`：非特权 M1 入口与契约
+- `AGENTS.md` / `ALGORITHM_PLAN.md` / `PROGRESS.md`：原则、方法、进度
 
-Run the imported component tests from each component directory, then run the
-new method and adapter tests:
+## 本地检查
 
 ```bash
-python -m pytest -q method/demo_graph/tests
-python -m pytest -q adapters/tests tests/integration
-python scripts/public_release_check.py
+python3 -m pytest -q method/demo_graph/tests adapters/tests experiments/insert_tubes tests/integration
+python3 scripts/public_release_check.py
 ```
 
-The initial repository intentionally has no open-source license while
-authorship and redistribution permissions are being confirmed.
-
+远程仓库：`https://github.com/muz1lee/demo-graph-lab`（已由原 `ksm` 重命名）。  
+首轮暂不添加开源 LICENSE。详见 [SECURITY.md](SECURITY.md)。

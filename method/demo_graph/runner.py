@@ -9,6 +9,7 @@ from typing import Callable, Mapping
 from ._json import JsonValue, content_digest, freeze_json
 from .models import ConstraintGraph, Node
 from .provenance import Provenance, assert_method_safe
+from .state_machine import NodePhase, advance_phase
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +73,7 @@ class NodeRunResult:
     observed_revisions: tuple[str, ...]
     failure_constraint_id: str | None = None
     reason: str = ""
+    phases: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
@@ -139,32 +141,55 @@ class PythonNodePolicy:
 
     def _run_node(self, node: Node) -> NodeRunResult:
         revisions: list[str] = []
+        phases: list[str] = [NodePhase.READY.value]
+        phase = NodePhase.READY
         last_reason = ""
         last_constraint: str | None = None
 
+        def track(nxt: NodePhase) -> None:
+            nonlocal phase
+            phase = advance_phase(phase, nxt)
+            phases.append(phase.value)
+
         for attempt in range(1, node.max_attempts + 1):
+            track(NodePhase.RESOLVING_HOLES)
             observation, error = self._safe_observe(node)
             if error is not None:
+                track(NodePhase.FAILED)
                 return self._failure(
-                    node, attempt - 1, revisions, f"observe failed: {error}"
+                    node,
+                    attempt - 1,
+                    revisions,
+                    f"observe failed: {error}",
+                    phases=phases,
                 )
             assert observation is not None
             revisions.append(observation.revision)
 
             goal, error = self._safe_goal(node, observation)
             if error is not None:
+                track(NodePhase.FAILED)
                 return self._failure(
-                    node, attempt - 1, revisions, f"goal check failed: {error}"
+                    node,
+                    attempt - 1,
+                    revisions,
+                    f"goal check failed: {error}",
+                    phases=phases,
                 )
             if goal:
+                track(NodePhase.SUCCEEDED)
                 return NodeRunResult(
                     node_id=node.node_id,
                     action=node.action,
                     status=NodeStatus.SKIPPED,
                     attempts=attempt - 1,
                     observed_revisions=tuple(revisions),
+                    phases=tuple(phases),
                 )
 
+            track(NodePhase.CANDIDATES_READY)
+            track(NodePhase.ADMITTED)
+            track(NodePhase.EXECUTING)
             controller = self.controllers[node.controller_ref]
             try:
                 controlled = controller(node, observation)
@@ -175,64 +200,93 @@ class PythonNodePolicy:
                     recoverable=True,
                 )
             if not isinstance(controlled, ControllerResult):
+                track(NodePhase.FAILED)
                 return self._failure(
                     node,
                     attempt,
                     revisions,
                     "trusted controller did not return ControllerResult",
                     constraint_id=f"contract:{node.node_id}",
+                    phases=phases,
                 )
             if controlled.constraint_id is not None:
                 if controlled.constraint_id not in node.attributable_ids:
+                    track(NodePhase.FAILED)
                     return self._failure(
                         node,
                         attempt,
                         revisions,
                         "controller attributed failure to an unknown constraint",
                         constraint_id=f"contract:{node.node_id}",
+                        phases=phases,
                     )
                 last_constraint = controlled.constraint_id
             if not controlled.ok:
                 last_reason = controlled.reason
                 if controlled.recoverable and attempt < node.max_attempts:
+                    track(NodePhase.RECOVERABLE)
+                    # 有界重试：回到填洞阶段
+                    phase = NodePhase.READY
+                    phases.append(NodePhase.READY.value)
                     continue
+                track(NodePhase.FAILED)
                 return self._failure(
                     node,
                     attempt,
                     revisions,
                     controlled.reason,
                     constraint_id=last_constraint,
+                    phases=phases,
                 )
 
+            track(NodePhase.VERIFYING)
             post_observation, error = self._safe_observe(node)
             if error is not None:
+                track(NodePhase.FAILED)
                 return self._failure(
-                    node, attempt, revisions, f"post-observe failed: {error}"
+                    node,
+                    attempt,
+                    revisions,
+                    f"post-observe failed: {error}",
+                    phases=phases,
                 )
             assert post_observation is not None
             revisions.append(post_observation.revision)
             goal, error = self._safe_goal(node, post_observation)
             if error is not None:
+                track(NodePhase.FAILED)
                 return self._failure(
-                    node, attempt, revisions, f"postcondition check failed: {error}"
+                    node,
+                    attempt,
+                    revisions,
+                    f"postcondition check failed: {error}",
+                    phases=phases,
                 )
             if goal:
+                track(NodePhase.SUCCEEDED)
                 return NodeRunResult(
                     node_id=node.node_id,
                     action=node.action,
                     status=NodeStatus.SUCCEEDED,
                     attempts=attempt,
                     observed_revisions=tuple(revisions),
+                    phases=tuple(phases),
                 )
             last_reason = "goal not satisfied after controller"
             last_constraint = node.constraints[0].constraint_id
+            if attempt < node.max_attempts:
+                track(NodePhase.RECOVERABLE)
+                phase = NodePhase.READY
+                phases.append(NodePhase.READY.value)
 
+        track(NodePhase.FAILED)
         return self._failure(
             node,
             node.max_attempts,
             revisions,
             last_reason or "attempt budget exhausted",
             constraint_id=last_constraint,
+            phases=phases,
         )
 
     def _safe_observe(
@@ -265,6 +319,7 @@ class PythonNodePolicy:
         reason: str,
         *,
         constraint_id: str | None = None,
+        phases: list[str] | None = None,
     ) -> NodeRunResult:
         return NodeRunResult(
             node_id=node.node_id,
@@ -276,4 +331,5 @@ class PythonNodePolicy:
                 constraint_id or node.constraints[0].constraint_id
             ),
             reason=reason,
+            phases=tuple(phases or ()),
         )

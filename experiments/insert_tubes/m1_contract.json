@@ -1,0 +1,39 @@
+{
+  "milestone": "M1",
+  "workspace": "/mnt/data/wenqian/demo-graph-lab",
+  "forbidden_runtimes": [
+    "/mnt/nas/knowin_sim/sim_workspace",
+    "/mnt/nas/knowin_sim/sim_workspace/services/ksm"
+  ],
+  "policy": "non_privileged",
+  "entry": "experiments/insert_tubes/run_m1.py",
+  "modes": {
+    "probe": "只读感知，默认入口",
+    "grasp": "需用户明确允许后才可发控制",
+    "full": "完整链；感知洞未解则 fail-closed"
+  },
+  "nodes": [
+    "observe",
+    "propose_select_grasp",
+    "pick",
+    "verify_attachment",
+    "reorient_if_needed",
+    "align",
+    "servo_insert",
+    "verify_inserted_upright"
+  ],
+  "method_visible_only": [
+    "demo_evidence",
+    "runtime_perception",
+    "robot_state",
+    "generic_prior",
+    "derived"
+  ],
+  "forbidden_inputs": [
+    "scene_asset",
+    "exact_simulator_pose",
+    "evaluator_predicate",
+    "target_binding",
+    "privileged_oracle"
+  ]
+}

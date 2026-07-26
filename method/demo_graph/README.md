@@ -1,33 +1,24 @@
-# Minimal Demo Graph runner
+# method/demo_graph：主方法模块
 
-This directory is the first executable vertical slice, not a general robot
-framework. It contains:
+本目录是可执行的方法核心，不是通用机器人框架。
 
-- a small JSON `ConstraintGraph` loader with recursive provenance rejection;
-- `PythonNodePolicy`, which observes before every node/retry, skips an already
-  satisfied goal, calls one trusted controller, re-observes, and retries within
-  the node budget;
-- an M1 graph and fake runtime that exercise
-  `pick → reorient/skip → align → insert → verify`.
+| 模块 | 职责 |
+|---|---|
+| `models.py` | `ConstraintGraph` / 节点 / typed hole |
+| `runner.py` | `PythonNodePolicy` 逐节点观察—执行—验证 |
+| `state_machine.py` | `READY → … → SUCCEEDED/RECOVERABLE/FAILED` |
+| `candidates.py` | 不可变 `ActionCandidate` 与选择器 |
+| `backends.py` | 主方法 Python 后端；YAML 仅 baseline |
+| `servo.py` | 可信高频伺服，只回传有界结果 |
+| `manifest.py` | `RunManifest` 可复现元数据 |
+| `isolation.py` | 策略隔离：禁网 / 禁特权 API |
+| `provenance.py` | 递归拒绝 `privileged_oracle` |
 
-Run the local smoke test from the repository root:
+## 本地烟雾
 
 ```bash
 python3 -m method.demo_graph.examples.m1_fake
 python3 -m unittest discover -s method/demo_graph/tests -v
 ```
 
-For a live adapter, provide only:
-
-```python
-PythonNodePolicy(
-    graph=graph,
-    observe=knowin_adapter.observe,
-    goal_satisfied=method_visible_goal_check,
-    controllers=trusted_controller_registry,
-)
-```
-
-The insertion controller owns its high-frequency loop. Generated policy code
-receives only its bounded `ControllerResult`; evaluator and simulator state are
-not part of this API.
+插入伺服的高频循环在可信 controller 内完成；生成策略只看到 `ControllerResult` / `ServoOutcome`。

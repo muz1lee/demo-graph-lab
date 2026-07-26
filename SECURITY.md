@@ -1,36 +1,29 @@
-# Security and public-release policy
+# 安全与公开发布策略
 
-This repository is a public, sanitized source repository. It must not contain
-credentials, internal service tokens, simulator assets, task/scene ground
-truth, model checkpoints, generated run artifacts, or third-party code whose
-license forbids redistribution.
+本仓库是公开、脱敏的源码仓。不得包含凭证、内部服务令牌、仿真资产、任务/场景真值、模型权重、跑实验原始产物，或许可证禁止再分发的第三方源码。
 
-## Ground-truth firewall
+## GT 防火墙
 
-Generated policies may use only:
+生成策略只能使用：
 
-- task instructions and demonstration evidence;
-- sensor-derived perception results with provenance;
-- robot-observable state and action feedback;
-- allowlisted, task-agnostic priors.
+- 任务指令与演示证据；
+- 带 provenance 的传感器感知结果；
+- 机器人可观测状态与动作反馈；
+- allowlisted、任务无关先验。
 
-Generated policies must not read scene or asset libraries, simulator entity
-state, exact poses or dimensions, evaluator predicates, target bindings, or
-values derived from those sources. Oracle evaluation runs in a separate
-trusted process, and its artifacts must never be supplied to policy
-generation, selection, recovery, or execution.
+禁止读取 scene/asset 库、仿真实体状态、精确位姿/尺寸、评测谓词、目标绑定，或由上述来源派生的字段。Oracle 评测在隔离进程中运行，其结果不得回流到策略生成、选择、恢复或执行。
 
-## Release checklist
+## 运行时边界
 
-Before every public push:
+- 技能迭代只在 1022 `demo-graph-lab` 内进行。
+- 不得向 1024 `/mnt/nas/knowin_sim/sim_workspace/` 写入或部署。
 
-1. stage only explicit allowlisted paths; never use `git add .`;
-2. scan tracked files for credentials and internal endpoints;
-3. reject model weights, datasets, run outputs, and files larger than 10 MiB;
-4. verify source manifests for imported components;
-5. run the unit, integration, and ground-truth firewall tests.
+## 发布前检查
 
-Security-sensitive runtime configuration belongs in `configs/local/`, which is
-ignored. Committed configuration files must be examples with placeholder
-values only.
+1. 只按 allowlist 暂存；永远不要 `git add .`
+2. 扫描凭证与内部 endpoint
+3. 拒绝权重、数据集、runs 输出与 >10 MiB 文件
+4. 核验导入组件 SOURCE_MANIFEST
+5. 跑通单测、集成测与 GT 防火墙测
 
+敏感运行时配置放在被忽略的 `configs/local/`；已提交配置只能是带占位符的示例。

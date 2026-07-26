@@ -1,15 +1,11 @@
-# Demonstration Constraint Graph v0.2
+# 演示约束图 Schema v0.2
 
-The graph is a small executable specification between demonstration evidence
-and a Python node policy. It describes required relations and unresolved
-runtime quantities; it does not contain simulator answers or motion
-waypoints.
+约束图是演示证据与 Python 节点策略之间的可执行规格：描述必须成立的关系与尚未解析的运行时量，**不**包含仿真答案或运动路点。
 
-The executable example is
-`method/demo_graph/examples/m1_graph.json`. Its loader is
-`method.demo_graph.ConstraintGraph`.
+可执行示例：`method/demo_graph/examples/m1_graph.json`  
+加载器：`method.demo_graph.ConstraintGraph`
 
-## Minimum shape
+## 最小形态
 
 ```json
 {
@@ -28,6 +24,9 @@ The executable example is
       "controller_ref": "trusted.pick",
       "max_attempts": 2,
       "next_node": "align",
+      "preconditions": [],
+      "postconditions": ["tube_attached"],
+      "invariants": [],
       "provenance": {
         "source": "demo_video",
         "reference": "grasp keyframe"
@@ -47,11 +46,11 @@ The executable example is
       "constraints": [
         {
           "constraint_id": "grasp_region",
-          "description": "grasp the perceived middle region",
+          "description": "grasp on the upper half of the tube body",
           "hole_ids": ["grasp_pose"],
           "provenance": {
             "source": "demo_video",
-            "reference": "relative contact location"
+            "reference": "relative grasp height"
           }
         }
       ]
@@ -60,30 +59,10 @@ The executable example is
 }
 ```
 
-Every node has one observable `goal`. The runner observes before execution,
-skips a node whose goal is already satisfied, calls one trusted controller,
-then observes again. `max_attempts` bounds local recovery.
+## 规则
 
-Every metric quantity unavailable from the demonstration is a typed hole with
-a runtime solver. A constraint may reference hole IDs so execution failures
-can identify the violated constraint without rewriting the full policy.
-
-## Provenance
-
-Main-method artifacts allow:
-
-```text
-demo_video
-task_instruction
-runtime_perception
-generic_prior
-derived
-```
-
-`derived` must recursively name its parents. `privileged_oracle` can label
-evaluator artifacts but is rejected anywhere in a main-method graph,
-including below a renamed derived value.
-
-Scene libraries, asset geometry, exact simulator state, evaluator predicates,
-target bindings, and values derived from them are not valid graph inputs.
-
+1. 每个节点至少一条 constraint，并声明 `goal` / `controller_ref`。
+2. provenance 允许：`demo_video` / `task_instruction` / `runtime_perception` / `robot_state` / `generic_prior` / `derived`。
+3. 含 `privileged_oracle`（含 derived 祖先）的图不得进入主方法。
+4. typed hole 必须带类型、solver 与 search_domain。
+5. 节点状态机：`READY → RESOLVING_HOLES → CANDIDATES_READY → ADMITTED → EXECUTING → VERIFYING → SUCCEEDED|RECOVERABLE|FAILED`。

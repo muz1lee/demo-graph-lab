@@ -1,17 +1,12 @@
-# Third-party dependencies
+# 第三方依赖说明
 
-This file records external dependencies without vendoring their source,
-weights, datasets, or runtime assets.
+本文件只记录外部依赖，不 vendor 其源码、权重、数据集或运行时资产。
 
-| Dependency | Pinned revision | License / redistribution policy | Repository policy |
+| 依赖 | 钉扎修订 | 许可 / 再分发 | 本仓策略 |
 |---|---|---|---|
-| CoTracker | `82e02e8029753ad4ef13cf06be7f4fc5facdda4d` | CC BY-NC 4.0 | Install externally; do not vendor. Verify checkpoint SHA-256 `2670d4562ed69326dda775a26e54883925cd11b6fc9b24cb7aa9f8078bce7834`. |
-| GraspNet baseline | Runtime-provided | Non-commercial and non-transferable; redistribution prohibited | Never commit its repository or weights. The repository contains only the independently written client/service wrapper. |
-| graspnetAPI | Runtime-provided | MIT | Install externally when required; do not vendor for the initial import. |
-| Knowin World | Deployment-provided | Internal runtime dependency | Never copy its source, scene library, task data, or assets into this repository. |
+| CoTracker | `82e02e8029753ad4ef13cf06be7f4fc5facdda4d` | CC BY-NC 4.0 | 外部安装；勿 vendor。校验 checkpoint SHA-256 `2670d4562ed69326dda775a26e54883925cd11b6fc9b24cb7aa9f8078bce7834`。 |
+| GraspNet baseline | 运行时提供 | 非商业且不可转让；禁止再分发 | 永不提交其仓库或权重；本仓只有独立编写的客户端/服务包装。 |
+| graspnetAPI | 运行时提供 | MIT | 需要时外部安装；首轮导入不 vendor。 |
+| Knowin World | 部署侧提供 | 内部运行时依赖 | 永不复制源码、场景库、任务数据或资产进本仓。技能迭代在 1022 `demo-graph-lab` 完成，不改 1024 基础仓。 |
 
-`components/robot-subtask-seg/NOTICE` must remain with that component. The
-initial public repository intentionally has no open-source `LICENSE`; rights
-for team-authored code remain reserved until authorship and licensing are
-confirmed.
-
+`components/robot-subtask-seg/NOTICE` 必须随组件保留。公开仓首轮故意不放开源 `LICENSE`；团队代码权利保留，待归属与授权确认后再定。

@@ -116,8 +116,13 @@ def scan(paths: list[Path], root: Path) -> list[Violation]:
         if _forbidden_name(path):
             violations.append(Violation(str(relative), "forbidden filename or file type"))
             continue
+        if not path.exists():
+            # 工作区已删除、尚未从 index 移除的路径：跳过，由 git status 处理。
+            continue
         if path.is_symlink():
             violations.append(Violation(str(relative), "symbolic links are not allowed"))
+            continue
+        if path.is_dir():
             continue
         if not path.is_file():
             violations.append(Violation(str(relative), "tracked path is not a regular file"))

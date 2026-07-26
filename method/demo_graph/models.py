@@ -57,8 +57,15 @@ class Node:
     constraints: tuple[Constraint, ...]
     provenance: Provenance
     holes: tuple[TypedHole, ...] = ()
+    preconditions: tuple[str, ...] = ()
+    postconditions: tuple[str, ...] = ()
+    invariants: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    budget: Mapping[str, JsonValue] = field(default_factory=dict)
     max_attempts: int = 1
     next_node: str | None = None
+    on_recoverable: str | None = None
+    on_failed: str | None = None
 
     def __post_init__(self) -> None:
         for value, name in (
@@ -70,6 +77,15 @@ class Node:
             _required(value, name)
         object.__setattr__(self, "constraints", tuple(self.constraints))
         object.__setattr__(self, "holes", tuple(self.holes))
+        object.__setattr__(self, "preconditions", tuple(self.preconditions))
+        object.__setattr__(self, "postconditions", tuple(self.postconditions))
+        object.__setattr__(self, "invariants", tuple(self.invariants))
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+        object.__setattr__(
+            self,
+            "budget",
+            freeze_json(self.budget, path=f"node[{self.node_id}].budget"),
+        )
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         if not self.constraints:
@@ -206,8 +222,15 @@ class ConstraintGraph:
                 ),
                 provenance=parse_provenance(value["provenance"]),
                 holes=tuple(parse_hole(item) for item in value.get("holes", ())),
+                preconditions=tuple(value.get("preconditions", ())),
+                postconditions=tuple(value.get("postconditions", ())),
+                invariants=tuple(value.get("invariants", ())),
+                evidence_refs=tuple(value.get("evidence_refs", ())),
+                budget=value.get("budget", {}),
                 max_attempts=value.get("max_attempts", 1),
                 next_node=value.get("next_node"),
+                on_recoverable=value.get("on_recoverable"),
+                on_failed=value.get("on_failed"),
             )
 
         return cls(

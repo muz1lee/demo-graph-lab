@@ -1,15 +1,23 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-26 12:34。路径若无前缀均相对本仓根目录；主机、部署路径和密钥只保存在
+最后更新 2026-07-26 12:55。路径若无前缀均相对本仓根目录；主机、部署路径和密钥只保存在
 被 Git 忽略的 `configs/local/`。
 
-**一句话状态**：public-safe 代码仓和最小
-`constraint graph → Python node policy → live pipeline` 单试管入口已完成；WHT 四组件回归为
-`131 passed, 1 skipped`，新代码为 `33 passed`。1024 只读实测已得到试管 grasp candidate，
-但空孔 place perception 返回 `point cloud insufficient`。因此下一步先跑一次非特权
-grasp-only 真执行；完整 M1 在 `tube_axis` 或 `holder_pose` 未解时 fail-closed。尚未产生新的
-非特权 scored trial，不能把 fake smoke、只读 probe 或旧特权诊断当作任务效果。
+## 硬边界更正（2026-07-26 用户紧急纠正）
+
+- **唯一技能迭代场地**：1022 `/mnt/data/wenqian/demo-graph-lab`（本地镜像：本仓）。
+- **禁止再碰**：1024 `/mnt/nas/knowin_sim/sim_workspace/` 及误部署的 `.../services/ksm`——不写入、不部署、不改配置、不启停其服务。
+- 旧 plan 中「部署到 1024 / services/ksm」条款作废；以本更正为准。
+- GitHub 远程已由 `muz1lee/ksm` **重命名**为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)；本地 `origin` 已指向新 URL。尚未要求则不自动 push 未提交改动。
+
+**一句话状态**：模块化主方法与 adapters 包已在本仓落地（本地新测 `54 passed`）；WHT
+`knowin-skill-manager 90 passed, 1 skipped`，`video-perception 2`，`grasp-proposal-tools 7`；
+`robot-subtask-seg` 因本机缺 `av` 未能收集用例。此前在错误边界上的只读 probe：有 grasp
+candidate，缺顶层 `tube_axis`，place 报 `point cloud insufficient`。现已在仓内修复解析：
+嵌套轴字段 + 由抓取 xquat 推导水平轴，并显式记录 `holder_pose_error`。下一步仅在 1022
+对本仓 pipeline 复跑只读 probe 验证几何字段；**未经用户明确允许不发控制 / 不跑 grasp**。
+未再产生非特权 scored trial；不能把 fake smoke 或旧特权诊断当任务效果。
 M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行，冻结决定未及送达；
 盘上已核实 5 个 `trial_*/` 各含视频与记录）。最好成绩 trial 5 到**第 4 阶段**：
 抓住✓（40 mm 测试提升 gate）、提起✓ 124.9 mm、转正✓ 7.34°、对准✓ 1.42 mm，
@@ -37,8 +45,9 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
   主方法图必须保留 provenance 依赖链，任何依赖 `privileged_oracle` 的字段都应被拒绝。
 - **WHT 资产已沉淀为 components**：已有算法先保持原样，我们的新方法与 adapter 分目录增加。
 - **进度纪律**：每个里程碑更新本文件；新窗口依次读 `AGENTS.md`、`ALGORITHM_PLAN.md` 和本文件。
-- **当前运行状态**：没有新的 scored trial 在执行；下一步是部署同一 Git commit 后运行
-  runtime doctor，再做非特权 M1 smoke。
+- **当前运行状态**：没有新的 scored trial 在执行；下一步是在 **1022 本仓** 对本地
+  pipeline 跑 `run_m1.py --mode probe`，确认 `tube_axis_source` / `holder_pose_error`
+  诊断字段；runtime doctor 也只针对 1022 侧 endpoint。禁止再向 1024 部署。
 
 ### 方向审计增量（2026-07-26 11:01）
 
@@ -143,11 +152,13 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo：部署当前 commit，运行 runtime doctor，再执行
-   `python3 experiments/insert_tubes/run_m1.py --mode grasp`。** 当前 `--mode probe` 已确认
-   qwen 能给 grasp candidate；grasp 真执行尚未跑。以测试提升后的 fresh qwen 观测验证抓取；
-   失败必须明确落到 perception、reach、grasp 或同型管重关联，不得使用 scene pose、固定孔心
-   或 evaluator fallback。该 gate 通过后优先修空孔感知，再顺序接 reorient/skip、align 和 insert。
+1. **当前唯一主线 next todo（仅 1022）：** 在 `/mnt/data/wenqian/demo-graph-lab` 同步本仓改动后，
+   对 1022 本地 pipeline 跑
+   `python3 experiments/insert_tubes/run_m1.py --mode probe`，核对
+   `tube_axis_found` / `tube_axis_source` 与 `holder_pose_error`。仍不要碰 1024。
+   **grasp 真执行须用户再次明确允许**。失败归因只能落在 perception / reach / grasp，
+   不得使用 scene pose、固定孔心或 evaluator fallback。holder 点云不足修好后，再接
+   reorient/skip、align、insert。
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。
