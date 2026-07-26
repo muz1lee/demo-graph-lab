@@ -9,6 +9,8 @@
 configs/secrets.env
 configs/local/
 /configs/env.sh
+configs/pipeline_runtime.env
+/services/
 
 # Generated experiment artifacts
 runs/
