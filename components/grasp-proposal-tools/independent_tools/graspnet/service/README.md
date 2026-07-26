@@ -14,25 +14,26 @@ reports the active backend and readiness state.
 
 ## Minimal Start
 
+在 **1022** `demo-graph-lab` 内启动；配置路径放在被忽略的本地文件中，不要写进 1024
+`/mnt/nas/knowin_sim/sim_workspace/`。旧 `/mnt/workspace/wht/...` 路径已作废。
+
 ```bash
-export GRASPNET_SERVICE_CONFIG=/mnt/workspace/wht/graspnet_service/service/config.json
+export GRASPNET_SERVICE_CONFIG=/path/to/local/config.json
 python -m uvicorn app:app --host 127.0.0.1 --port 8091
 ```
 
-## 1021 Deployment Notes
+## Local runtime notes (1022)
 
-Current standalone sandbox:
+Standalone sandbox pointers (host-local; not the 1024 base tree):
 
-- Service root: `/mnt/workspace/wht/graspnet_service`
 - Fixture smoke service: `http://127.0.0.1:8091`
 - GraspNet baseline service: `http://127.0.0.1:8092`
-- Baseline repo: `/mnt/workspace/wht/graspnet_service/repos/graspnet-baseline`
-- Checkpoint path: `/mnt/workspace/wht/graspnet_service/weights/checkpoint-rs/checkpoint.tar`
+- Baseline repo / checkpoint: provide via local config (do not vendor weights here)
 
 The baseline service needs the PyTorch/CUDA library path when started:
 
 ```bash
-export GRASPNET_SERVICE_CONFIG=/mnt/workspace/wht/graspnet_service/service/config.graspnet_baseline.example.json
+export GRASPNET_SERVICE_CONFIG=/path/to/local/config.graspnet_baseline.json
 export LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/torch/lib:/usr/local/cuda-12.1/lib64:${LD_LIBRARY_PATH}
 python -m uvicorn app:app --host 127.0.0.1 --port 8092
 ```

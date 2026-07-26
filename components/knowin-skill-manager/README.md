@@ -1,19 +1,22 @@
-# knowin-skill-manager
+# knowin-skill-manager（components 快照）
 
-KSM is the ASPIRE-KW workspace for generating, evaluating, and iterating Knowin World YAML skills without modifying the Knowin World runtime repository.
-
-Current working host/workspace:
+本目录是 WHT 历史组件的字节级快照，包名仍为 `ksm`；**所属仓库对外名是 `demo-graph-lab`**，
+不是独立 ksm 项目。当前技能迭代唯一场地：
 
 ```text
-1021
-/mnt/workspace/wht/kw-aspire-robodojo/knowin-skill-manager
+1022
+/mnt/data/wenqian/demo-graph-lab
+（本组件路径：components/knowin-skill-manager/）
 ```
+
+旧路径 `1021 /mnt/workspace/wht/...` 与任何「部署到 1024 `/mnt/nas/knowin_sim/sim_workspace/`」
+指引均已作废。1024 NAS 基础仓仅可只读借用数据 / venv，禁止写入部署。
 
 Runtime boundary:
 
-- Read KW skill/tool information from `/mnt/workspace/wht/kw-aspire-robodojo/runtime/knowin-world`.
-- Publish generated executable YAML only under `knowin_skills/knowin_skill_manager_tests/<experiment_name>/`.
-- Do not modify mature KW source, built-in skills, scenes, or runtime services from this workspace.
+- Knowin World 为外部运行时；可从 NAS 只读借用数据 / venv，不改基础仓。
+- Publish generated executable YAML only under this component tree（1022 本仓内）。
+- Do not modify mature KW source, built-in skills, scenes, or runtime services.
 
 ## Current Architecture
 
@@ -53,7 +56,7 @@ Unified ASPIRE suite loop:
 
 ```bash
 python3 -m ksm.cli aspire-suite \
-  --config configs/local_1021.yaml \
+  --config configs/local/<your>.yaml \
   --suite <suite.yaml> \
   --candidate-prefix <candidate_id> \
   --population-size 2 \
@@ -64,7 +67,7 @@ RoboDojo full-task experiment:
 
 ```bash
 python3 -m ksm.cli robodojo-auto \
-  --config configs/local_1021.yaml \
+  --config configs/local/<your>.yaml \
   --task-class <task_class> \
   --tier 4 \
   --candidate-prefix <candidate_id>
@@ -74,7 +77,7 @@ Task-level reuse/new/gap decision probe:
 
 ```bash
 python3 -m ksm.cli robodojo-decision \
-  --config configs/local_1021.yaml \
+  --config configs/local/<your>.yaml \
   --task-class <task_class>
 ```
 
@@ -82,7 +85,7 @@ Diagnostic staged experiment, retained as a task-segmentation entry point:
 
 ```bash
 python3 -m ksm.cli robodojo-staged \
-  --config configs/local_1021.yaml \
+  --config configs/local/<your>.yaml \
   --task-class <task_class>
 ```
 

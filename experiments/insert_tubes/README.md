@@ -1,7 +1,7 @@
 # insert_tubes：M1 垂直切片
 
 工作边界固定在 **1022** 的 `demo-graph-lab`（`/mnt/data/wenqian/demo-graph-lab`）。  
-**禁止**改写、部署或驱动 1024 `/mnt/nas/knowin_sim/sim_workspace/`。
+1024 NAS 基础仓可只读借用数据 / venv；**禁止**对其写入、部署或改配置。
 
 ## 节点顺序
 

@@ -15,8 +15,10 @@
 
 ## 运行时边界
 
-- 技能迭代只在 1022 `demo-graph-lab` 内进行。
-- 不得向 1024 `/mnt/nas/knowin_sim/sim_workspace/` 写入或部署。
+- 技能迭代只在 1022 `/mnt/data/wenqian/demo-graph-lab`（本仓）内进行；对外名是
+  `demo-graph-lab`，不是 ksm。
+- 1024 NAS 基础仓 `/mnt/nas/knowin_sim/sim_workspace/`：可只读借用数据 / venv；不得写入、
+  部署、改配置或启停其服务。
 
 ## 发布前检查
 

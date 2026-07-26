@@ -14,12 +14,16 @@ It keeps CoTracker3 resident on a dedicated GPU and exposes evidence only.
 - The service does not infer task stages, object semantics, success, 3D pose, or
   robot-frame coordinates.
 
-## Deployment
+## Runtime notes
 
-The 1021 deployment uses:
+Run this service under the **1022** `demo-graph-lab` workspace
+(`/mnt/data/wenqian/demo-graph-lab`). Do not deploy into 1024
+`/mnt/nas/knowin_sim/sim_workspace/`.
+
+Typical local bind (adjust in ignored `configs/local/`):
 
 - port `8093`, bound to `127.0.0.1`;
-- the second GPU through `CUDA_VISIBLE_DEVICES=1`;
+- a dedicated GPU via `CUDA_VISIBLE_DEVICES`;
 - official Meta CoTracker commit
   `82e02e8029753ad4ef13cf06be7f4fc5facdda4d`;
 - `scaled_offline.pth`, SHA-256

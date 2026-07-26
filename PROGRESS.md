@@ -1,15 +1,19 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-26 12:55。路径若无前缀均相对本仓根目录；主机、部署路径和密钥只保存在
+最后更新 2026-07-26 13:10。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
 被 Git 忽略的 `configs/local/`。
 
 ## 硬边界更正（2026-07-26 用户紧急纠正）
 
-- **唯一技能迭代场地**：1022 `/mnt/data/wenqian/demo-graph-lab`（本地镜像：本仓）。
-- **禁止再碰**：1024 `/mnt/nas/knowin_sim/sim_workspace/` 及误部署的 `.../services/ksm`——不写入、不部署、不改配置、不启停其服务。
-- 旧 plan 中「部署到 1024 / services/ksm」条款作废；以本更正为准。
-- GitHub 远程已由 `muz1lee/ksm` **重命名**为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)；本地 `origin` 已指向新 URL。尚未要求则不自动 push 未提交改动。
+- **唯一技能迭代场地**：1022 `/mnt/data/wenqian/demo-graph-lab`（本地镜像：本仓）。对外名
+  `demo-graph-lab`，不是 ksm。
+- **1024 NAS 基础仓** `/mnt/nas/knowin_sim/sim_workspace/`：只可只读借用数据 / venv；**禁止**
+  写入、部署、改配置、启停服务。
+- **历史事实（已作废）**：曾误部署到 `.../sim_workspace/services/ksm`——保留此记录以免再犯，
+  **禁止再做**；任何「去 1024 部署/跑本项目」的旧 plan 条款一律作废。
+- GitHub 远程为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)
+  （由旧名重命名）；本地 `origin` 已指向新 URL。
 
 **一句话状态**：模块化主方法与 adapters 包已在本仓落地（本地新测 `54 passed`）；WHT
 `knowin-skill-manager 90 passed, 1 skipped`，`video-perception 2`，`grasp-proposal-tools 7`；
@@ -47,7 +51,7 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 - **进度纪律**：每个里程碑更新本文件；新窗口依次读 `AGENTS.md`、`ALGORITHM_PLAN.md` 和本文件。
 - **当前运行状态**：没有新的 scored trial 在执行；下一步是在 **1022 本仓** 对本地
   pipeline 跑 `run_m1.py --mode probe`，确认 `tube_axis_source` / `holder_pose_error`
-  诊断字段；runtime doctor 也只针对 1022 侧 endpoint。禁止再向 1024 部署。
+  诊断字段；runtime doctor 也只针对 1022 侧 endpoint。1024 NAS 仅可只读借用，勿写入部署。
 
 ### 方向审计增量（2026-07-26 11:01）
 
@@ -155,7 +159,7 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 1. **当前唯一主线 next todo（仅 1022）：** 在 `/mnt/data/wenqian/demo-graph-lab` 同步本仓改动后，
    对 1022 本地 pipeline 跑
    `python3 experiments/insert_tubes/run_m1.py --mode probe`，核对
-   `tube_axis_found` / `tube_axis_source` 与 `holder_pose_error`。仍不要碰 1024。
+   `tube_axis_found` / `tube_axis_source` 与 `holder_pose_error`。1024 NAS 只读可借、禁止写入。
    **grasp 真执行须用户再次明确允许**。失败归因只能落在 perception / reach / grasp，
    不得使用 scene pose、固定孔心或 evaluator fallback。holder 点云不足修好后，再接
    reorient/skip、align、insert。

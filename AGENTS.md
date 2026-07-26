@@ -233,14 +233,17 @@ subagent 不直接编辑 `PROGRESS.md`，只向主 agent 返回证据，避免�
 
 ## 9. 项目环境与改动安全
 
-本仓是公开、净化后的 source-of-truth。技能迭代、感知 probe、抓取试验与模块化改造的**唯一
-工作树**是 1022 上的 `/mnt/data/wenqian/demo-graph-lab`（及其同步镜像）。  
-**禁止**对 1024 `/mnt/nas/knowin_sim/sim_workspace/`（含误部署的 `services/ksm`）写入、部署、
-改配置或启停服务——那是基础仓，不是本项目迭代场地。
+本仓是公开、净化后的 source-of-truth。对外名是 **demo-graph-lab**（不是 ksm）。技能迭代、
+感知 probe、抓取试验与模块化改造的**唯一工作树**是 1022 上的
+`/mnt/data/wenqian/demo-graph-lab`（及其同步镜像）。
+
+1024 NAS 基础仓 `/mnt/nas/knowin_sim/sim_workspace/` 不是本项目迭代场地：可只读借用其中的
+数据（如 `knowin-world-data`）与既有 venv；**禁止**写入、部署、改配置或启停其服务。历史上
+曾误把工作副本放进该树的路径已作废，操作指引不得再指向那里。
 
 具体主机、路径、端口和密钥只写入被忽略的 `configs/local/`，不写进公开文档或 example
 config。若存在独立 runtime checkout，必须与本仓使用同一 Git commit，且仍不得落在上述 1024
-基础仓路径内。
+基础仓路径内作为可写部署。
 
 Knowin World 是外部、共享且可能 dirty 的依赖，不作为本仓子目录、submodule 或 vendored
 源码。开发 run 可以记录依赖的 dirty diff digest，但必须标为 non-golden；正式评测只允许
