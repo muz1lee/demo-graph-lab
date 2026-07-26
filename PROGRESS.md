@@ -1,13 +1,15 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-26 12:19。路径若无前缀均相对本仓根目录；主机、部署路径和密钥只保存在
+最后更新 2026-07-26 12:34。路径若无前缀均相对本仓根目录；主机、部署路径和密钥只保存在
 被 Git 忽略的 `configs/local/`。
 
-**一句话状态**：public-safe 代码仓已经建立，WHT 四组件已按来源白名单导入并通过
-`131 passed, 1 skipped`；正在实现最小的
-`demo graph → Python node policy → Knowin World` 单试管 vertical slice。尚未产生新的
-非特权 scored trial，不能把 fake smoke 或旧特权诊断当作任务效果。
+**一句话状态**：public-safe 代码仓和最小
+`constraint graph → Python node policy → live pipeline` 单试管入口已完成；WHT 四组件回归为
+`131 passed, 1 skipped`，新代码为 `33 passed`。1024 只读实测已得到试管 grasp candidate，
+但空孔 place perception 返回 `point cloud insufficient`。因此下一步先跑一次非特权
+grasp-only 真执行；完整 M1 在 `tube_axis` 或 `holder_pose` 未解时 fail-closed。尚未产生新的
+非特权 scored trial，不能把 fake smoke、只读 probe 或旧特权诊断当作任务效果。
 M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行，冻结决定未及送达；
 盘上已核实 5 个 `trial_*/` 各含视频与记录）。最好成绩 trial 5 到**第 4 阶段**：
 抓住✓（40 mm 测试提升 gate）、提起✓ 124.9 mm、转正✓ 7.34°、对准✓ 1.42 mm，
@@ -141,10 +143,11 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo：部署当前 commit，运行 runtime doctor，再做一个完全非特权的
-   grasp-only M1 smoke。** 通过感知取得 tube/grasp pose，以测试提升和新观测验证抓取；失败必须
-   明确落到 perception、reach 或 grasp，不得使用 scene pose、固定孔心或 evaluator fallback。
-   该 gate 通过后才顺序接 reorient/skip、align 和 insert。
+1. **当前唯一主线 next todo：部署当前 commit，运行 runtime doctor，再执行
+   `python3 experiments/insert_tubes/run_m1.py --mode grasp`。** 当前 `--mode probe` 已确认
+   qwen 能给 grasp candidate；grasp 真执行尚未跑。以测试提升后的 fresh qwen 观测验证抓取；
+   失败必须明确落到 perception、reach、grasp 或同型管重关联，不得使用 scene pose、固定孔心
+   或 evaluator fallback。该 gate 通过后优先修空孔感知，再顺序接 reorient/skip、align 和 insert。
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。

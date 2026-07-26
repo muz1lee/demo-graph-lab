@@ -1,0 +1,167 @@
+{
+  "schema_version": "0.2",
+  "graph_id": "m1_single_tube_non_privileged",
+  "entry_node": "pick",
+  "provenance": {
+    "source": "task_instruction",
+    "reference": "pick one perceived tube and insert it into one perceived empty rack opening"
+  },
+  "nodes": [
+    {
+      "node_id": "pick",
+      "action": "pick",
+      "goal": "tube_attached",
+      "controller_ref": "trusted.pick",
+      "max_attempts": 1,
+      "next_node": "reorient",
+      "provenance": {
+        "source": "demo_video",
+        "reference": "grasp then lift"
+      },
+      "holes": [
+        {
+          "hole_id": "grasp_pose",
+          "value_type": "pose_se3",
+          "solver": "qwen_dof_xquat",
+          "search_domain": {
+            "source": "current RGB-D",
+            "candidate_count": 3
+          },
+          "provenance": {
+            "source": "runtime_perception",
+            "reference": "current qwen_dof_xquat candidates"
+          }
+        }
+      ],
+      "constraints": [
+        {
+          "constraint_id": "grasp_and_lift",
+          "description": "use a current perception candidate and verify attachment by observed upward motion",
+          "hole_ids": ["grasp_pose"],
+          "provenance": {
+            "source": "demo_video",
+            "reference": "grasp and lift phase"
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "reorient",
+      "action": "reorient",
+      "goal": "tube_upright",
+      "controller_ref": "trusted.reorient",
+      "max_attempts": 1,
+      "next_node": "align",
+      "provenance": {
+        "source": "demo_video",
+        "reference": "tube is upright before alignment"
+      },
+      "holes": [
+        {
+          "hole_id": "tube_axis",
+          "value_type": "axis_3d",
+          "solver": "runtime_perception",
+          "search_domain": {
+            "source": "current observation after lift"
+          },
+          "provenance": {
+            "source": "runtime_perception",
+            "reference": "current observed tube axis"
+          }
+        }
+      ],
+      "constraints": [
+        {
+          "constraint_id": "upright_before_align",
+          "description": "skip motion when the current observed tube axis is already upright",
+          "hole_ids": ["tube_axis"],
+          "provenance": {
+            "source": "demo_video",
+            "reference": "pre-alignment orientation"
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "align",
+      "action": "align",
+      "goal": "tube_aligned",
+      "controller_ref": "trusted.align",
+      "max_attempts": 1,
+      "next_node": "insert",
+      "provenance": {
+        "source": "demo_video",
+        "reference": "pre-insertion alignment"
+      },
+      "holes": [
+        {
+          "hole_id": "holder_pose",
+          "value_type": "pose_se3",
+          "solver": "qwen_dof_xquat_place",
+          "search_domain": {
+            "source": "current RGB-D empty opening"
+          },
+          "provenance": {
+            "source": "runtime_perception",
+            "reference": "current qwen_dof_xquat_place result"
+          }
+        }
+      ],
+      "constraints": [
+        {
+          "constraint_id": "align_to_observed_opening",
+          "description": "align only to a currently perceived opening pose",
+          "hole_ids": ["holder_pose"],
+          "provenance": {
+            "source": "demo_video",
+            "reference": "tube axis aligns with holder opening"
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "insert",
+      "action": "insert",
+      "goal": "tube_inserted",
+      "controller_ref": "trusted.insert",
+      "max_attempts": 1,
+      "next_node": "verify",
+      "provenance": {
+        "source": "demo_video",
+        "reference": "bounded insertion motion"
+      },
+      "constraints": [
+        {
+          "constraint_id": "bounded_visual_insert",
+          "description": "advance in bounded steps while preserving the observed alignment",
+          "provenance": {
+            "source": "demo_video",
+            "reference": "insertion segment"
+          }
+        }
+      ]
+    },
+    {
+      "node_id": "verify",
+      "action": "verify",
+      "goal": "task_verified",
+      "controller_ref": "trusted.verify",
+      "max_attempts": 1,
+      "next_node": null,
+      "provenance": {
+        "source": "task_instruction",
+        "reference": "tube remains inserted and upright"
+      },
+      "constraints": [
+        {
+          "constraint_id": "visually_inserted_upright",
+          "description": "fresh perception must show inserted and upright without evaluator state",
+          "provenance": {
+            "source": "task_instruction",
+            "reference": "visible task goal"
+          }
+        }
+      ]
+    }
+  ]
+}
