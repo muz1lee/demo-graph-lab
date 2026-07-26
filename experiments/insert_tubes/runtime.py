@@ -9,12 +9,14 @@ from typing import Any, Mapping, Protocol
 from adapters import BrokerPolicyBindings, EvidenceRef, MethodBroker, MethodResult
 from adapters.method_broker import MethodSpec
 from method.demo_graph import (
+    CompiledPolicyArtifact,
     ConstraintGraph,
     ControllerResult,
     Node,
     Observation,
 )
 
+from .candidate_chain import parse_candidate_chain_from_log
 from .perception import parse_place_response, parse_pick_response
 
 
@@ -63,7 +65,7 @@ class M1Runtime:
         pick_prompt: str,
         place_prompt: str,
         lift_m: float = 0.08,
-        lift_evidence_m: float = 0.03,
+        lift_evidence_m: float = 0.04,
         max_track_xy_m: float = 0.05,
         upright_tolerance_deg: float = 15.0,
         settle_poll_s: float = 0.25,
@@ -83,6 +85,9 @@ class M1Runtime:
         self.pick: dict[str, Any] | None = None
         self.place: dict[str, Any] | None = None
         self.last_place_error: str | None = None
+        self.attachment_evidence: dict[str, Any] | None = None
+        self.observation_evidence: list[dict[str, Any]] = []
+        self._reuse_preflight_pick_once = False
         self.revision = 0
 
     def _qwen_pick(self) -> dict[str, Any] | None:
@@ -157,6 +162,11 @@ class M1Runtime:
         return None
 
     def probe(self) -> dict[str, Any]:
+        self.pick = None
+        self.place = None
+        self.last_place_error = None
+        self.initial_pick_xyz = None
+        self._reuse_preflight_pick_once = False
         pick = self._qwen_pick()
         place = self._qwen_place() if pick is not None else None
         holes = []
@@ -175,13 +185,56 @@ class M1Runtime:
             "pick_diagnostics": None if pick is None else pick.get("diagnostics"),
             "place_diagnostics": None if place is None else place.get("diagnostics"),
             "perceptual_holes": holes,
+            # GraspGen counts are record-only; never an execution precondition.
+            "candidate_chain": parse_candidate_chain_from_log(),
         }
 
-    def observe(self, node_id: str) -> dict[str, Any]:
+    def prime_execution_from_preflight(self, *, mode: str) -> None:
+        """Reuse one successful preflight pick for the first policy observation."""
+        if mode not in {"grasp", "full"}:
+            raise ValueError(f"cannot prime execution for mode={mode!r}")
+        if self.pick is None:
+            raise PipelineError("cannot prime execution without a preflight pick")
+        if mode == "full" and self.place is None:
+            raise PipelineError("cannot prime full execution without a preflight place")
+        self._reuse_preflight_pick_once = True
+
+    def _record_observation(
+        self,
+        payload: dict[str, Any],
+        *,
+        node_id: str,
+        action: str | None,
+        goal: str | None,
+    ) -> dict[str, Any]:
+        self.observation_evidence.append(
+            {
+                "node_id": node_id,
+                "action": action,
+                "goal": goal,
+                **payload,
+            }
+        )
+        return payload
+
+    def observe(
+        self,
+        node_id: str,
+        *,
+        action: str | None = None,
+        goal: str | None = None,
+    ) -> dict[str, Any]:
         self.revision += 1
-        pick = self._qwen_pick()
+        if action == "pick" and self._reuse_preflight_pick_once:
+            pick = self.pick
+            self._reuse_preflight_pick_once = False
+            pick_source = "preflight_reuse"
+        else:
+            pick = self._qwen_pick()
+            pick_source = "fresh"
         payload: dict[str, Any] = {
             "revision": f"m1-{self.revision}",
+            "pick_source": pick_source,
             "tube_attached": False,
             "tube_upright": False,
             "tube_aligned": False,
@@ -191,18 +244,34 @@ class M1Runtime:
         }
         if pick is None:
             payload["perceptual_holes"] = ["grasp_pose"]
-            return payload
+            return self._record_observation(
+                payload,
+                node_id=node_id,
+                action=action,
+                goal=goal,
+            )
         payload["pick_pose"] = pick["pose"]
         payload["axis_source"] = pick.get("axis_source")
         if self.initial_pick_xyz is not None:
             delta = [
                 pick["pose"][index] - self.initial_pick_xyz[index] for index in range(3)
             ]
-            payload["observed_pick_delta"] = delta
-            payload["tube_attached"] = (
+            xy_drift = math.hypot(delta[0], delta[1])
+            gate_passed = (
                 delta[2] >= self.lift_evidence_m
-                and math.hypot(delta[0], delta[1]) <= self.max_track_xy_m
+                and xy_drift <= self.max_track_xy_m
             )
+            payload["observed_pick_delta"] = delta
+            payload["tube_attached"] = gate_passed
+            self.attachment_evidence = {
+                "source": "runtime_perception",
+                "z_rise_m": delta[2],
+                "xy_drift_m": xy_drift,
+                "minimum_z_rise_m": self.lift_evidence_m,
+                "maximum_xy_drift_m": self.max_track_xy_m,
+                "gate_passed": gate_passed,
+                "pick_source": pick_source,
+            }
         axis = pick["axis"]
         if axis is None:
             payload["perceptual_holes"].append("tube_axis")
@@ -211,7 +280,7 @@ class M1Runtime:
             payload["tube_upright"] = _axis_vertical(
                 axis, self.upright_tolerance_deg
             )
-        if node_id in {"align", "insert", "verify"}:
+        if action in {"align", "insert", "verify"}:
             place = self._qwen_place()
             if place is None:
                 payload["perceptual_holes"].append("holder_pose")
@@ -219,7 +288,33 @@ class M1Runtime:
                     payload["holder_pose_error"] = self.last_place_error
             else:
                 payload["holder_pose"] = place["pose"]
-        return payload
+        canonical_goal = {
+            "pick": "tube_attached",
+            "reorient": "tube_upright",
+            "align": "tube_aligned",
+            "insert": "tube_inserted",
+            "verify": "task_verified",
+        }.get(action or "")
+        if goal and canonical_goal is not None:
+            payload[goal] = payload[canonical_goal]
+        return self._record_observation(
+            payload,
+            node_id=node_id,
+            action=action,
+            goal=goal,
+        )
+
+    def stage_evidence(self) -> dict[str, Any]:
+        return {
+            "attachment": (
+                None
+                if self.attachment_evidence is None
+                else dict(self.attachment_evidence)
+            ),
+            "observations": [
+                dict(observation) for observation in self.observation_evidence
+            ],
+        }
 
     def _wait_arm(self, timeout_s: float = 30.0) -> None:
         deadline = time.monotonic() + timeout_s
@@ -241,10 +336,19 @@ class M1Runtime:
     def pick_controller(self, node: Node, observation: Observation) -> ControllerResult:
         del observation
         if self.pick is None:
+            hole_id = next(
+                (
+                    hole.hole_id
+                    for hole in node.holes
+                    if "grasp_pose" in hole.hole_id
+                ),
+                node.constraints[0].constraint_id,
+            )
             return ControllerResult(
                 ok=False,
                 reason="perceptual hole unresolved: qwen_dof_xquat returned no grasp pose",
-                constraint_id="grasp_pose",
+                recoverable=True,
+                constraint_id=hole_id,
             )
         pose = self.pick["pose"]
         grasp_angle = float(self.pick["grasp_angle"])
@@ -307,11 +411,20 @@ def _evidence(value: Mapping[str, Any], revision: str) -> EvidenceRef:
     )
 
 
-def build_policy(runtime: M1Runtime, graph: ConstraintGraph):
+def build_policy(
+    runtime: M1Runtime,
+    graph: ConstraintGraph,
+    *,
+    compiled: CompiledPolicyArtifact | None = None,
+):
     latest: dict[str, Mapping[str, Any]] = {}
 
     def observe_handler(params: Mapping[str, Any]) -> MethodResult:
-        payload = runtime.observe(str(params["node_id"]))
+        payload = runtime.observe(
+            str(params["node_id"]),
+            action=str(params["action"]),
+            goal=str(params["goal"]),
+        )
         revision = str(payload.pop("revision"))
         latest[revision] = payload
         value = {"revision": revision, "payload": payload}
@@ -338,11 +451,22 @@ def build_policy(runtime: M1Runtime, graph: ConstraintGraph):
         "trusted.insert": runtime.unresolved_controller,
         "trusted.verify": runtime.unresolved_controller,
     }
-    return bindings.build_policy(graph, controllers), broker
+    if compiled is None:
+        policy = bindings.build_policy(graph, controllers)
+    else:
+        policy = compiled.bind(
+            graph,
+            observe=bindings.observe,
+            goal_satisfied=bindings.goal_satisfied,
+            controllers=controllers,
+        )
+    return policy, broker
 
 
 def grasp_only_graph(graph: ConstraintGraph) -> ConstraintGraph:
-    pick = graph.node("pick")
+    pick = graph.node(graph.entry_node)
+    if pick.action != "pick":
+        raise ValueError("grasp-only graph requires a pick entry node")
     pick = type(pick)(
         node_id=pick.node_id,
         action=pick.action,
@@ -363,7 +487,7 @@ def grasp_only_graph(graph: ConstraintGraph) -> ConstraintGraph:
     )
     return ConstraintGraph(
         graph_id=f"{graph.graph_id}_grasp_only",
-        entry_node="pick",
+        entry_node=pick.node_id,
         nodes=(pick,),
         provenance=graph.provenance,
         schema_version=graph.schema_version,

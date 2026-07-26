@@ -1,7 +1,7 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-26 13:10。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
+最后更新 2026-07-26 23:40。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
 被 Git 忽略的 `configs/local/`。
 
 ## 硬边界更正（2026-07-26 用户紧急纠正）
@@ -15,24 +15,7 @@
 - GitHub 远程为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)
   （由旧名重命名）；本地 `origin` 已指向新 URL。
 
-**一句话状态**：模块化主方法与 adapters 包已在本仓落地（本地新测 `54 passed`）；WHT
-`knowin-skill-manager 90 passed, 1 skipped`，`video-perception 2`，`grasp-proposal-tools 7`；
-`robot-subtask-seg` 因本机缺 `av` 未能收集用例。此前在错误边界上的只读 probe：有 grasp
-candidate，缺顶层 `tube_axis`，place 报 `point cloud insufficient`。现已在仓内修复解析：
-嵌套轴字段 + 由抓取 xquat 推导水平轴，并显式记录 `holder_pose_error`。下一步仅在 1022
-对本仓 pipeline 复跑只读 probe 验证几何字段；**未经用户明确允许不发控制 / 不跑 grasp**。
-未再产生非特权 scored trial；不能把 fake smoke 或旧特权诊断当任务效果。
-M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行，冻结决定未及送达；
-盘上已核实 5 个 `trial_*/` 各含视频与记录）。最好成绩 trial 5 到**第 4 阶段**：
-抓住✓（40 mm 测试提升 gate）、提起✓ 124.9 mm、转正✓ 7.34°、对准✓ 1.42 mm，
-下插✗（depth_ratio 0，管底停在顶板上方 11 mm，下插只走了 100 mm 中的 33.8 mm）。
-两点更正：① 盘上最终记录的 P1 判据是测试提升，`is_gripping_sth` 存布尔 `false` 且标注
-「不作为判据」，此前 tmux 中间态看到的 `bool("False")` 问题在最终记录不存在；
-② 但按 10:39 信息隔离边界回溯，trial 5 的孔心用了父图特权世界坐标、gate 用了特权 snapshot，
-所以 5 个 trial 全部归类为**先于契约的特权诊断**，不是主方法成绩。机制性发现（重力转正、
-枢轴夹持、qwen_xquat 竖直盲区）见「已钉死的事实」。
-旧 trial 到此冻结。谓词已有 1 个明显正例 + 3 个明显负例回归，v2 spec 足够用于当前评价，
-不再追插入毫米数；下一次执行必须走新的非特权 API 边界。
+**一句话状态**：T1 已把 `graspgen>0` 从执行门禁降级为记录性指标。一次 `--mode grasp` 完整尝试流程已跑：内部 preflight **3/3** 因 `grasp_pose` fail-closed，**未发控制**，按协议**未消耗**授权。根因是外部 **SAM3 :6068 connection refused**（mask 失败 → IK=0）；GraspGen `/api/health` 本轮 ok 但未进入 merge。证据 `runs/m1_grasp_authorized_20260726_233559/`。1024 NAS 未写入。待 SAM3 owner 恢复后再消费授权；禁止自行重启他人服务；`--mode full` 仍禁止。
 
 ## 0. 当前方向（2026-07-26 09:52 老板拍板）
 
@@ -49,9 +32,10 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
   主方法图必须保留 provenance 依赖链，任何依赖 `privileged_oracle` 的字段都应被拒绝。
 - **WHT 资产已沉淀为 components**：已有算法先保持原样，我们的新方法与 adapter 分目录增加。
 - **进度纪律**：每个里程碑更新本文件；新窗口依次读 `AGENTS.md`、`ALGORITHM_PLAN.md` 和本文件。
-- **当前运行状态**：没有新的 scored trial 在执行；下一步是在 **1022 本仓** 对本地
-  pipeline 跑 `run_m1.py --mode probe`，确认 `tube_axis_source` / `holder_pose_error`
-  诊断字段；runtime doctor 也只针对 1022 侧 endpoint。1024 NAS 仅可只读借用，勿写入部署。
+- **当前运行状态**：pipeline 节点在 1022 以 GraspGen timeout 8 s / 外层 pick budget 10 s
+  运行；没有 probe/grasp/录像进程。GraspGen worker 当前连接超时，候选生成仍是 fit-only
+  降级链路。一次 grasp 控制授权已取得但尚未消费；只有只读日志确认 `graspgen>0` 后才继续，
+  `--mode full` 仍明确禁止。1024 NAS 仅可只读借用。
 
 ### 方向审计增量（2026-07-26 11:01）
 
@@ -81,6 +65,17 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 
 | 编号 | 目的 | 结果数字 | 结论 | 产物 | 核实 |
 |---|---|---|---|---|---|
+| **B.1 · T1** | 视频 → 非度量约束图提取器 | 索引 **14** 个 refined trace；`insert_tubes` 形成 **3** 个操作周期、**15** 节点、**18** 个完整 typed holes；7 项覆盖检查全真；度量扫描 **0** 条 | ConstraintGraph v0.2 可加载；覆盖 grasp region/DoF、reorientation、placement DoF、target axis/clearance、postcondition、recovery；全部 constraint provenance 为 `demo_video` | `runs/t1_graph_extraction_20260726_163107/{constraint_graph.json,diagnostics.json,metric_scan.json}` | ✅ 盘上 schema 加载 + T3 扫描 |
+| **B.1 · T2** | 关键帧夹爪-物体相对关系提取器 | 三次抓取均输出 `upper_body / axial / cross_axis`；与人工标注 **3/3** 一致；置信度 **0.9439 / 0.9639 / 0.7972** | 单关键帧 + CoTracker + object mask 可恢复粗粒度关系；未建全轨迹、未输出毫米级相对位姿 | `runs/t2_keyframe_relations_20260726_163026/{cases.json,relations.json}` | ✅ 盘上 3/3 |
+| **B.1 · T3** | 度量字面量静态扫描与冻结 gate | B7 已知照搬阳性 **3/3** 文件命中，共 **11** 条（4/5/2）；干净 `m1_fake.py` **0** 误报 | Python/YAML/JSON 扫描器可拒绝场景特定 pose/slot/offset 字面量；同一 gate 已接入 T4 冻结流程 | `runs/t3_metric_scan_20260726_163133/{b7_positive_scan.json,clean_policy_scan.json}` | ✅ 阳性 + 阴性 |
+| **B.1 · T4** | D/E seed 协议 fake backend 干跑 | D **3/3**、E **20/20** 完整执行；五阶段漏斗各为 3/3、20/20；**23** 份 RunManifest 仅 **1** 个 code digest；配置覆盖 E=100 | 冻结、seed 隔离、批量调度、manifest 与 funnel 链路通过；`effect_claims_allowed=false`，fake 结果不作机器人效果声明 | `runs/t4_seed_protocol_20260726_164708/{REPORT.md,protocol_snapshot.json,metric_scan.json,funnel_report.json,development/,held_out/}` | ✅ fake-only 干跑 |
+| **M1.a preflight** | 在任何新控制前复核非特权感知入口 | 新鲜只读 probe **0/3** 通过：attempt 1/2 为 `grasp_pose + holder_pose` 未解；attempt 3 的 grasp/axis 可用，但 `holder_pose` 报 `place xquats empty` | 旧 probe 成功不能替代当前可执行性；当前感知/IK 输出有波动，未满足进入 `grasp/full` 的新鲜前置条件。全程 `control_sent=false` | `runs/m1_preflight_20260726_172712/{summary.json,probe_*.json,probe_*.exit,probe_*.stderr}` | ❌ 当前入口未通过；无控制 |
+| **M1.a grasp · 单次授权** | 单抓取 + 80 mm 测试提升 + 第三视角录像 | 新鲜 probe **1/3** 通过；唯一一次 `--mode grasp` exit **2**，首节点 `grasp_pose` 未解；`control_sent=false`、`lift_command_sent=false`、`attachment_evidence=null`。录像 **19.667 s / 59 帧 / 1280×720**；T3 **0** 条；`full=0` | 独立 probe 通过不保证下一进程的随机感知再次成功；第一失败层为 runtime perception，不是 reach/grasp/controller。未发生控制，不能形成 grasp 或 attachment 结论；单次授权已消耗，不重跑 | `runs/m1_grasp_20260726_182456/{REPORT.md,summary.json,grasp_result.json,third_person.mp4,compiled_policy.py}` | ❌ fail-closed；无控制 |
+| **M1.a atomic preflight fix** | 消除 probe→grasp 的二次随机采样 | 同场景四次 selector **0/0/1/0**；控制模式同进程 preflight，首个 pick 复用一次，动作后重新感知；targeted **10/10**、merged **72/72**；改动文件 release scan 通过；真实控制 **0** | 修复确定性的集成接缝，不构成抓取效果声明；真实重试需新授权 | `runs/m1_atomic_preflight_20260726_183748/` | ✅ fake/no-control only |
+| **M1.a Review P0** | mode-aware gate、3 次只读 preflight、来源审计、异常 JSON；排查 GraspGen | `grasp` holder 非 gate、`full` 双 gate；attempts 保存 holes；`pick_source` 进入 stage；异常 exit 3；targeted **14/14**、merged **76/76**；API health 5/5，但 GraspGen **4/4 timeout**，候选均为 fit 16→IK 32，selector **1/4** | P0 通过；当前 candidate generation 是无 GraspNet 候选的降级链，1/4 不能外推完整链效果；真实控制仍为 0 | `runs/m1_p0_preflight_20260726_190123/` | ✅ fake/no-control + read-only diagnostic |
+| **M1.a grasp · fit-only gate 撤销** | 撤销 graspgen>0 执行门禁并消费一次尝试流程 | T1：candidate_chain 记录化；T2：`--mode grasp` exit 2，preflight 3/3 `grasp_pose`，control=0；根因 SAM3 :6068 refused，IK=0；授权未消耗；视频 12.2s | 门禁已降级；当前阻塞在外部 SAM3，不是 graspgen>0 | `runs/m1_grasp_authorized_20260726_233559/` | ❌ fail-closed；无控制 |
+| **M1.a GraspGen gate · 新授权** | 放宽 GraspGen timeout、确认候选进入 merge 后再单次控制 | timeout 4→8 s；probe 1 揭示 outer budget 4 s；budget 调至 10 s 后 probe 2 明确 worker connect timeout，`graspgen=0/error`、fit 16→IK 32、selector 0。真实 `grasp/full/control/video` 均 **0** | “只差 0.1 s”假设被否证；当前 blocker 是 worker 不可达。用户的一次 grasp 控制授权保留未消费，`graspgen>0` 前不发控制 | `runs/m1_grasp_authorized_20260726_191610/` | ❌ read-only gate 未通过 |
+| **M1.b · Code Agent 接入** | 用 T1 提取图替换人工图进入受限 Python node-policy 编译 | 输入图 **15** 节点，选择 cycle 1 的 **5** 节点；生成代码 digest `sha256:b8db3194…49054`；T3 **0** 条；fake 节点 **5/5**；相关回归 **70 passed**。同一图与同一 code digest 的真实只读 probe exit **2**，`grasp_pose + holder_pose` 未解 | 图→受限 handler→可信 controller registry 的编译接缝已落地，`human_graph_used=false`；fake 只证明接口，不作效果声明。M1.b 的“开发 seed probe→真实执行链”仍未通过，不能标完成 | `runs/m1b_codegen_20260726_174243/{compile_manifest.json,compiled_policy.py,selected_graph.json,fake_execution.json,real_probe.json,real_probe_summary.json}` | ⚠️ 编译/fake 通过；真实执行未通过 |
 | **PREDICATE_V2_REGRESSION** | 判断 v2 是否已“够用”，避免继续调毫米 | 1 个 oracle positive 判 True；horizontal-in-rack、upright-but-uninserted、inverted-in-rack 3 个明显负例均判 False；`restore_ok=true` | v2 已满足当前评价需求：`inserted` 与显式 `orientation(+y,+z)` 能互相兜底。停止谓词调参；未改全局 evaluator、物理配置或项目代码 | `runs/predicate_v2_regression_20260726_102557/{REPORT.md,results.json}` | ✅ 4/4 |
 | **M1 trial 1** | 首次单管抓取→提起→重定向 | tube1 `z_rise=116.72 mm`；lift 后长轴距竖直 2.8°；reorient 后变成 53.36°，未进入 align/insert。`is_gripping_sth` 与 `still_gripping` 均为字符串 `"False"`，却被 Python `bool()` 判真 | 该 trial 不能用于成功率。两条直接结论：① funnel 先做类型规范化，P1 必须要求真实 grasp retention；② reorient 必须重新观察**物体轴**后再决定是否/如何旋转，不能只让 wrist 到目标姿态并假设物体刚性随动 | `runs/m1_single_tube_20260726_095818/trial_1/`（含 `third_person.mp4`） | ❌ funnel 无效，P3 实际失败 |
 | **M1 pre-flight** | 在真正 trial 前核对动作 frame、旋转闭环和 reach | `delta_move` 实测为 world frame；`local_delta_move` 为 EE frame；`local_rotation_move` 命令 17.19° 实到 13.51°。arm 0 的 tube0/1/2 grasp-height 误差分别 39.98/37.65/98.42 mm，均未达到 20 mm gate；tube1 pre-grasp 误差 4.89 mm，far_0 pre-insert 误差 16.69 mm | 32 原语动作面可用不等于当前 grasp pose 可达。已有 M1 graph 选择 tube0 的“xy 最近”理由被实测 reach 结果削弱；在冻结抓取 pose/arm 前不得跑整链。**没有有效 scored trial、没有成功率结论** | `runs/m1_single_tube_20260726_095818/{code,probes,logs}` | ⚠️ 仅 pre-flight |
@@ -156,13 +151,8 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo（仅 1022）：** 在 `/mnt/data/wenqian/demo-graph-lab` 同步本仓改动后，
-   对 1022 本地 pipeline 跑
-   `python3 experiments/insert_tubes/run_m1.py --mode probe`，核对
-   `tube_axis_found` / `tube_axis_source` 与 `holder_pose_error`。1024 NAS 只读可借、禁止写入。
-   **grasp 真执行须用户再次明确允许**。失败归因只能落在 perception / reach / grasp，
-   不得使用 scene pose、固定孔心或 evaluator fallback。holder 点云不足修好后，再接
-   reorient/skip、align、insert。
+1. **当前唯一主线 next todo：** 联系 **SAM3 服务 owner** 恢复 `101.132.143.105:6068`；禁止自行重启。恢复后保留 graspgen timeout 8 s / pick budget 10 s，再跑一次 `--mode grasp`（授权仍未消耗）。GraspGen API 本轮 health=ok，但若 merge 仍为 0 再找 GraspGen owner。`--mode full` 仍禁止。1024 NAS 继续只读。
+
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。
@@ -170,7 +160,9 @@ M1 agent 实际跑完了 **5 个 trial**（10:23–10:54，与方向审计并行
 4. **用真实孔位回溯重算 B5.1 / B7 的所有槽位指标**，闸门从「在架体内」收紧到「落进某个孔的 0.94 mm 容差内」。预期几乎全部归零，这个结果要如实写。
 5. **补一个约束校验环节**。F1 证明 LLM 对注入数值 100% 照搬、零物理校验，所以自动提取一旦有几何误差，会被原样编译进代码且无人察觉——这把"提取质量"从工程问题升级成了安全性问题。三条可做的路各 8 次调用：提取侧对着场景 AABB 校验 / 注入侧把几何约束翻译成 `assert` / prompt 侧明确要求量纲范围检查。
 6. **失败信用分配一次都没测过**，而它可能是相对 CaP-X 唯一站得住的差异点。现在全部实验是 `max_attempts=1`。
-7. **矩阵 B3 从未跑过**，提取管线没接上。全部结论建立在 1 个任务、1 张人写图、1 个模型（gpt-5）上。
+7. **矩阵 B3 尚无真实执行结果**。自动提取图已通过受限 Code Agent 编译，并在 fake runtime
+   走完单管 5 节点；真实只读 probe 仍因 `grasp_pose + holder_pose` 未解而退出，未发控制。
+   因此已有机器人执行结论仍建立在人写图和单任务上，不能把 fake 编译链写成 B3 效果。
 
 ### 小的未解矛盾
 

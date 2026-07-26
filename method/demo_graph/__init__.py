@@ -7,6 +7,12 @@ from .candidates import (
     CandidateSelector,
     SelectionResult,
 )
+from .code_agent import (
+    CodeAgentCompileError,
+    CompiledPolicyArtifact,
+    RestrictedCodeAgentCompiler,
+    select_linear_action_cycle,
+)
 from .isolation import IsolatedPolicyWorker, IsolationViolation
 from .manifest import RunManifest
 from .models import Constraint, ConstraintGraph, Node, TypedHole
@@ -34,6 +40,8 @@ __all__ = [
     "ActionCandidate",
     "CandidateDecision",
     "CandidateSelector",
+    "CodeAgentCompileError",
+    "CompiledPolicyArtifact",
     "Constraint",
     "ConstraintGraph",
     "ControllerResult",
@@ -55,6 +63,7 @@ __all__ = [
     "PythonNodePolicy",
     "PythonNodePolicyBackend",
     "RunManifest",
+    "RestrictedCodeAgentCompiler",
     "SelectionResult",
     "ServoController",
     "ServoOutcome",
@@ -63,4 +72,5 @@ __all__ = [
     "TypedHole",
     "advance_phase",
     "assert_method_safe",
+    "select_linear_action_cycle",
 ]

@@ -5,6 +5,7 @@
 | 模块 | 职责 |
 |---|---|
 | `models.py` | `ConstraintGraph` / 节点 / typed hole |
+| `code_agent.py` | 图 → 受限 Python node handlers；只绑定可信 controller registry |
 | `runner.py` | `PythonNodePolicy` 逐节点观察—执行—验证 |
 | `state_machine.py` | `READY → … → SUCCEEDED/RECOVERABLE/FAILED` |
 | `candidates.py` | 不可变 `ActionCandidate` 与选择器 |

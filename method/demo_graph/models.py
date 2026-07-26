@@ -23,11 +23,27 @@ class TypedHole:
     solver: str
     search_domain: Mapping[str, JsonValue]
     provenance: Provenance
+    shape: tuple[int, ...] = ()
+    unit: str = "unspecified"
+    frame: str = "unspecified"
+    required_inputs: tuple[str, ...] = ()
+    runtime_verification: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _required(self.hole_id, "hole_id")
         _required(self.value_type, "value_type")
         _required(self.solver, "solver")
+        _required(self.unit, "unit")
+        _required(self.frame, "frame")
+        object.__setattr__(self, "shape", tuple(int(item) for item in self.shape))
+        object.__setattr__(self, "required_inputs", tuple(self.required_inputs))
+        object.__setattr__(
+            self,
+            "runtime_verification",
+            tuple(self.runtime_verification),
+        )
+        if any(item < 1 for item in self.shape):
+            raise ValueError("typed-hole shape dimensions must be >= 1")
         object.__setattr__(
             self,
             "search_domain",
@@ -201,6 +217,13 @@ class ConstraintGraph:
                 solver=value["solver"],
                 search_domain=value.get("search_domain", {}),
                 provenance=parse_provenance(value["provenance"]),
+                shape=tuple(value.get("shape", ())),
+                unit=value.get("unit", "unspecified"),
+                frame=value.get("frame", "unspecified"),
+                required_inputs=tuple(value.get("required_inputs", ())),
+                runtime_verification=tuple(
+                    value.get("runtime_verification", ())
+                ),
             )
 
         def parse_constraint(value: Mapping[str, Any]) -> Constraint:

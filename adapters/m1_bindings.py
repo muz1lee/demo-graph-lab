@@ -32,7 +32,11 @@ class BrokerPolicyBindings:
     def observe(self, node: Node) -> Observation:
         result = self._broker.call(
             "perception.observe",
-            {"node_id": node.node_id, "goal": node.goal},
+            {
+                "node_id": node.node_id,
+                "action": node.action,
+                "goal": node.goal,
+            },
         )
         value = _mapping_value(result, "perception.observe")
         revision = value.get("revision")
