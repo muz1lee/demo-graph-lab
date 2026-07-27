@@ -1,7 +1,7 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-27 11:46。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
+最后更新 2026-07-27 12:00。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
 被 Git 忽略的 `configs/local/`。
 
 ## 硬边界更正（2026-07-26 用户紧急纠正）
@@ -15,7 +15,7 @@
 - GitHub 远程为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)
   （由旧名重命名）；本地 `origin` 已指向新 URL。
 
-**一句话状态**：SAM3(:6068) 已恢复 healthy；T1 只读 preflight **0/3**——fit 16→IK 32 但 DOF selector **selected=0**，gating=`grasp_pose`。T2 `--mode grasp` 未执行（授权保留）。T3 感知误差 tube0 **22.22 mm ≈ 23.64×** 容差(0.94mm)，`used_in_control=false`。内层 GraspGen worker `192.168.1.119:5079` 仍 timeout（记录性）。
+**一句话状态**：selector=0 根因已定位为 **IK seed 缺当前 qpos**（32/32 `ik_residual_too_large`，`qpos_seeded=false`）；runtime 已补传 `left_qpos`/`right_qpos`（本地单测 14/14）。**硬阻塞**：GraspPipeline_Re `:5093` connection refused，纪律禁止重启 → D3 preflight / D4 grasp **未跑**（授权保留）。SAM3 :6068 healthy；GraspGen worker 5079 timeout 仍为记录性。
 
 ## 0. 当前方向（2026-07-26 09:52 老板拍板）
 
@@ -69,6 +69,7 @@
 | **B.1 · T2** | 关键帧夹爪-物体相对关系提取器 | 三次抓取均输出 `upper_body / axial / cross_axis`；与人工标注 **3/3** 一致；置信度 **0.9439 / 0.9639 / 0.7972** | 单关键帧 + CoTracker + object mask 可恢复粗粒度关系；未建全轨迹、未输出毫米级相对位姿 | `runs/t2_keyframe_relations_20260726_163026/{cases.json,relations.json}` | ✅ 盘上 3/3 |
 | **B.1 · T3** | 度量字面量静态扫描与冻结 gate | B7 已知照搬阳性 **3/3** 文件命中，共 **11** 条（4/5/2）；干净 `m1_fake.py` **0** 误报 | Python/YAML/JSON 扫描器可拒绝场景特定 pose/slot/offset 字面量；同一 gate 已接入 T4 冻结流程 | `runs/t3_metric_scan_20260726_163133/{b7_positive_scan.json,clean_policy_scan.json}` | ✅ 阳性 + 阴性 |
 | **B.1 · T4** | D/E seed 协议 fake backend 干跑 | D **3/3**、E **20/20** 完整执行；五阶段漏斗各为 3/3、20/20；**23** 份 RunManifest 仅 **1** 个 code digest；配置覆盖 E=100 | 冻结、seed 隔离、批量调度、manifest 与 funnel 链路通过；`effect_claims_allowed=false`，fake 结果不作机器人效果声明 | `runs/t4_seed_protocol_20260726_164708/{REPORT.md,protocol_snapshot.json,metric_scan.json,funnel_report.json,development/,held_out/}` | ✅ fake-only 干跑 |
+| **M1.a selector=0 · qpos seed** | 定位 selected=0 并最小修复后验证 | D1：`ik_residual_too_large×32` + `qpos_seeded=false`；默认 seed=零位。D2：runtime 从 `/info/get_qpos` 取双臂 qpos 传入 `qwen_dof_xquat`（不改 knowin-world/5093）；单测 14/14。D3/D4：**:5093 宕机**未验证/未 grasp | 修复已就位；需周振秋恢复 5093 后再跑 probe×3（目标 ≥2/3 selected>0）与一次 grasp | `runs/m1_preflight_qposfix_20260727_115214/` + `runs/m1_preflight_probe_20260727_114334/` | ⚠️ 代码修复；实机验证硬阻塞 |
 | **M1.a grasp · SAM3 恢复后 T1** | SAM3 恢复后只读 preflight→条件允许则 grasp | SAM3 healthy；probe **0/3**，均 fit16→IK32、graspgen=0/error、**selector=0**；gating=`grasp_pose`；T2 未跑；T3 tube0 **22.22 mm / 0.94 = 23.64×** | 阻塞从 SAM3 refused 转移到 DOF selector；授权未消耗 | `runs/m1_preflight_probe_20260727_114334/` | ❌ T1 fail-closed；无控制 |
 | **M1.a preflight** | 在任何新控制前复核非特权感知入口 | 新鲜只读 probe **0/3** 通过：attempt 1/2 为 `grasp_pose + holder_pose` 未解；attempt 3 的 grasp/axis 可用，但 `holder_pose` 报 `place xquats empty` | 旧 probe 成功不能替代当前可执行性；当前感知/IK 输出有波动，未满足进入 `grasp/full` 的新鲜前置条件。全程 `control_sent=false` | `runs/m1_preflight_20260726_172712/{summary.json,probe_*.json,probe_*.exit,probe_*.stderr}` | ❌ 当前入口未通过；无控制 |
 | **M1.a grasp · 单次授权** | 单抓取 + 80 mm 测试提升 + 第三视角录像 | 新鲜 probe **1/3** 通过；唯一一次 `--mode grasp` exit **2**，首节点 `grasp_pose` 未解；`control_sent=false`、`lift_command_sent=false`、`attachment_evidence=null`。录像 **19.667 s / 59 帧 / 1280×720**；T3 **0** 条；`full=0` | 独立 probe 通过不保证下一进程的随机感知再次成功；第一失败层为 runtime perception，不是 reach/grasp/controller。未发生控制，不能形成 grasp 或 attachment 结论；单次授权已消耗，不重跑 | `runs/m1_grasp_20260726_182456/{REPORT.md,summary.json,grasp_result.json,third_person.mp4,compiled_policy.py}` | ❌ fail-closed；无控制 |
@@ -155,7 +156,7 @@
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo：** 查明 DOF Selector 在 fit-only+IK=32 时 selected=0 的原因（含 pipeline 是否必须传 `/info/get_qpos`；日志已有 `qpos_by_arm not provided` 警告）。T1 通过前禁止 `--mode grasp`/`--mode full`。GraspGen worker 5079 timeout 仍为记录性。证据 `runs/m1_preflight_probe_20260727_114334/`。
+1. **当前唯一主线 next todo：** 等周振秋恢复 GraspPipeline_Re `:5093` 后，用已合入的 qpos seed 修复连跑只读 probe×3（目标 ≥2/3 `selected>0` 且 grasp `gating_holes=[]`），通过后立刻一次 `--mode grasp`。`--mode full` 仍禁止。证据 `runs/m1_preflight_qposfix_20260727_115214/`。
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。

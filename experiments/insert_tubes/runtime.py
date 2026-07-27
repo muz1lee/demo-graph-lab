@@ -54,6 +54,14 @@ def _axis_vertical(axis: list[float], tolerance_deg: float) -> bool:
     return tilt <= tolerance_deg
 
 
+def _current_qpos_by_arm(pipeline: SupportsPipeline) -> dict[str, list[float]]:
+    """Read live dual-arm qpos for DOF selector IK seeding (no hardcoded joints)."""
+    return {
+        "left_qpos": _vector(pipeline.info("get_qpos", arm_id=0)),
+        "right_qpos": _vector(pipeline.info("get_qpos", arm_id=1)),
+    }
+
+
 class M1Runtime:
     """任务薄层：只用当前感知与机器人反馈，禁止 GT / scene pose 回退。"""
 
@@ -91,12 +99,15 @@ class M1Runtime:
         self.revision = 0
 
     def _qwen_pick(self) -> dict[str, Any] | None:
+        qpos = _current_qpos_by_arm(self.pipeline)
         raw = self.pipeline.reasoning(
             "qwen_dof_xquat",
             text=[self.pick_prompt],
             offsets=[0.0, 0.0, 0.0],
             arm_id=self.arm_id,
             pick_per_arm_topk=3,
+            left_qpos=qpos["left_qpos"],
+            right_qpos=qpos["right_qpos"],
         )
         parsed = parse_pick_response(raw, arm_id=self.arm_id)
         if parsed.pose is None or parsed.grasp_angle is None:
@@ -119,12 +130,15 @@ class M1Runtime:
         if self.pick is None:
             self.last_place_error = "no pick observation"
             return None
+        qpos = _current_qpos_by_arm(self.pipeline)
         attempts: list[dict[str, Any]] = [
             {
                 "text": [self.place_prompt],
                 "data": self.pick["pose"],
                 "offsets": [0.0, 0.0, 0.0],
                 "arm_id": self.arm_id,
+                "left_qpos": qpos["left_qpos"],
+                "right_qpos": qpos["right_qpos"],
             }
         ]
         if self.pick.get("run_id"):
@@ -136,6 +150,8 @@ class M1Runtime:
                     "offsets": [0.0, 0.0, 0.0],
                     "arm_id": self.arm_id,
                     "run_id": self.pick["run_id"],
+                    "left_qpos": qpos["left_qpos"],
+                    "right_qpos": qpos["right_qpos"],
                 },
             )
         errors: list[str] = []

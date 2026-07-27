@@ -42,9 +42,15 @@ class FakePipeline:
         self.pick_failures = pick_failures
         self.actions: list[str] = []
         self.place_kwargs: list[dict] = []
+        self.pick_kwargs: list[dict] = []
+        self.qpos_by_arm = {
+            0: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+            1: [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7],
+        }
 
     def reasoning(self, name, **kwargs):
         if name == "qwen_dof_xquat":
+            self.pick_kwargs.append(dict(kwargs))
             self.pick_calls += 1
             if self.pick_calls <= self.pick_failures:
                 return {
@@ -78,9 +84,9 @@ class FakePipeline:
         self.actions.append(name)
 
     def info(self, name, **kwargs):
-        del kwargs
         assert name == "get_qpos"
-        return [0.0] * 7
+        arm_id = int(kwargs.get("arm_id", 0))
+        return list(self.qpos_by_arm[arm_id])
 
 
 def _runtime(fake):
@@ -111,6 +117,18 @@ def test_parse_nested_axis_and_derive_fallback():
     derived = derive_axis_from_xquat([0, 0, 0, 0, 0, 0, 1])
     assert derived is not None
     assert abs(derived[2]) < 1e-9
+
+
+def test_pick_and_place_pass_live_qpos_for_selector_seed():
+    fake = FakePipeline(place_found=True)
+    result = _runtime(fake).probe()
+    assert result["grasp_candidate_found"] is True
+    assert fake.pick_kwargs
+    assert fake.pick_kwargs[0]["left_qpos"] == fake.qpos_by_arm[0]
+    assert fake.pick_kwargs[0]["right_qpos"] == fake.qpos_by_arm[1]
+    assert fake.place_kwargs
+    assert fake.place_kwargs[0]["left_qpos"] == fake.qpos_by_arm[0]
+    assert fake.place_kwargs[0]["right_qpos"] == fake.qpos_by_arm[1]
 
 
 def test_probe_derives_tube_axis_and_reports_holder_error():
