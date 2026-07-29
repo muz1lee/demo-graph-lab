@@ -64,6 +64,16 @@ def test_stages_from_trace():
     assert st[1]["role"] == "cleanup"
 
 
+def test_norm_item_salvages_toplevel_args():
+    from harness.extract import _norm_item
+    it = {"name": "region_grasp", "object": "tube0", "region": "upper_body",
+          "confidence": 0.8, "evidence_frames": [1]}
+    _norm_item(it)
+    assert it["args"]["region"] == "upper_body"
+    assert it["args"]["object"] == "tube0"
+    assert "confidence" not in it["args"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

@@ -9,19 +9,27 @@ from pathlib import Path
 from . import util, vocab
 
 
-def _norm_args(name: str, args) -> dict:
-    """模型偶尔把 args 出成列表;按词表槽位名归一成 dict,保证 canon/校验一致。"""
-    if isinstance(args, dict):
-        return args
+_RESERVED = {"name", "args", "stage", "confidence", "evidence_frames",
+             "provenance", "notes", "votes"}
+
+
+def _norm_item(item: dict) -> dict:
+    """归一 args:列表→按词表槽位;缺失→从顶层多余键抢救(模型常把参数平铺在顶层)。"""
+    name, args = item.get("name"), item.get("args")
+    if not args:
+        args = {k: v for k, v in item.items() if k not in _RESERVED}
     if isinstance(args, list):
         slots = vocab.CONSTRAINT_VOCAB.get(name, {}).get("args", [])
-        return {slots[i] if i < len(slots) else f"arg{i}": v
+        args = {slots[i] if i < len(slots) else f"arg{i}": v
                 for i, v in enumerate(args)}
-    return {"arg0": args} if args is not None else {}
+    elif not isinstance(args, dict):
+        args = {"arg0": args}
+    item["args"] = args
+    return item
 
 
 def _canon(item: dict) -> tuple:
-    item["args"] = _norm_args(item.get("name"), item.get("args"))
+    _norm_item(item)
     return (item.get("name"), json.dumps(item["args"], sort_keys=True, ensure_ascii=False))
 
 
@@ -100,6 +108,7 @@ def run(task: str, k: int = 5, model: str | None = None,
                 samples.append(llm.parse_json_block(out))
             except ValueError:
                 parse_fail += 1
+        util.write_json(run_dir / "samples" / f"stage{st['index']:02d}.json", samples)
         merged = merge_samples(samples) if samples else {"constraints": [], "acceptance": [], "holes": []}
         graph["stages"].append({**{k_: st[k_] for k_ in
                                    ("index", "name", "label", "start_sec", "end_sec")},

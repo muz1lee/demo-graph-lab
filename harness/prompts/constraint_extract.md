@@ -34,6 +34,16 @@ HARD RULES:
   above its center of mass), record it as constraints (e.g. region_grasp=upper_body +
   axis_vertical as acceptance), not as a trajectory.
 
+ARG SIGNATURES (use EXACTLY these key names inside `args`; never put arguments at the
+top level of a constraint, never as a bare list):
+axis_parallel(axis_a, axis_b) · axis_vertical(axis) · center_align(obj_a, obj_b) ·
+region_grasp(obj, region) · approach_direction(cone[, target]) · above(obj_a, obj_b) ·
+inside(obj_a, obj_b) · order(stage_sequence) · carry(relation) · clearance(obj_a, obj_b)
+
+Example constraint (format reference only):
+{"name": "region_grasp", "args": {"obj": "tube0", "region": "upper_body"},
+ "confidence": 0.85, "evidence_frames": [3, 5]}
+
 Output JSON schema:
 {"stage": str, "constraints": [...], "acceptance": [...], "holes": [...],
  "notes": str (optional, <=50 words)}
