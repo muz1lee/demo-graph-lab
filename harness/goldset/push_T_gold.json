@@ -1,0 +1,82 @@
+{
+  "task": "push_T",
+  "annotator": "claude-bringup",
+  "annotated_at": "2026-07-29",
+  "stages": {
+    "0": {
+      "constraints": [
+        {
+          "key": "center_align|{\"obj_a\": \"t_block.center\", \"obj_b\": \"pad.center\"}",
+          "verdict": "correct",
+          "note": "核心：粗推阶段的驱动目标就是把块心推向 pad 心。f000(t0000_00) 块在 pad 右侧约 100px；f075(t0003_00) 块已推到与 pad 重叠；f100(t0004_00) 块大体压住 pad。违反=块没到 pad，任务必败；粗对齐阈值由 align_tolerance hole 承接。"
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"side\", \"target\": \"t_block\"}",
+          "verdict": "correct",
+          "note": "side 有视觉支持：f025(t0001_00) 夹爪闭合、指尖降至桌面高度从块右侧水平接近；f050(t0002_00)/f075(t0003_00) 指尖贴在块柄端侧面推进，块全程贴桌未被抬起或顶压。非抓取推动中 side/top_down 仰角类别有力学意义（顶压产生不了平面位移），属 demo 教的接触关系而非 symmetry-free 方位，故 correct 而非 incidental。词表缺口：cone 表达不了『推哪个侧面』（应推背离 pad 的面），由 push_contact_point hole(5/5) 兜底，见 rationale。"
+        },
+        {
+          "key": "axis_parallel|{\"axis_a\": \"t_block.stem_axis\", \"axis_b\": \"pad.stem_axis\"}",
+          "verdict": "wrong",
+          "note": "本阶段 demo 不维持柄轴平行，反而系统性打破它：像素测量（PCA+三阶矩取向，见 rationale）初始朝向差仅约 -11°(f000)，偏心侧推使其持续增大到 +76°(f075, t0003_00, 无遮挡) 直至 ~+120°(f100, t0004_00, 部分遮挡有噪但放大图可见大角度错开)。其自引证据帧 0/75/100 恰好横跨这段『越推越歪』。朝向对齐是 stage1 才完成的（f184→f212）。约束对任务终态成立，但作为本阶段约束与视觉证据相反，判 wrong（阶段归属错误）。"
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "center_align|{\"obj_a\": \"t_block.center\", \"obj_b\": \"pad.center\"}",
+          "verdict": "correct",
+          "note": "f100(t0004_00) 块已压在 pad 上，粗对位达成（残余偏移由 stage1 收尾），作为粗推阶段验收合理；容差语义由 align_tolerance hole 表达。"
+        },
+        {
+          "key": "axis_parallel|{\"axis_a\": \"t_block.stem_axis\", \"axis_b\": \"pad.stem_axis\"}",
+          "verdict": "wrong",
+          "note": "被其唯一引用的 f100(t0004_00) 直接反驳：4.0s 边界处灰 pad 大角度露出，测得朝向差 ~+120°（f075 无遮挡已 +76°），任何合理容差下都不成立。按此验收 demo 自己都过不了 stage0。对比 push_T_random 卷同名验收判 correct（该 run stage0 完成了大部分旋转、边界残差仅 20-30°）——同一规则、不同 demo 事实，判定相反，见 rationale。"
+        }
+      ],
+      "missing": []
+    },
+    "1": {
+      "constraints": [
+        {
+          "key": "axis_parallel|{\"axis_a\": \"t_block.long_axis\", \"axis_b\": \"pad.long_axis\"}",
+          "verdict": "correct",
+          "note": "pad 是灰色 T 形填充标记（f000 放大可辨），目标显式指定朝向；T 无旋转对称，rubric 对称原则不适用 → 朝向对齐是核心。测量：朝向差 ~+120°(f100) → +3.8°(f184, t0007_38，灰边仅剩细条) → +2.0°(f212, t0008_50，pad 被完全盖住)；撤臂后 f235 +2.4° 无遮挡确认。本 run 的『fine』阶段实际承担了大角度旋转整形。注意与 stage0 的 stem_axis 同义异名；无向轴平行仍留 180° 翻转歧义，见 missing。"
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"t_block.center\", \"obj_b\": \"pad.center\"}",
+          "verdict": "correct",
+          "note": "f212(t0008_50) 红块完全覆盖 pad；撤臂后 f235(t0009_40) 灰 pad 可见像素从基线 524 降至 ~39（测量），中心重合无残留露出。核心目标约束。"
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"t_block\"}",
+          "verdict": "wrong",
+          "note": "五个引证帧里接触均为桌面高度的侧向轻推：f100(t0004_00) 指尖贴块侧面；f128/f156(t0005_12/t0006_25) 有遮挡但指尖可见位于块侧旁、桌面高度；f184(t0007_38) 最清晰——闭合指尖贴在柄的侧面。块全程贴桌做平移+旋转（~120°→2°，需要侧向力），从未见指尖压在块顶面发力。头顶的腕部/前臂姿态易被误读为 top_down，但按接触仰角类别应为 side，与 demo 相反，判 wrong（3/5 票、conf 0.51 也反映了 ensemble 摇摆）。"
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "axis_parallel|{\"axis_a\": \"t_block.long_axis\", \"axis_b\": \"pad.long_axis\"}",
+          "verdict": "correct",
+          "note": "f212(t0008_50) 块完全盖住 T 形标记，测得朝向差 +2.0°（f235 撤臂后 +2.4°）；T 非对称使其为核心验收。"
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"t_block.center\", \"obj_b\": \"pad.center\"}",
+          "verdict": "correct",
+          "note": "f212(t0008_50) 完全覆盖；f235(t0009_40) 无遮挡确认（灰 pad 残留 ~39px）。核心验收。"
+        }
+      ],
+      "missing": [
+        {
+          "name": "approach_direction",
+          "args": "{\"cone\": \"side\", \"target\": \"t_block\"}",
+          "note": "本阶段执行成功所必需的侧面接触约束缺失（抽取器给的是相反的 top_down）：f184(t0007_38) 等帧显示微调靠指尖在桌面高度顶住块侧面施加侧向力，~120° 的旋转纠偏全靠它。与 push_T_random 金标 stage1 的同名 missing 对齐。判定口径：错值条目计 wrong（精度）、正确值计 missing（召回），见 rationale judgment call。"
+        },
+        {
+          "name": "inside",
+          "args": "{\"obj\": \"t_block\", \"region\": \"pad\"}",
+          "note": "center_align + 无向 axis_parallel 联合欠定目标位姿：绕形心平面内转 180° 的 T 同时满足两者（形心不动、无向长轴平行），但 T 无 2-fold 对称，横杠换端、footprint 盖不住标记 → 任务失败而验收通过。demo 末态 f235(t0009_40，撤臂无遮挡，灰残留 ~39px) 证明目标是 footprint 完整覆盖；闭词表内 inside 是唯一能钉死翻转 DoF 的条目。与 push_T_random 金标 missing 2 同一判法。"
+        }
+      ]
+    }
+  }
+}
