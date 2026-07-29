@@ -60,3 +60,14 @@ validator 最终全任务 0 违例(度量字面量零泄漏)。
   预期主攻 R(0.777→0.8+),P 已有余量。
 - 歧义对素材构造方案(录制 or 仿真)另定。
 - 5090 侧 extract 待办公室代理恢复后补验;9 个未标任务视需要扩量。
+
+## 6. 编译步首轮(2026-07-30 追加)
+
+graph → policy 编译链上线(`harness compile`):Opus 按 API 契约(`contract.py`,单一真源)
+把五个任务的图各编译成 Python policy,**5/5 全绿**——AST 静态检查零违例(禁数字字面量/
+禁 import/只准 rt.* 契约内调用)、fake 干跑 normal 全过、注入 gate 失败的重试分支全部
+正确恢复。关键设计:`rt.solve()` 返回**不透明句柄**,policy 拿得到值、读不出数字——
+「写不出硬编码」从事后扫描升级为结构性质;两级 ReAct 骨架在可信 runner(`fakerun.py`)
+里,LLM 只编译不写控制循环。观察:生成代码会 solve 个别用不上的洞(无害,声明式原语
+吸收了),图里洞名有 `tube1.grasp_pose` vs `tube0_grasp_pose` 式漂移(记入 v0.2 符号
+归一化)。Phase 1 时把 FakeRuntime 换成 knowin_sim_v2 适配器,policy 代码不变。

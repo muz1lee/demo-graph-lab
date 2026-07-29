@@ -64,6 +64,33 @@ def test_stages_from_trace():
     assert st[1]["role"] == "cleanup"
 
 
+def test_compile_static_check_rules():
+    from harness.compilepolicy import static_check
+    good = ("def stage_0(rt):\n    p = rt.solve('grasp_pose')\n    rt.grasp_at(p)\n"
+            "STAGES = {0: stage_0}\n")
+    assert static_check(good) == []
+    assert any("数字字面量" in e for e in static_check(
+        "def stage_0(rt):\n    x = 0.05\nSTAGES = {0: stage_0}\n"))
+    assert any("import" in e for e in static_check("import os\nSTAGES = {}\n"))
+    assert any("契约外" in e for e in static_check(
+        "def stage_0(rt):\n    rt.teleport('x')\nSTAGES = {0: stage_0}\n"))
+    assert any("只准调用" in e for e in static_check(
+        "def stage_0(rt):\n    print('hi')\nSTAGES = {0: stage_0}\n"))
+
+
+def test_compile_dry_run_mini():
+    from harness.compilepolicy import dry_run
+    graph = {"stages": [{"index": 0, "name": "pick",
+                         "acceptance": [{"name": "carry", "args": {}}],
+                         "holes": [{"name": "grasp_pose", "type": "pose_se3"}]}]}
+    code = ("def stage_0(rt):\n    rt.grasp_at(rt.solve('grasp_pose'))\n"
+            "STAGES = {0: stage_0}\n")
+    r = dry_run(code, graph)
+    assert r["normal"]["ok"] and r["holes_solved"] == ["grasp_pose"]
+    assert r["retry_injection"]["ok"]        # 注入一次 gate 失败 → 重试后通过
+    assert r["retry_injection"]["stages"][0]["status"] == "passed_retry1"
+
+
 def test_norm_item_salvages_toplevel_args():
     from harness.extract import _norm_item
     it = {"name": "region_grasp", "object": "tube0", "region": "upper_body",

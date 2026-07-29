@@ -21,9 +21,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="harness", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in ("ingest", "stages", "keyframes", "extract", "validate",
-                 "report", "metrics", "all"):
+                 "report", "metrics", "all", "compile"):
         p = sub.add_parser(name)
         p.add_argument("--task", required=True)
+        if name == "compile":
+            p.add_argument("--model", default=None)
         if name in ("ingest", "all"):
             p.add_argument("--video")
             p.add_argument("--trace")
@@ -56,6 +58,9 @@ def main(argv=None):
         report.run(args.task)
     elif args.cmd == "metrics":
         metrics.run(args.task, args.gold)
+    elif args.cmd == "compile":
+        from . import compilepolicy
+        compilepolicy.run(args.task, args.model)
     elif args.cmd == "all":
         ingest.run(args.task, args.video, args.trace, args.n_frames)
         stages.run(args.task, args.model)
