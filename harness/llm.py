@@ -15,7 +15,7 @@ class CostCapExceeded(RuntimeError):
 
 
 def chat(messages: list, run_dir: Path, tag: str, model: str | None = None,
-         max_tokens: int = 1500, temperature: float = 0.2, retries: int = 2) -> str:
+         max_tokens: int = 1500, temperature: float = 0.2, retries: int = 4) -> str:
     """一次 chat 调用。返回文本;usage/cost 记入 run_dir/cost.jsonl。"""
     from openai import OpenAI  # lazy: mac 单测不需要
 
@@ -48,9 +48,9 @@ def chat(messages: list, run_dir: Path, tag: str, model: str | None = None,
             return content
         except CostCapExceeded:
             raise
-        except Exception as e:  # 网络/限流等,指数退避重试
+        except Exception as e:  # 限流走长退避(OpenRouter 新账号 10 RPM),其余指数退避
             last_err = e
-            time.sleep(2 ** attempt)
+            time.sleep(min(60, 15 * (attempt + 1)) if "429" in str(e) else 2 ** attempt)
     raise RuntimeError(f"LLM call failed after {retries + 1} attempts: {last_err}")
 
 
