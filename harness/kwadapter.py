@@ -165,6 +165,31 @@ class KWRuntime:
         x = self.pipe.call("info", "get_xquat", {"arm_id": self.arm_id})
         return list(x[:3]), list(x[3:7])
 
+    def _wait_settle(self, target_xyz=None, tol=0.012, timeout_s=25.0, still_n=4):
+        """pipeline 的 ctrl 是 fire-and-forget(源码里等 future 那行被注释),必须自己等。
+        收敛判据:到达 target(tol) 或连续 still_n 次位置几乎不变(静止/受阻)。"""
+        t0, last, still = time.time(), None, 0
+        while time.time() - t0 < timeout_s:
+            time.sleep(0.35)
+            try:
+                xyz, _ = self._cur_xquat()
+            except Exception:
+                continue
+            if target_xyz is not None and math.dist(xyz, list(target_xyz)) < tol:
+                self._log("settle", reason="reached", sec=round(time.time() - t0, 1))
+                return "reached"
+            if last is not None and math.dist(xyz, last) < 0.0015:
+                still += 1
+                if still >= still_n:
+                    self._log("settle", reason="still", sec=round(time.time() - t0, 1),
+                              gap=round(math.dist(xyz, list(target_xyz)), 4) if target_xyz else None)
+                    return "still"
+            else:
+                still = 0
+            last = xyz
+        self._log("settle", reason="timeout", sec=round(time.time() - t0, 1))
+        return "timeout"
+
     def _move(self, xyz, quat=None, interpolation="z_arc", gpos=None):
         if quat is None:
             _, quat = self._cur_xquat()
@@ -172,7 +197,9 @@ class KWRuntime:
               "interpolation": interpolation}
         if gpos is not None:
             kw["gpos"] = gpos
-        return self._ctrl("xquat_move", **kw)
+        r = self._ctrl("xquat_move", **kw)
+        self._wait_settle(target_xyz=xyz)
+        return r
 
     def approach(self, target, cone=None):
         if isinstance(target, dict) and target.get("kind") == "pose":
@@ -186,11 +213,14 @@ class KWRuntime:
     def grasp_at(self, grasp_pose):
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         self._ctrl("set_gripper", angle=GRIP_OPEN)
+        time.sleep(1.0)
         self._move(xyz)
         self._ctrl("set_gripper", angle=GRIP_CLOSE)
+        time.sleep(1.5)   # 闭合无可靠回读(is_gripping_sth 在本仿真恒假),固定等待
 
     def lift(self, obj):
         self._ctrl("delta_move", delta_xyz=[0, 0, LIFT_DZ])
+        self._wait_settle()
 
     def transport(self, obj, target):
         if isinstance(target, dict) and "xyz" in target:
@@ -210,19 +240,32 @@ class KWRuntime:
         self._move(xyz, interpolation="linear")
 
     def lower_until(self, stop_condition):
-        for _ in range(LOWER_MAX_STEPS):
+        """逐步下探。停止条件:目标谓词转真(root_in_bbox/axis_aligned,非恒真项)、
+        或高度不再下降(接触/受阻)、或步数预算耗尽。不用恒真的 depth_in 作判据。"""
+        prev_z = None
+        for i in range(LOWER_MAX_STEPS):
             self._ctrl("delta_move", delta_xyz=[0, 0, -LOWER_STEP])
-            probes = self.eval.state().get("probes", [])
-            if probes and all(p.get("passed") for p in probes
-                              if "depth" in str(p.get("label", "")).lower()):
-                break
-        self._log("lower_until_done")
+            self._wait_settle(timeout_s=8.0)
+            probes = {str(p.get("label")): p.get("passed") for p in self.probes()}
+            if probes.get("root_in_bbox") and probes.get("axis_aligned"):
+                self._log("lower_until_done", reason="predicates", steps=i + 1)
+                return
+            try:
+                z = self._cur_xquat()[0][2]
+            except Exception:
+                continue
+            if prev_z is not None and prev_z - z < 0.004:
+                self._log("lower_until_done", reason="contact", steps=i + 1)
+                return
+            prev_z = z
+        self._log("lower_until_done", reason="budget", steps=LOWER_MAX_STEPS)
 
     def push(self, obj, contact, toward):
         raise NotImplementedError("push 任务挂起(老板指示),M1 不实现")
 
     def release(self):
         self._ctrl("set_gripper", angle=GRIP_OPEN)
+        time.sleep(1.2)
 
     # ---------- contract: 验证(词表几何检查,oracle 态) ----------
     def verify(self, constraint: dict) -> bool:
