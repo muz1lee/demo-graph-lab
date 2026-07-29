@@ -2,7 +2,8 @@
 
 金标格式(report.exportGold 产物): stages{<idx>: {constraints:[{key,verdict,note}],
 acceptance:[...], missing:[{name,args,note}]}}。
-precision = correct/(correct+wrong);recall = correct/(correct+missing)。unsure 不计入。
+precision = correct/(correct+wrong);recall = correct/(correct+missing)。
+incidental(真但非核心,见 goldset/RUBRIC.md)与 unsure 单列,不进 P/R 分母。
 """
 
 from __future__ import annotations
@@ -11,9 +12,10 @@ from . import util
 
 
 def score(gold: dict) -> dict:
-    per_stage, tot = {}, {"correct": 0, "wrong": 0, "unsure": 0, "missing": 0}
+    per_stage = {}
+    tot = {"correct": 0, "incidental": 0, "wrong": 0, "unsure": 0, "missing": 0}
     for si, g in gold.get("stages", {}).items():
-        c = {"correct": 0, "wrong": 0, "unsure": 0,
+        c = {"correct": 0, "incidental": 0, "wrong": 0, "unsure": 0,
              "missing": len(g.get("missing", []))}
         for field in ("constraints", "acceptance"):
             for it in g.get(field, []):

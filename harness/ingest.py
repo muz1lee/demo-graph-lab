@@ -66,12 +66,18 @@ def grab_frame(video: Path, t_sec: float, out_path: Path, max_width: int = 640) 
 
     cap = cv2.VideoCapture(str(video))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    idx = max(0, round(t_sec * fps))
-    cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-    ok, img = cap.read()
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    idx = max(0, min(round(t_sec * fps), total - 1))
+    ok, img = False, None
+    for j in range(idx, max(-1, idx - 8), -1):  # 末尾编码缺帧时向前回退
+        cap.set(cv2.CAP_PROP_POS_FRAMES, j)
+        ok, img = cap.read()
+        if ok:
+            idx = j
+            break
     cap.release()
     if not ok:
-        raise RuntimeError(f"cannot read frame at {t_sec}s from {video}")
+        raise RuntimeError(f"cannot read frame at {t_sec}s (idx≤{idx}) from {video}")
     h, w = img.shape[:2]
     if w > max_width:
         img = cv2.resize(img, (max_width, int(h * max_width / w)))

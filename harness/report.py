@@ -41,7 +41,7 @@ parsed {{ st.k_valid }}/{{ k }}{% if st.parse_fail %} (parse_fail={{ st.parse_fa
 <td><b>{{ c.name }}</b></td><td><code>{{ c.args_json }}</code></td>
 <td>{{ c.votes }}</td><td>{{ c.confidence }}</td><td>{{ c.evidence_frames }}</td>
 <td><select class="verdict"><option value="">--</option><option>correct</option>
-<option>wrong</option><option>unsure</option></select></td>
+<option>incidental</option><option>wrong</option><option>unsure</option></select></td>
 <td><input type="text" class="note" size="18"></td></tr>{% endfor %}</table>
 <h3>验收条件</h3><table><tr><th>name</th><th>args</th><th>votes</th><th>conf</th>
 <th>金标判定</th><th>备注</th></tr>
@@ -50,7 +50,7 @@ parsed {{ st.k_valid }}/{{ k }}{% if st.parse_fail %} (parse_fail={{ st.parse_fa
 <td><b>{{ c.name }}</b></td><td><code>{{ c.args_json }}</code></td>
 <td>{{ c.votes }}</td><td>{{ c.confidence }}</td>
 <td><select class="verdict"><option value="">--</option><option>correct</option>
-<option>wrong</option><option>unsure</option></select></td>
+<option>incidental</option><option>wrong</option><option>unsure</option></select></td>
 <td><input type="text" class="note" size="18"></td></tr>{% endfor %}</table>
 <h3>Typed holes</h3><table><tr><th>name</th><th>type</th><th>solver_hint</th><th>votes</th></tr>
 {% for h in st.holes %}<tr><td>{{ h.name }}</td><td>{{ h.type }}</td>
