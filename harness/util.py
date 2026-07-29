@@ -39,7 +39,8 @@ def new_run_dir(task: str, kind: str = "harness") -> Path:
 
 
 def latest_run_dir(task: str) -> Path:
-    runs = sorted((HARNESS_ROOT / "runs").glob(f"harness_{task}_*"))
+    # 时间戳以 2 开头,防止 push_T 匹配到 push_T_random 等带后缀的同前缀任务
+    runs = sorted((HARNESS_ROOT / "runs").glob(f"harness_{task}_2*"))
     if not runs:
         raise FileNotFoundError(f"no run dir for task {task}; run `ingest` first")
     return runs[-1]
