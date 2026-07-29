@@ -1,0 +1,337 @@
+{
+  "task": "insert_tubes",
+  "annotator": "claude-bringup-v2",
+  "annotated_at": "2026-07-30",
+  "stages": {
+    "0": {
+      "constraints": [
+        {
+          "key": "region_grasp|{\"obj\": \"tube_left\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0000_75/t0001_12: left gripper closes on the upper (cap-side) portion of the lying tube; the tube then hangs and self-reorients vertical (t0001_12-t0001_50), which is exactly the pinned-physics mechanism the grasp region enables. Violation (mid/low grasp) would prevent gravity reorientation. Note: physical tube grasped here is the UPPER-left tube, which the registry's own distinguishers would call tube_mid (inserted first) - coreference issue, relation itself correct."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"tube_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0001_12/t0001_50: tube hangs from the gripper with its base off the table. Lifting clear of the table is the point of the pick stage; dragging would fail the transport. Scope is naturally at_end (tube is on the table at t0000_00), which the acceptance version encodes."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"tube_left\"}",
+          "verdict": "incidental",
+          "note": "t0000_00 to t0000_75: the arm does descend onto the lying tube from above, so the frames support it, but per the symmetry rule the pick-side approach cone for a rotationally symmetric lying tube is an equivalence-class sample (side pinch would also work); the taught relation is grasp region, not the approach cone."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0001_12/t0001_50: after grasp the tube hangs vertical; needed as the hand-off state for insertion. Scope note: no holds field claimed; only true post-grasp - at t0000_00 the tube lies tilted on the table, so a 'throughout' reading would be contradicted; treated as at_end which frames 28/38 support."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"side\", \"target\": \"tube_left\"}",
+          "verdict": "incidental",
+          "note": "Derived (from stage 2), zero evidence frames; the demo frames here actually show an above-ish approach (t0000_00-t0000_75). By the boss symmetry principle the side-vs-top_down dispute on a symmetric tube pick is a symmetry-free DoF, so both cones fall in the same equivalence class: incidental, not wrong."
+        },
+        {
+          "key": "order|{\"stage_sequence\": \"s0:pick<s1:insertion<s2:pick<s3:insertion<s4:transport<s5:insertion\"}",
+          "verdict": "correct",
+          "note": "Derived (auto-added). The sequence matches the observed video exactly (tube 1 pick t0000-t0001 -> insert by t0004_00, tube 2 t0004_50-t0008_00, tube 3 t0008_50-t0012_50) and encodes the instruction's 'one by one': each pick must precede its insertion and insertions are serialized. Core dependency structure."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "clearance|{\"obj_a\": \"tube_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0001_50 (frame 38): tube base visibly off the table, hanging from gripper. at_end scope matches frames."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"tube_left\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0001_12/t0001_50: grip persists on the upper body at stage end; required for the later insertion (gripper must stay above the rack when the tube seats)."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0001_50: tube hangs vertical under gravity at stage end; at_end scope correct."
+        }
+      ],
+      "missing": []
+    },
+    "1": {
+      "constraints": [
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0002_75 (frame ~69): tube vertical, cap up, above the rack; stays vertical through seating (t0003_38, t0004_00). Verticality is what lets the tube enter the vertical bore. at_end claimed - conservative but not contradicted (it actually holds for the whole approach)."
+        },
+        {
+          "key": "axis_parallel|{\"axis_a\": \"tube_left.long_axis\", \"axis_b\": \"rack.hole_axis\"}",
+          "verdict": "correct",
+          "note": "t0003_38/t0004_00: tube slides into the vertical bore; tube long axis parallel to hole axis at insertion is the canonical core constraint - misalignment jams the peg-in-hole."
+        },
+        {
+          "key": "inside|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0004_00 (frame 100): tube seated in the center hole, only cap and neck above the rack plane. This is the stage goal; at_end scope correct."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"tube_left.center\", \"obj_b\": \"rack.hole_center\"}",
+          "verdict": "correct",
+          "note": "t0002_75 -> t0003_38: tube axis brought coaxial with the hole before descent; without lateral center alignment the tube hits the rack face. Args semantics slightly loose (a seated tube's centroid is below the hole plane; intent is coaxial alignment) but within vocab use."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"rack\"}",
+          "verdict": "correct",
+          "note": "Derived, but directly supported: t0002_75 shows the tube poised vertically above the rack and t0003_38 shows a straight vertical descent into the bore. Insertion-side top_down toward a vertical hole is core (a side approach cannot enter the bore), unlike pick-side cones."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0004_00: tube seated in rack center hole."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0004_00: seated tube stands vertical in the bore."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"tube_left.center\", \"obj_b\": \"rack.hole_center\"}",
+          "verdict": "correct",
+          "note": "t0004_00: tube coaxial with the hole it occupies; necessary consequence of successful seating."
+        }
+      ],
+      "missing": [
+        {
+          "name": "region_grasp",
+          "args": "{\"obj\": \"tube_left\", \"region\": \"upper_body\"}",
+          "note": "t0002_75-t0003_38: the gripper holds the tube at its upper body/cap so the lower body can enter the bore while the gripper stays above the rack plane. A mid/low grasp would make full seating impossible (gripper collides with rack). Stage 3 lists this for the second tube; it is equally necessary here."
+        },
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"gripper_holds(tube_left)\"}",
+          "note": "Grip must be maintained from stage start until the tube is seated (t0001_50 through t0003_38); dropping mid-transit or mid-descent fails the insertion. Stage 4 encodes this for the third tube but it is absent here."
+        }
+      ]
+    },
+    "2": {
+      "constraints": [
+        {
+          "key": "clearance|{\"obj_a\": \"tube_right\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0005_15/t0005_80 (frames ~129-145): tube hangs from the right gripper clearly off the table. Lift clearance is the pick-stage goal."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"tube_right\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0004_50/t0004_83 (frames ~112-121): right gripper closes on the cap-side upper end of the lying tube; t0004_83 -> t0005_15 shows the hanging tube swinging to vertical, confirming the above-CoM grasp. Core for gravity self-reorientation."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_right.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0005_15/t0005_80: tube hangs near-vertical after lift. Scope note: only true post-grasp (tube lies tilted at t0004_50 and still hangs tilted at t0004_83 mid-swing); no holds field claimed, acceptance's at_end matches frames 137/145."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"side\", \"target\": \"tube_right\"}",
+          "verdict": "incidental",
+          "note": "t0004_50: the right gripper does come at the lying tube from a lateral-ish/oblique direction, so frames weakly support it (3/5, conf 0.37), but the pick-side approach cone on a symmetric tube is a symmetry-free DoF per the rubric - equivalence-class sample, not a taught constraint."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"tube_right\"}",
+          "verdict": "incidental",
+          "note": "Derived (from stage 0), no evidence frames, and the demo here actually approaches more from the side (t0004_50). Same symmetry ruling as its side twin: the side-vs-top_down dispute on a symmetric tube pick is incidental either way."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "clearance|{\"obj_a\": \"tube_right\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0005_47/t0005_80: tube fully airborne at stage end."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_right.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0005_80: hanging tube settled to vertical at stage end; at_end scope correct."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"tube_right\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0005_15-t0005_80: upper-body grip retained at stage end, enabling the coming insertion."
+        }
+      ],
+      "missing": []
+    },
+    "3": {
+      "constraints": [
+        {
+          "key": "inside|{\"obj_a\": \"tube_right\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0007_45/t0008_00 (frames ~186-200): second orange cap seated in the hole right of center; stage goal achieved."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_right.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0006_90 (frame ~172): tube vertical, cap up, during final approach; remains vertical through seating (t0007_45, t0008_00). Needed to enter the vertical bore."
+        },
+        {
+          "key": "above|{\"obj_a\": \"tube_right\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0006_90: tube positioned above the rack's right hole before descent. Being above the target hole is the necessary waypoint of a top-down insertion. At frame 159 (t0006_35) it is still lateral to the rack, but no throughout scope is claimed, so mid/late-stage evidence suffices."
+        },
+        {
+          "key": "axis_parallel|{\"axis_a\": \"tube_right.long_axis\", \"axis_b\": \"rack.hole_axis\"}",
+          "verdict": "correct",
+          "note": "t0006_90 -> t0008_00: tube axis parallel to the vertical bore at insertion; core peg-in-hole constraint, at_end scope matches."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0006_90 -> t0007_45: straight vertical descent into the hole. Insertion-side top_down toward a vertical bore is core (rubric symmetry rule exempts only the azimuth, not the elevation class)."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"tube_right\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0006_35/t0006_90 (frames ~159-172): grip remains at the upper body below the cap during carry-in and descent, letting the gripper stay above the rack plane while the tube seats (t0007_45)."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"tube_right.center\", \"obj_b\": \"rack.hole_center\"}",
+          "verdict": "correct",
+          "note": "Derived, but supported: successful seating at t0007_45/t0008_00 entails coaxial alignment over the chosen empty hole before descent; without it the tube strikes the rack face. Mirrors the stage-1 demo-voted item."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"tube_right\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0008_00: tube seated, cap at rack-top height matching the first tube."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_right.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0008_00: seated tube vertical in bore."
+        }
+      ],
+      "missing": [
+        {
+          "name": "clearance",
+          "args": "{\"obj_a\": \"tube_right\", \"obj_b\": \"tube_mid\"}",
+          "note": "The first tube already occupies the adjacent center hole (t0006_35 onward); the descending second tube and the gripper must clear its protruding cap (t0006_90-t0007_45 pass within a hole pitch). Rubric explicitly lists clearance with already-placed objects as a canonical miss. (Registry id note: the first-inserted tube is tube_mid per objects.json, though the graph called it tube_left in stages 0-1.)"
+        },
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"gripper_holds(tube_right)\"}",
+          "note": "Grip must persist from stage start through seating (t0005_80 to t0007_45); a drop en route fails the insertion. Encoded for tube 3 in stage 4 but absent here."
+        }
+      ]
+    },
+    "4": {
+      "constraints": [
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "wrong",
+          "note": "Scope contradicted: claims holds=throughout with evidence frames 212-262, but at t0008_50 (frame ~212, its own first evidence frame) the freshly grasped tube hangs visibly tilted (~30-40 deg, still reorienting), and at t0010_00 (frame ~250) it is again tilted mid-swing during transport. The underlying constraint is real at stage end (settled vertical by t0011_00), but 'throughout' is falsified by the cited frames, so per the v0.2 scope rule this is wrong; correct form would be at_end (as the acceptance item has it)."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"tube_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0008_50 through t0010_50: tube airborne for the whole stage (hanging from gripper at 212, well clear by 225-262). throughout scope supported; dragging on the table would fail the carry."
+        },
+        {
+          "key": "carry|{\"relation\": \"gripper_holds(tube_left)\"}",
+          "verdict": "correct",
+          "note": "All five frames t0008_50-t0010_50 show the tube held by the left gripper; maintaining the grasp throughout transport is core (a drop fails the stage). Arg style 'gripper_holds(...)' is loose but within vocab intent."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"tube_left\", \"region\": \"upper_body\"}",
+          "verdict": "correct",
+          "note": "t0009_00 (frame ~225): orange cap visible immediately below the gripper - grip is on the upper body; unchanged through 238. Above-CoM grip is what keeps the tube hanging vertical-ish for the coming insertion; throughout scope fine since a grasp cannot migrate."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0010_00/t0010_50 (frames ~250-262): tube approaches the rack (which now holds two seated tubes) without contact. Real safety constraint - clipping the rack or seated caps during approach would knock them out. Trivially satisfied early-stage, so throughout is not contradicted."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "at_end (frame 262): tube occluded by the forearm at t0010_50 itself, but at t0011_00 (frame ~275, 0.5s later) the tube hangs settled vertical above the rack - at_end verticality is the plausible reading, unlike the throughout claim in the constraints list."
+        },
+        {
+          "key": "carry|{\"relation\": \"gripper_holds(tube_left)\"}",
+          "verdict": "correct",
+          "note": "Grip continuous into stage 5 (t0011_00 shows the same tube still held above the rack)."
+        },
+        {
+          "key": "above|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "unsure",
+          "note": "At t0010_50 (frame 262) the tube is occluded by the left forearm and the gripper appears still left of the rack footprint, not verifiably over it; it is confirmed above the target hole only at t0011_00 (stage 5). Cannot confirm the at_end claim from this stage's frames - occlusion, so unsure rather than wrong."
+        }
+      ],
+      "missing": []
+    },
+    "5": {
+      "constraints": [
+        {
+          "key": "inside|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0012_00/t0012_50 (frames ~300-312): third tube seated in the left hole; all three caps at rack-top height. Stage goal, at_end scope correct."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "throughout claimed over frames 262-300: t0011_00 hover, t0011_50 descent, t0012_00 seated all show the tube vertical; frame 262 is occluded but nothing contradicts. Swing has settled by insertion, so throughout is plausible here (unlike stage 4)."
+        },
+        {
+          "key": "axis_parallel|{\"axis_a\": \"tube_left.long_axis\", \"axis_b\": \"rack.hole_axis\"}",
+          "verdict": "correct",
+          "note": "t0011_50/t0012_00: tube axis parallel to the vertical bore through the descent; core insertion constraint."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"tube_left.center\", \"obj_b\": \"rack.hole_center\"}",
+          "verdict": "correct",
+          "note": "t0011_00: tube positioned coaxially over the empty left hole before descent; t0011_50-t0012_00 confirm clean entry. Core - lateral offset means striking the rack face or a neighboring cap."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0011_00 -> t0012_00: vertical descent from hover into the bore; throughout scope matches the whole visible approach. Insertion-side top_down toward a vertical hole is core per the symmetry rule."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"gripper\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0012_50 (frame 312): both arms fully retracted to home, gripper clear of the rack with all three tubes still seated. Post-release retract clearance is real - clipping the rack or caps on the way out would undo the task. Note 'gripper' is not an objects.json registry id (registry gap)."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"tube_left\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0012_00/t0012_50: tube seated and stays seated after release."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"tube_left.long_axis\"}",
+          "verdict": "correct",
+          "note": "t0012_50: seated tube vertical in the bore at stage end."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"gripper\", \"obj_b\": \"rack\"}",
+          "verdict": "correct",
+          "note": "t0012_50: arms at home pose, well clear of rack; rack contents undisturbed."
+        }
+      ],
+      "missing": [
+        {
+          "name": "clearance",
+          "args": "{\"obj_a\": \"tube_left\", \"obj_b\": \"tube_mid\"}",
+          "note": "The target left hole is directly adjacent to the first-inserted tube (center, tube_mid per registry) whose cap protrudes above the rack (t0011_00-t0011_50); the descending tube and gripper pass within a hole pitch of it. Contact would eject or tilt the seated tube. Canonical placed-object clearance miss."
+        },
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"gripper_holds(tube_left)\"}",
+          "note": "Grip must persist from stage start until the tube is seated (t0010_50 through t0012_00, release only after seating); a drop above the rack fails the insertion and can scatter seated tubes. Holds until release, not to stage end."
+        }
+      ]
+    }
+  }
+}
