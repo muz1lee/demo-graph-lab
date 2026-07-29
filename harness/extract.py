@@ -6,11 +6,23 @@ import json
 import math
 from pathlib import Path
 
-from . import util
+from . import util, vocab
+
+
+def _norm_args(name: str, args) -> dict:
+    """模型偶尔把 args 出成列表;按词表槽位名归一成 dict,保证 canon/校验一致。"""
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, list):
+        slots = vocab.CONSTRAINT_VOCAB.get(name, {}).get("args", [])
+        return {slots[i] if i < len(slots) else f"arg{i}": v
+                for i, v in enumerate(args)}
+    return {"arg0": args} if args is not None else {}
 
 
 def _canon(item: dict) -> tuple:
-    return (item.get("name"), json.dumps(item.get("args", {}), sort_keys=True, ensure_ascii=False))
+    item["args"] = _norm_args(item.get("name"), item.get("args"))
+    return (item.get("name"), json.dumps(item["args"], sort_keys=True, ensure_ascii=False))
 
 
 def merge_samples(samples: list[dict], key_fields=("constraints", "acceptance")) -> dict:

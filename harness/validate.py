@@ -36,13 +36,16 @@ def check_item(item: dict, stage_idx: int, field: str) -> list[str]:
     if name not in vocab.CONSTRAINT_VOCAB:
         errs.append(f"s{stage_idx}.{field}: 未知约束名 {name!r}")
     args = item.get("args", {}) or {}
+    if not isinstance(args, dict):
+        args = {f"arg{i}": v for i, v in enumerate(args)}
     if name == "region_grasp" and args.get("region") not in vocab.GRASP_REGIONS:
         errs.append(f"s{stage_idx}.{field}: 非法 region {args.get('region')!r}")
     if name == "approach_direction" and args.get("cone") not in vocab.APPROACH_CONES:
         errs.append(f"s{stage_idx}.{field}: 非法 cone {args.get('cone')!r}")
     if item.get("provenance") not in vocab.PROVENANCE_ALLOWED:
         errs.append(f"s{stage_idx}.{field}: 非法 provenance {item.get('provenance')!r}")
-    for key, v in args.items():
+    pairs = args.items() if isinstance(args, dict) else enumerate(args)
+    for key, v in pairs:
         if _is_metric_literal(v):
             errs.append(f"s{stage_idx}.{field}: 度量字面量 {name}.{key}={v!r}(必须留洞)")
     return errs

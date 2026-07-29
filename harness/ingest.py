@@ -22,14 +22,16 @@ def find_trace(task: str) -> Path | None:
     base = util.data_root() / "outputs/gemini35_eef_trace_v2_refined" / task
     if not base.exists():
         return None
-    for p in sorted(base.rglob("*.json")):
+    exact = sorted(base.rglob("trace.json"))
+    for p in exact or sorted(base.rglob("*.json")):
         try:
             d = json.loads(p.read_text())
         except Exception:
             continue
-        if isinstance(d, dict) and isinstance(d.get("segments"), list) and d["segments"]:
-            if "start_sec" in d["segments"][0]:
-                return p
+        if (isinstance(d, dict) and d.get("trace_id")
+                and isinstance(d.get("segments"), list) and d["segments"]
+                and "start_sec" in d["segments"][0]):
+            return p
     return None
 
 

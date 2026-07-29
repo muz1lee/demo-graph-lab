@@ -14,9 +14,9 @@ from . import util
 
 def from_trace(trace: dict) -> list[dict]:
     stages = []
-    for seg in trace.get("segments", []):
+    for i, seg in enumerate(trace.get("segments", [])):
         stages.append({
-            "index": seg.get("index"),
+            "index": seg.get("index", i) if seg.get("index") is not None else i,
             "name": seg.get("motion_type") or seg.get("label", f"seg{seg.get('index')}"),
             "label": seg.get("label", ""),
             "start_sec": float(seg["start_sec"]),
