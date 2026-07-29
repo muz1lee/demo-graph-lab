@@ -27,7 +27,8 @@ def main(argv=None):
             p.add_argument("--video")
             p.add_argument("--trace", help="robot-subtask-seg refined trace 目录(只读)")
         if name == "extract":
-            p.add_argument("--model", default="claude-opus-4-8")
+            p.add_argument("--model", default="anthropic/claude-opus-4.8",
+                           help="OpenRouter slug; key/base_url/proxy 读 .env")
             p.add_argument("--k", type=int, default=5, help="自一致性采样数")
         if name == "metrics":
             p.add_argument("--gold", required=True)

@@ -142,7 +142,7 @@ GraspNet 出候选(每个候选=位置/接近方向/闭合轴,数值)
 
 ### 4.8 VLM 使用纪律
 
-- 编译期 VLM = **Claude Opus**（`claude-opus-4-8`，模型可换，接口留开关）；仅两个合法工位：关键帧→粗标签/结构化三元组（低温、JSON schema 约束输出、逐条 evidence 帧）、三层漏斗后的 tie-break。
+- 编译期 VLM = **Claude Opus**（经 OpenRouter 路由，slug `anthropic/claude-opus-4.8`，OpenAI 兼容客户端；key/base_url/代理均读 `.env`，模型可换）；仅两个合法工位：关键帧→粗标签/结构化三元组（低温、JSON schema 约束输出、逐条 evidence 帧）、三层漏斗后的 tie-break。
 - 自一致性：同输入采样 k=5，按多数票入图，分歧项降 confidence 并标记人审。
 - 全部调用缓存（帧 hash+prompt hash）、成本入账。执行期 runtime **无 LLM**。
 
@@ -211,7 +211,7 @@ harness/
 - **5090 服务器 = 共同实验机**：`knowin-sim@192.168.77.113`（key 登录已配好）。RTX 5090 32GB、磁盘 1.7T 空、py3.12；`/home/knowin-sim/knowin_sim_v2`（knowin-world + data，Phase 1 用，**不迁移**）、`knowin_sim_v4verify` 备用。
 - **代码同步拓扑（2026-07-29 定稿）**：主仓 = 内网 Gitea `http://192.168.20.77/muz1lee/demo-graph-lab`（**私有**）。mac 编辑/commit → `git push gitea main` → 5090 拉取（mac agent-forward 驱动 `git pull`，rsync 兜底）。GitHub 远端保留为历史备份，不再作为同步枢纽。
 - **1022/学生区**：保持只读 upstream；素材经 source manifest 登记后拉到 5090 `data/upstream/`。
-- 安全提示：5090 密码过弱且我方已配 key，建议尽快禁用密码登录或改强密码；Anthropic API key 需放服务器 `.env`（**由老板自己放或明确授权我从本地拷**，本提案不擅自迁移密钥）。
+- 安全提示：5090 密码过弱且我方已配 key，建议尽快禁用密码登录或改强密码；VLM 走 OpenRouter（key 已在服务器 `.env`，600 权限）；若开 Clash Verge 的 Allow LAN 供 5090 走代理，注意该代理会暴露给整个办公网（无鉴权），知情取舍。
 
 ## 8. TODO
 
@@ -223,7 +223,7 @@ harness/
 
 **本周（老板）**
 5. 审本提案；定词表 v0 终版；给 4 任务各写一句「demo 比常识多教了什么」终稿（§5.1 表为草稿）。
-6. ANTHROPIC_API_KEY 放 5090（或授权迁移）。（同步已切 Gitea 私有仓，无需 GitHub deploy key。）
+6. ~~API key~~ 已解决：OPENROUTER_API_KEY 已落 5090 `.env`（600 权限，.gitignore 覆盖）。遗留一项：5090 出口在国内，OpenRouter 上的 Anthropic 模型区域受限，需给服务器一条代理路（Clash Verge 开 Allow LAN 或等价方案，见 §7 安全提示）。
 
 **两周内**
 7. 金标 4/4 标注完成（report.html 内完成，预计每任务 ≤1h）。
