@@ -209,7 +209,7 @@ harness/
 ## 7. Infra 与工作方式（2026-07-29 起）
 
 - **5090 服务器 = 共同实验机**：`knowin-sim@192.168.77.113`（key 登录已配好）。RTX 5090 32GB、磁盘 1.7T 空、py3.12；`/home/knowin-sim/knowin_sim_v2`（knowin-world + data，Phase 1 用，**不迁移**）、`knowin_sim_v4verify` 备用。
-- **代码同步拓扑**：mac（编辑/commit/push）↔ GitHub `muz1lee/demo-graph-lab`（hub）↔ 5090（pull/跑实验）。5090 的 GitHub 拉取凭证待配（deploy key，见 TODO）；配好前由 mac rsync 兜底。
+- **代码同步拓扑（2026-07-29 定稿）**：主仓 = 内网 Gitea `http://192.168.20.77/muz1lee/demo-graph-lab`（**私有**）。mac 编辑/commit → `git push gitea main` → 5090 拉取（mac agent-forward 驱动 `git pull`，rsync 兜底）。GitHub 远端保留为历史备份，不再作为同步枢纽。
 - **1022/学生区**：保持只读 upstream；素材经 source manifest 登记后拉到 5090 `data/upstream/`。
 - 安全提示：5090 密码过弱且我方已配 key，建议尽快禁用密码登录或改强密码；Anthropic API key 需放服务器 `.env`（**由老板自己放或明确授权我从本地拷**，本提案不擅自迁移密钥）。
 
@@ -223,7 +223,7 @@ harness/
 
 **本周（老板）**
 5. 审本提案；定词表 v0 终版；给 4 任务各写一句「demo 比常识多教了什么」终稿（§5.1 表为草稿）。
-6. ANTHROPIC_API_KEY 放 5090（或授权迁移）；GitHub deploy key 批准（我生成，你在仓库设置里点添加）。
+6. ANTHROPIC_API_KEY 放 5090（或授权迁移）。（同步已切 Gitea 私有仓，无需 GitHub deploy key。）
 
 **两周内**
 7. 金标 4/4 标注完成（report.html 内完成，预计每任务 ≤1h）。
