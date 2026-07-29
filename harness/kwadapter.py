@@ -73,11 +73,24 @@ class KWRuntime:
         self.calls.append({"t": round(time.time(), 2), "op": op, **kw})
 
     # ---------- 实体解析(oracle) ----------
-    def _entities(self):
-        return self.eval.state().get("entities", {})
+    def _entities(self, max_age_s: float = 0.4):
+        """/state 每次都会重算谓词,短 TTL 缓存避免风暴。"""
+        now = time.time()
+        if not hasattr(self, "_ents_cache") or now - self._ents_cache[0] > max_age_s:
+            self._ents_cache = (now, self.eval.state().get("entities", {}))
+        return self._ents_cache[1]
+
+    # 语义同义词组:图里的通用名 → 场景实体的命名习惯
+    SYNONYMS = [
+        ("rack", "holder", "slot", "stand", "socket", "bank", "piggy"),
+        ("table", "desk", "surface", "workspace"),
+        ("tube", "test_tube", "vial"),
+        ("bowl", "dish"), ("coin", "disc"), ("pad", "marker", "target_zone"),
+        ("block", "cube", "tblock", "t_block"),
+    ]
 
     def _resolve(self, name: str) -> str:
-        """registry id/物体名 → /state 实体键。启发式:别名/去后缀/数字/位置排序。"""
+        """registry id/物体名 → /state 实体键。启发式:精确/别名/子串/同义词/位置序。"""
         ents = self._entities()
         if name in ents:
             return name
@@ -91,6 +104,11 @@ class KWRuntime:
         for e in ents:  # 子串
             if base in e.lower() or e.lower().replace("_prop", "") in base:
                 return e
+        for group in self.SYNONYMS:  # 同义词组:base 命中组内任一词,则找组内任一词命中的实体
+            if any(w in base for w in group):
+                for e in ents:
+                    if any(w in e.lower() for w in group):
+                        return e
         # tube_left/mid/right 等按 y 坐标排序映射
         token = base.rsplit("_", 1)[-1]
         if token in ("left", "mid", "middle", "right"):
