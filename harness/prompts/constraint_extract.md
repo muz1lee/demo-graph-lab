@@ -34,6 +34,21 @@ HARD RULES:
   above its center of mass), record it as constraints (e.g. region_grasp=upper_body +
   axis_vertical as acceptance), not as a trajectory.
 
+OBJECT REFERENCES: an OBJECT REGISTRY is provided below. Every object reference inside
+`args` MUST use a registry id (optionally with a suffix like `<id>.long_axis`,
+`<id>.center`). Never invent new object names; never use trace aliases directly.
+
+APPROACH CONE SEMANTICS: `approach_direction.cone` is judged by the CONTACT direction of
+the end-effector relative to gravity at the moment of contact — top_down = descending onto
+the object/target from above; side = horizontal contact — NOT by the wrist's overhead
+posture. (A pusher contacting an object's side face is `side` even if the wrist hangs
+from above.)
+
+TEMPORAL SCOPE: every constraint and acceptance item must carry
+`"holds": "throughout" | "at_end"` — throughout = must stay true across the whole stage
+window; at_end = achieved by the end of the stage. Judge from the frames: do NOT claim
+`throughout` for a state that only appears near the boundary.
+
 ARG SIGNATURES (use EXACTLY these key names inside `args`; never put arguments at the
 top level of a constraint, never as a bare list):
 axis_parallel(axis_a, axis_b) · axis_vertical(axis) · center_align(obj_a, obj_b) ·
@@ -45,5 +60,7 @@ Example constraint (format reference only):
  "confidence": 0.85, "evidence_frames": [3, 5]}
 
 Output JSON schema:
-{"stage": str, "constraints": [...], "acceptance": [...], "holes": [...],
+{"stage": str,
+ "stage_objects": {"manipulated": "<registry id or null>", "target": "<registry id or null>"},
+ "constraints": [...], "acceptance": [...], "holes": [...],
  "notes": str (optional, <=50 words)}

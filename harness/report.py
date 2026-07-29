@@ -26,6 +26,9 @@ frames: {{ n_frames }} | 总成本: ${{ cost }} | 生成时间: {{ ts }}</p>
 {% if validation.passed %}<div class="ok">✅ 校验通过({{ validation.items_checked }} 项)</div>
 {% else %}<div class="viol">❌ 校验违例 {{ validation.violations|length }} 条:
 <ul>{% for v in validation.violations %}<li>{{ v }}</li>{% endfor %}</ul></div>{% endif %}
+{% if validation.warnings %}<div style="background:#fff3e0;padding:8px;border-radius:6px">
+⚠️ 告警 {{ validation.warnings|length }} 条(时序错位/装配缺口,标注时重点看):
+<ul>{% for w in validation.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
 
 {% for st in stages %}
 <div class="stage"><h2>Stage {{ st.index }}: {{ st.name }}</h2>

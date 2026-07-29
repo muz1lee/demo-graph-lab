@@ -54,18 +54,31 @@ def check_item(item: dict, stage_idx: int, field: str) -> list[str]:
 def run(task: str) -> dict:
     run_dir = util.latest_run_dir(task)
     graph = util.read_json(run_dir / "graph.json")
-    errors, n_items = [], 0
+    fps = util.read_json(run_dir / "meta.json")["video"]["fps"]
+    errors, warnings, n_items = [], [], 0
     for st in graph["stages"]:
+        idx = st["index"]
+        lo, hi = st["start_sec"] - 1.0, st["end_sec"] + 1.0
         for field in ("constraints", "acceptance"):
             for it in st.get(field, []):
                 n_items += 1
-                errors.extend(check_item(it, st["index"], field))
+                errors.extend(check_item(it, idx, field))
+                if it.get("holds") not in (None, *vocab.HOLDS_ALLOWED):
+                    errors.append(f"s{idx}.{field}: 非法 holds {it.get('holds')!r}")
+                ev = it.get("evidence_frames") or []
+                if (it.get("provenance") != "derived" and ev
+                        and all(not (lo <= f / fps <= hi) for f in ev)):
+                    warnings.append(f"s{idx}.{field}: 时序错位? {it['name']} "
+                                    f"证据帧 {ev} 全在阶段窗口外")
         for h in st.get("holes", []):
             if h.get("type") not in vocab.HOLE_TYPES:
-                errors.append(f"s{st['index']}.holes: 非法 hole 类型 {h.get('type')!r}")
+                errors.append(f"s{idx}.holes: 非法 hole 类型 {h.get('type')!r}")
+        if (sum(1 for h in st.get("holes", []) if h.get("type") == "axis_3d") >= 2
+                and not any(c["name"] == "axis_parallel" for c in st.get("constraints", []))):
+            warnings.append(f"s{idx}: 装配缺口——axis_3d 洞≥2 但无 axis_parallel 约束")
     result = {"task": task, "items_checked": n_items,
-              "violations": errors, "passed": not errors}
+              "violations": errors, "warnings": warnings, "passed": not errors}
     util.write_json(run_dir / "validation.json", result)
-    print(f"[validate] {task}: {n_items} items, {len(errors)} violations "
-          f"-> {'PASS' if result['passed'] else 'FAIL'}")
+    print(f"[validate] {task}: {n_items} items, {len(errors)} violations, "
+          f"{len(warnings)} warnings -> {'PASS' if result['passed'] else 'FAIL'}")
     return result

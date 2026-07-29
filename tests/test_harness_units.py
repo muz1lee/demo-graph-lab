@@ -64,6 +64,25 @@ def test_stages_from_trace():
     assert st[1]["role"] == "cleanup"
 
 
+def test_enrich_propagation_and_order():
+    from harness.enrich import add_order, propagate
+    mk = lambda i, manip, cons: {"index": i, "name": "insertion", "role": "core",
+                                 "stage_objects": {"manipulated": manip, "target": "rack"},
+                                 "constraints": list(cons), "acceptance": []}
+    inside = lambda o: {"name": "inside", "args": {"obj_a": o, "obj_b": "rack.hole"},
+                        "provenance": "demo_video", "confidence": 0.8}
+    graph = {"stages": [mk(1, "tube_a", [inside("tube_a")]),
+                        mk(3, "tube_b", [inside("tube_b")]),
+                        mk(5, "tube_c", [])]}
+    n = propagate(graph)
+    assert n == 1
+    added = graph["stages"][2]["constraints"][0]
+    assert added["args"]["obj_a"] == "tube_c" and added["provenance"] == "derived"
+    assert add_order(graph)
+    assert any(c["name"] == "order" for c in graph["stages"][0]["constraints"])
+    assert propagate(graph) == 0        # derived 不作为来源,不链式扩散
+
+
 def test_compile_static_check_rules():
     from harness.compilepolicy import static_check
     good = ("def stage_0(rt):\n    p = rt.solve('grasp_pose')\n    rt.grasp_at(p)\n"

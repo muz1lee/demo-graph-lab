@@ -20,11 +20,11 @@ from . import util
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="harness", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("ingest", "stages", "keyframes", "extract", "validate",
-                 "report", "metrics", "all", "compile"):
+    for name in ("ingest", "stages", "keyframes", "objects", "extract", "enrich",
+                 "validate", "report", "metrics", "all", "compile"):
         p = sub.add_parser(name)
         p.add_argument("--task", required=True)
-        if name == "compile":
+        if name in ("compile", "objects"):
             p.add_argument("--model", default=None)
         if name in ("ingest", "all"):
             p.add_argument("--video")
@@ -43,8 +43,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     util.load_env()
 
-    from . import extract, ingest, keyframes, metrics, report, stages, validate
-    if args.cmd == "ingest":
+    from . import enrich, extract, ingest, keyframes, metrics, registry, report, stages, validate
+    if args.cmd == "objects":
+        registry.run(args.task, args.model)
+    elif args.cmd == "enrich":
+        enrich.run(args.task)
+    elif args.cmd == "ingest":
         ingest.run(args.task, args.video, args.trace, args.n_frames)
     elif args.cmd == "stages":
         stages.run(args.task, args.model)
@@ -65,7 +69,9 @@ def main(argv=None):
         ingest.run(args.task, args.video, args.trace, args.n_frames)
         stages.run(args.task, args.model)
         keyframes.run(args.task, args.per_stage)
+        registry.run(args.task, args.model)
         extract.run(args.task, args.k, args.model, args.max_stages)
+        enrich.run(args.task)
         validate.run(args.task)
         report.run(args.task)
     return 0

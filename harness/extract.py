@@ -93,11 +93,15 @@ def run(task: str, k: int = 5, model: str | None = None,
     if (run_dir / "trace.json").exists():
         instruction = util.read_json(run_dir / "trace.json").get("instruction", instruction)
     prompt = (util.HARNESS_ROOT / "prompts/constraint_extract.md").read_text().split("---", 1)[1]
+    if (run_dir / "objects.json").exists():
+        objects = util.read_json(run_dir / "objects.json")
+        prompt += ("\n\n## OBJECT REGISTRY (use EXACTLY these ids for object references)\n"
+                   + json.dumps(objects, ensure_ascii=False))
 
-    graph = {"schema": "harness.constraint_graph.v0", "task": task,
+    graph = {"schema": "harness.constraint_graph.v0.2", "task": task,
              "instruction": instruction, "model": model, "k": k, "stages": []}
-    core = [s for s in stages if s.get("role", "core") == "core"]
-    for st in core[:max_stages] if max_stages else core:
+    todo = stages[:max_stages] if max_stages else stages   # v0.2: cleanup 段也提取
+    for st in todo:
         frames = keyframes.get(str(st["index"]), [])
         msgs = _stage_messages(prompt, instruction, st, frames, run_dir)
         samples, parse_fail = [], 0
@@ -110,8 +114,14 @@ def run(task: str, k: int = 5, model: str | None = None,
                 parse_fail += 1
         util.write_json(run_dir / "samples" / f"stage{st['index']:02d}.json", samples)
         merged = merge_samples(samples) if samples else {"constraints": [], "acceptance": [], "holes": []}
+        so_votes = [json.dumps(s.get("stage_objects"), sort_keys=True)
+                    for s in samples if s.get("stage_objects")]
+        stage_objects = (json.loads(max(set(so_votes), key=so_votes.count))
+                         if so_votes else None)
         graph["stages"].append({**{k_: st[k_] for k_ in
                                    ("index", "name", "label", "start_sec", "end_sec")},
+                                "role": st.get("role", "core"),
+                                "stage_objects": stage_objects,
                                 **merged, "k_valid": len(samples), "parse_fail": parse_fail})
         print(f"[extract] stage {st['index']} {st['name']}: "
               f"{len(merged['constraints'])} constraints, {len(merged['holes'])} holes "

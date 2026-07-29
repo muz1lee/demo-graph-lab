@@ -35,4 +35,5 @@ CONSTRAINT_REQUIRED_FIELDS = [
     "name", "args", "stage", "holes", "provenance",
     "evidence_frames", "confidence",
 ]
-PROVENANCE_ALLOWED = ["demo_video", "task_instruction", "generic_prior"]
+PROVENANCE_ALLOWED = ["demo_video", "task_instruction", "generic_prior", "derived"]
+HOLDS_ALLOWED = ["throughout", "at_end"]
