@@ -99,8 +99,79 @@ class KWRuntime:
         ("block", "cube", "tblock", "t_block"),
     ]
 
+    # 空间词 → y 序偏好(机器人系 +y 为左)。用于同类多实体的稳定双射分配。
+    _SPATIAL = {"left": +1.0, "leftmost": +1.5, "right": -1.0, "rightmost": -1.5,
+                "mid": 0.0, "middle": 0.0, "center": 0.0, "centre": 0.0,
+                "top": 0.0, "upper": 0.0, "bottom": 0.0, "lower": 0.0}
+
+    def _family(self, base: str, ents: dict) -> list:
+        """与 base 同类的实体键(按同义词组或前缀词命中),按 y 排序。"""
+        cat = None
+        for group in self.SYNONYMS:
+            if any(w in base for w in group):
+                cat = group
+                break
+        if cat:
+            fam = [e for e in ents if any(w in e.lower() for w in cat)]
+        else:
+            head = base.split("_")[0]
+            fam = [e for e in ents if head and head in e.lower()]
+        return sorted(fam, key=lambda e: ents[e]["pos"][1])   # 左(+y)→右(-y)? 见下
+
+    def _graph_object_names(self) -> list:
+        """从图的 stage_objects 收集所有被引用的物体名(去重,保序)。"""
+        seen, out = set(), []
+        for st in self.graph.get("stages", []):
+            so = st.get("stage_objects") or {}
+            for key in ("manipulated", "target"):
+                v = so.get(key)
+                if v and v not in seen:
+                    seen.add(v)
+                    out.append(v)
+        return out
+
+    def _spatial_key(self, base: str) -> float:
+        """名字里空间词的左右得分(越大越靠左/+y)。无空间词返回 0。"""
+        toks = [t for t in base.replace("-", "_").split("_") if t in self._SPATIAL]
+        return sum(self._SPATIAL[t] for t in toks)
+
+    def _family_bijection(self, base: str, ents: dict):
+        """把图里与 base 同类的所有物体名,一一映到同类实体上(稳定双射)。
+        旧逻辑在同义词分支贪婪返回第一个实体,导致 bowl_left/mid_right/top_right 全撞
+        bowl0;这里改为:取同类图名按空间词得分(再按名字)排序,同类实体按 y 排序,
+        逐位对齐,保证每个图名拿到不同实体。结果缓存,避免每次重算。"""
+        cat_key = None
+        for group in self.SYNONYMS:
+            if any(w in base for w in group):
+                cat_key = group
+                break
+        head = base.split("_")[0]
+        cache = getattr(self, "_bij_cache", None)
+        if cache is None:
+            cache = self._bij_cache = {}
+        ckey = cat_key or head
+        if ckey in cache:
+            return cache[ckey]
+        # 同类图名
+        def _same_cat(nm):
+            nb = nm.split(".")[0].lower()
+            if cat_key:
+                return any(w in nb for w in cat_key)
+            return head and head in nb
+        names = [n for n in self._graph_object_names() if _same_cat(n)]
+        fam = self._family(base, ents)   # 已按 y 排序(左+y→右-y? 见 _family)
+        fam_l2r = sorted(fam, key=lambda e: -ents[e]["pos"][1])   # 左(+y)→右(-y)
+        # 图名按空间得分从左到右排(得分大=左),同名再按字典序稳定
+        names_l2r = sorted(names, key=lambda n: (-self._spatial_key(n.split(".")[0].lower()), n))
+        mapping = {}
+        for i, nm in enumerate(names_l2r):
+            mapping[nm] = fam_l2r[min(i, len(fam_l2r) - 1)] if fam_l2r else None
+        cache[ckey] = mapping
+        return mapping
+
     def _resolve(self, name: str) -> str:
-        """registry id/物体名 → /state 实体键。启发式:精确/别名/子串/同义词/位置序。"""
+        """registry id/物体名 → /state 实体键。
+        启发式顺序:精确 → 别名 → 子串 → **同类双射(空间词)** → 同义词兜底。"""
         ents = self._entities()
         if name in ents:
             return name
@@ -111,23 +182,21 @@ class KWRuntime:
                     for e in ents:
                         if alias.lower() in e.lower():
                             return e
-        for e in ents:  # 子串
+        for e in ents:  # 子串(如 bowl0 ↔ bowl0_prop)
             if base in e.lower() or e.lower().replace("_prop", "") in base:
                 return e
-        for group in self.SYNONYMS:  # 同义词组:base 命中组内任一词,则找组内任一词命中的实体
+        # 同类双射:名字含空间词、且同类图物体 >=2 个时,用缓存双射拿到唯一实体。
+        toks = [t for t in base.replace("-", "_").split("_") if t in self._SPATIAL]
+        if toks:
+            mp = self._family_bijection(base, ents)
+            hit = mp.get(name) or mp.get(base) or mp.get(str(name).split(".")[0])
+            if hit:
+                return hit
+        for group in self.SYNONYMS:  # 同义词组兜底
             if any(w in base for w in group):
                 for e in ents:
                     if any(w in e.lower() for w in group):
                         return e
-        # tube_left/mid/right 等按 y 坐标排序映射
-        token = base.rsplit("_", 1)[-1]
-        if token in ("left", "mid", "middle", "right"):
-            fam = sorted((e for e in ents if base.split("_")[0] in e.lower()),
-                         key=lambda e: ents[e]["pos"][1])
-            if fam:
-                idx = {"left": 0, "mid": len(fam) // 2, "middle": len(fam) // 2,
-                       "right": len(fam) - 1}[token]
-                return fam[min(idx, len(fam) - 1)]
         raise KeyError(f"cannot resolve object {name!r} among {sorted(ents)}")
 
     def _ent(self, name: str) -> dict:
