@@ -21,6 +21,16 @@ PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
 LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
 GRIP_OPEN, GRIP_CLOSE = 0.0, 160.0   # close 值沿用审计记录的 hand_tuned 常数
 
+# 竖直(top-down)抓取姿态,xyzw。取自 shipped reorient.yaml 的
+# postgrasp_vertical_quat_xyzw=[0,1,0,0](夹爪 -z 朝下)。之前 _move 在 quat=None
+# 时复用 home 四元数,而 home 姿态并非抓取姿态 → IK 求出的解自碰撞/不可达。
+GRASP_QUAT_TOPDOWN = [0.0, 1.0, 0.0, 0.0]
+# 增量趋近:当一次性 xquat_move 收不敛(settle 返回 still/timeout 且 gap 仍大)时,
+# 用闭环 delta_move 逐步逼近——每步从更好的当前构型重解 IK,规避从 home 折叠构型
+# 直接大跳所触发的自碰撞。步长/预算/到位判据如下。
+STEP_MAX, STEP_TOL, STEP_BUDGET = 0.05, 0.03, 30
+STEP_STALL_EPS, STEP_STALL_N = 0.006, 3   # 连续 N 步位移 < eps 判定卡死(到达 reach 边界)
+
 
 class EvalClient:
     def __init__(self, base_url: str, timeout_s: float = 60.0):
@@ -190,15 +200,55 @@ class KWRuntime:
         self._log("settle", reason="timeout", sec=round(time.time() - t0, 1))
         return "timeout"
 
+    def _step_to(self, xyz, gpos=None):
+        """闭环位置增量趋近:每步朝 target 走 <=STEP_MAX(仅位置),再 settle。
+        每步从当前(逐步更展开的)构型重解 IK,避免从 home 折叠位一次大跳的自碰撞。
+        注意:实测本机在前伸够物区无法维持 top-down 腕姿,故此处**不锁姿态**(不传 quat),
+        让姿态随 IK 自然漂移——这样 delta_move 的 IK 报 collision_free=true 且能持续前进;
+        一旦强锁 [0,1,0,0],腕关节被逼到极限、机械臂折叠上翻(rot_error≈95°)。
+        返回到位则 True;连续 STEP_STALL_N 步几乎不动(到 reach 边界)则 False。"""
+        stall = 0
+        for _ in range(STEP_BUDGET):
+            cur, _ = self._cur_xquat()
+            d = [xyz[i] - cur[i] for i in range(3)]
+            gap = math.sqrt(sum(v * v for v in d))
+            if gap < STEP_TOL:
+                return True
+            n = gap or 1e-9
+            step = min(STEP_MAX, gap)
+            delta = [round(d[i] / n * step, 3) for i in range(3)]
+            kw = {"delta_xyz": delta}
+            if gpos is not None:
+                kw["gpos"] = gpos
+            self._ctrl("delta_move", **kw)
+            self._wait_settle(timeout_s=14.0)   # 伺服收敛慢,给足时间
+            nxt, _ = self._cur_xquat()
+            if math.dist(nxt, cur) < STEP_STALL_EPS:
+                stall += 1
+                if stall >= STEP_STALL_N:
+                    self._log("step_to", reason="stalled",
+                              gap=round(math.dist(nxt, list(xyz)), 4))
+                    return False
+            else:
+                stall = 0
+        self._log("step_to", reason="budget",
+                  gap=round(math.dist(self._cur_xquat()[0], list(xyz)), 4))
+        return False
+
     def _move(self, xyz, quat=None, interpolation="z_arc", gpos=None):
+        # quat=None 时用竖直抓取姿态,而非复用 home 姿态(后者会让 IK 求出自碰撞解)。
         if quat is None:
-            _, quat = self._cur_xquat()
+            quat = list(GRASP_QUAT_TOPDOWN)
         kw = {"target_xyz": [round(v, 4) for v in xyz], "target_quat": quat,
               "interpolation": interpolation}
         if gpos is not None:
             kw["gpos"] = gpos
         r = self._ctrl("xquat_move", **kw)
-        self._wait_settle(target_xyz=xyz)
+        # 一次性 xquat_move 常因 home 折叠构型/大跳触发自碰撞而收不敛;若未到位,
+        # 回退到闭环增量趋近(仅位置)。gap 判据 > STEP_TOL 才回退,避免无谓多走。
+        if self._wait_settle(target_xyz=xyz) != "reached":
+            if math.dist(self._cur_xquat()[0], list(xyz)) > STEP_TOL:
+                self._step_to(xyz, gpos=gpos)
         return r
 
     def approach(self, target, cone=None):
