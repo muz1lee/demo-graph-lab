@@ -551,3 +551,28 @@ python3 -m harness.phase1 episode --task insert_tubes --task-id robodojo_insert_
 环境：`OPENROUTER_API_KEY` 从仓根 `.env` 读（`harness/util.py:15-25`，`setdefault` 语义——已存在的环境变量不被覆盖）；成本上限 `HARNESS_COST_CAP` 默认 `8.0`（`util.py:69-70`）；数据根 `HARNESS_DATA_ROOT` 默认 `~/data/upstream/robot-subtask-seg`（`util.py:28-31`）。
 
 仓库：主仓为**内网 Gitea 私有仓**（remote `gitea`），5090 用 `ssh -A` 拉取；GitHub `origin` 自 2026-07-29 起停止维护。
+
+---
+
+## 附录：文档花名册与权威范围
+
+（从 README 下沉至此，2026-07-30。README 只保留最短阅读路径。）
+
+| # | 文档 | 权威范围 | 注意 |
+|---|---|---|---|
+| 1 | [`RESEARCH_PROPOSAL_V2.md`](RESEARCH_PROPOSAL_V2.md) | **当前唯一权威方案**：主张、假设 H1/H2/H3'、方法、验收门 | 2026-07-29；取代 v1 的执行策略 |
+| 2 | [`harness/PHASE0_ROUND2.md`](harness/PHASE0_ROUND2.md) | Phase 0 第二轮结果与终判 | 2026-07-30；P/R 数字以此为准 |
+| 3 | [`harness/PHASE1_M1A_STATUS.md`](harness/PHASE1_M1A_STATUS.md) | Phase 1 现场状态与阻塞 | 顶部有 2026-07-30 上午的 reach 墙更新，先读顶部再读正文 |
+| 4 | [`harness/PHASE1_API_PLAN.md`](harness/PHASE1_API_PLAN.md) | Phase 1 感知 API v1 设计 | **是计划不是现状**，12 个 API 零实现 |
+| 5 | [`PROGRESS.md`](PROGRESS.md) | **实验总账**，所有数字的出处与「⚠️ 待核」标记 | 与其他文档冲突时，先看这里有没有标待核 |
+| 6 | [`AGENTS.md`](AGENTS.md) | 工作边界 / 信息边界 / 代码边界 | §9 含 1022/1024 时期的历史环境条款，**已不是当前规则** |
+| 7 | [`harness/contract.py`](harness/contract.py) | `rt.*` API 单一真源（编译提示词直接引用本源码） | 代码即规范 |
+| 8 | [`harness/vocab.py`](harness/vocab.py) | 封闭约束词表 v0（10 条）+ 阶段词表 | 代码即规范，改词表走 git review |
+| 9 | [`schema/constraint_graph_schema.md`](schema/constraint_graph_schema.md) | 图 schema v0.2 | — |
+| 10 | [`harness/DESIGN_GRASP_AND_LOOP.md`](harness/DESIGN_GRASP_AND_LOOP.md) | 抓取姿态 / pose-in-hand / 闭环由谁来闭的设计裁定 | 2026-07-30；改的是方法设计不只是实现 |
+| 11 | [`harness/README.md`](harness/README.md) | harness 目录说明 | ⚠️ 状态行停在 2026-07-29「脚手架」，**已过时** |
+| 12 | [`SECURITY.md`](SECURITY.md) | 发布策略与两档要求 | push 前必读 |
+| 13 | [`RESEARCH_MILESTONES.md`](RESEARCH_MILESTONES.md) | ⚠️ **SUPERSEDED**；仅**止损判据与验收阈值**仍有效（含唯一成文的 20-seed 阈值） | 顶部有逐条 SUPERSEDED 标注，正文行号是加注前的 |
+| 14 | [`RESEARCH_PROPOSAL.md`](RESEARCH_PROPOSAL.md) | v1（2026-07-26），执行策略已作废 | 只作历史参考 |
+| 15 | [`DIRECTION_AUDIT_20260726.md`](DIRECTION_AUDIT_20260726.md) / [`PRIMITIVE_API_AUDIT.md`](PRIMITIVE_API_AUDIT.md) | 竞品占位审计 / 控制原语审计 | 手写资产，曾被误列进 `.gitignore`，现已入库 |
+| 16 | [`ALGORITHM_PLAN.md`](ALGORITHM_PLAN.md) / [`PLAN.md`](PLAN.md) | v1 期规划 | 已被 v2 取代 |
