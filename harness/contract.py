@@ -1,6 +1,6 @@
 """API 契约:生成的 policy 只准调用本文件声明的 rt.* 接口(单一真源,编译提示词引用本源码)。
 
-设计原则(对应 RESEARCH_PROPOSAL_V2 §3/§4):
+设计原则(对应 docs/archive/PROPOSAL_v2.md §3/§4):
 - 洞的唯一数值来源是 rt.solve();返回值是**不透明句柄**——policy 可传递、不可读出数字,
   硬编码度量在结构上不可表达。
 - 控制原语是声明式的粗粒度动作;tick 级控制/重试/回退属于可信 runner(fakerun.run_policy),

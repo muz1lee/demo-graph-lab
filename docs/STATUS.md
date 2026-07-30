@@ -11,15 +11,15 @@
 
 ## 1. 一句话状态
 
-Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1（执行绑定）软件链在 5090 上端到端可跑但**全部走 oracle 特权态**、物理侧仍被姿态路径与夹爪通道挡住；**真正的研究断点不在 infra，而在「约束 → 检验函数」这一环今天零代码**——因此即使 Phase 1 明天跑出成功率，也无法归因给 demo 约束。
+Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1（执行绑定）软件链在 5090 上端到端可跑但**全部走 oracle 特权态**、物理侧仍被**姿态路径**挡住（**夹爪通道已于 2026-07-30 晚证实可动、B5 解除，此前判「不通」是我方调用写错参数名**）；**真正的研究断点不在 infra，而在「约束 → 检验函数」这一环今天零代码**——因此即使 Phase 1 明天跑出成功率，也无法归因给 demo 约束。
 
 ---
 
 ## 2. 三个 Phase 状态表
 
-| Phase | 定义（`PROPOSAL.md:151` / `:205-206`） | 状态 | 判据 | 证据路径 |
+| Phase | 定义（`archive/PROPOSAL_v2.md` §5 / §6） | 状态 | 判据 | 证据路径 |
 |---|---|---|---|---|
-| **Phase 0** 理解层 | demo 视频 → 带 typed holes 的约束程序，不碰仿真 | **已达标** | H2 门：P≥0.7、R≥0.8、金标 5/5、自一致性 k=5 全解析、零度量字面量（`PROPOSAL.md:55`） | micro **P=0.931 / R=0.865** [已核实]，逐任务见 §2.1；`harness/PHASE0_ROUND2.md` |
+| **Phase 0** 理解层 | demo 视频 → 带 typed holes 的约束程序，不碰仿真 | **已达标** | H2 门：P≥0.7、R≥0.8、金标 5/5、自一致性 k=5 全解析、零度量字面量（`archive/PROPOSAL_v2.md` §2 H2、§5.4 验收门） | micro **P=0.931 / R=0.865** [已核实]，逐任务见 §2.1；`harness/PHASE0_ROUND2.md` |
 | **Phase 1** 执行绑定 | 最小执行层对接 knowin-world；三层漏斗实装；两级 ReAct；反事实法庭 | **进行中（软件通、物理未通、感知全 oracle）** | 需：非 oracle 感知 + 真实抓取成功 + 约束真正参与决策 | 软件链见 `harness/phase1.py`、`harness/fakerun.py:60`、`harness/kwadapter.py`；episode 产物**只在 5090** `~/phase1/artifacts/<task>/episode_*.json`，**本 checkout 无任何 `episode_*.json`** [已核实] |
 | **Phase 2** 冻结协议 | D/E seed 协议、六组对照 + no-demo frontier / per-episode VLM 两条新基线 | **未开** | 冻结后 held-out seed 成功率与泛化 gap | 无代码、无产物 [已核实：仓内无 seed 协议实现] |
 
@@ -48,7 +48,7 @@ Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1�
 | **B2** | **demo 约束今天不影响抓取**（归因不可能） | 编译 prompt 明确告诉模型「grasp region is already baked into the grasp-pose hole」，但 `solve()` 不兑现——只对 hole **名字字符串**做子串匹配 | prompt：`harness/prompts/compile_policy.md:20`；实现：`harness/kwadapter.py:301-305`，抓取点 = oracle 质心 xy + AABB 顶 − 硬编码 `0.03`。把图里 `region_grasp` 的 region 从 `upper_body` 改成 `bottom` 或 `rim`，产生的抓取位姿**逐比特相同** | 我方，同 B1 |
 | **B3** | **`stage['constraints']` 整个字段无运行期读者** | gate 只读 `acceptance` | `harness/gates.py:51`、`:63`、`:65` 三处全部 `stage.get("acceptance")`，全仓无运行期读 `stage["constraints"]` 的点 | 我方，同 B1 |
 | **B4** | **姿态路径不可行**（物理阻塞） | 手写 servo 贪心逼近，姿态不闭环 | `rot_error` 沿路点 **16°→52° 发散**、`collision_free=true`（`harness/PHASE1_M1A_STATUS.md` 顶部块）[文档声称，产物在 5090]；代码自陈：`harness/kwadapter.py:402` 注释「姿态交给 IK 自然漂移」[已核实] | 我方 + 5090；**用户已放行 motion planning 路线**（上游成功先例全走 KSM 运动规划，raw IK 直达在本环境零先例） |
-| **B5** | **夹爪通道不通** | v3 控制器每臂只出 7 DoF | `harness/DESIGN_GRASP_AND_LOOP.md:86`、`harness/kwadapter.py:510`（实测注释）[已核实] | infra 侧 / knowin-world；捏取类抓取在此之前**不可能成功** |
+| ~~**B5**~~ ✅**已解除 2026-07-30 晚**（**保留此行作误判记录**） | ~~夹爪通道不通~~ → **误判，夹爪可动** | ~~v3 控制器每臂只出 7 DoF~~ → 真因是**我方调用写错参数名**：用 `gpos=` 调 `set_gripper` 会**静默无效**，pipeline 照样回 `ok=True`、画面零变化，被误读成通道不通 | 实测（5090 `~/knowin_sim`，场景 `v4_protocol_smoke`，机器人 `k1u_v4_w_claw_26w27_1d`）：kwargs 必须是 `{"arm_id":N,"angle":A}`，`A` 取 0（张开）–100（闭合），超值被 `gripper.max_angle=100` 截断；腕相机 `left_hand/left` 在 `angle=0` 为 73938 B/md5 `4505170dd4`、`angle=100` 为 85611 B/md5 `3ef9e77851`，指垫可见开合 [已核实]。出处 `harness/DESIGN_GRASP_AND_LOOP.md` §5 与 `harness/kwadapter.py:507-513` 注释均已就地更正 | 已无外部依赖。**仍成立三条**：①MotorNode 秒回 `SUCCESS` 是假阳性（`_wait_gripper` 拿上一条指令值比目标），不可当到位证据 ②开合角不可读 ③`is_gripping_sth` 恒假（`current_limit` 恒 0）——**但 PI 已裁定本方案不依赖它**，降为报上游的低优先级项 |
 | **B6** | **Phase 1 感知全部走 oracle** | `solve()` 直接 `EvalServer GET /state` 拿特权态；`PHASE1_API_PLAN.md` 规划的 12 个非特权感知 API **零实现** | `harness/kwadapter.py:295-321`；`harness/PHASE1_API_PLAN.md:32-43` 列 12 条；全仓 grep `def get_observation / segment_text / mask_to_world_points / compute_obb / sample_grasps / query_yes_no` **零命中** [已核实] | 我方 + 5090（GraspNet 从 1022 移植、SAM/GDINO 权重现状 [未核实]） |
 | **B7** | **`push` 硬 stub 被 dry-run 吞成绿灯** | `KWRuntime.push` 直接 `raise`，而 `FakeRuntime.__getattr__` 把 `push` 列入「统一记日志」白名单 → dry-run 不炸、只在真机炸 | `harness/kwadapter.py:574-575`（`raise NotImplementedError("push 任务挂起(老板指示),M1 不实现")`）；`harness/fakerun.py:49-55`；**4 个生成的 policy 共 8 处调用 `rt.push(`** [已核实：`grep -c` on `harness/runs/*/policy.py`] | 我方，本仓 |
 | **B8** | **`residual` 是软 stub** | 只 `_log`，无感知无数值 | `harness/kwadapter.py:323-325` | 我方，本仓 |
@@ -61,19 +61,19 @@ Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1�
 
 ## 4. 主张链的健康度（核心）
 
-主张（`PROPOSAL.md:13`）：「一段 demo 教的是**每个阶段什么必须成立**，不是照抄哪条轨迹。」
+主张（`PROPOSAL.md` §0–§1；原句出自 `archive/PROPOSAL_v2.md` §0 北极星）：「一段 demo 教的是**每个阶段什么必须成立**，不是照抄哪条轨迹。」
 把它拆成 5 个**可证伪**环节；链条强度 = 最弱环强度。
 
 | 环 | 命题 | 状态 | 证据 / 缺什么 |
 |---|---|---|---|
 | **环 1** | demo 能提取约束 | ✅ **已证** | micro **P=0.931 / R=0.865**，5 任务 `metrics.json` 盘上可核（§2.1）。风险：金标由独立 agent 标注，人工复核范围**未核实** |
 | **环 2** | 约束能编译成**检验函数** | ❌ **零代码 —— 断点在这里** | 无「约束 → 可执行判据」的编译步骤。现状是 10 选 5 的硬编码几何 switch（`harness/kwadapter.py:582-615`），hole 的 `type/solver_hint/frame` 无消费者（`solver_hint` 无任何程序消费点，`.py` 源码里只有渲染：`harness/report.py:58-60`；`confidence` 唯一程序读取点是排序：`harness/extract.py:58`）。`stage['constraints']` 整个字段零运行期读者（`harness/gates.py:51/63/65`） |
-| **环 3** | 检验函数能**筛掉坏候选** | ❌ **未开始** | 既无候选生成器（`sample_grasps` = `PHASE1_API_PLAN.md:39` 第 8 条，零实现），也无筛选器；`PROPOSAL.md:103`（§4.2）的三层漏斗未实装 |
+| **环 3** | 检验函数能**筛掉坏候选** | ❌ **未开始** | 既无候选生成器（`sample_grasps` = `PHASE1_API_PLAN.md:39` 第 8 条，零实现），也无筛选器；`PROPOSAL.md` §2.1 的候选筛选链条（v2 §4.2 三层漏斗）未实装 |
 | **环 4** | 筛出的候选**成功率更高** | ⚠️ **路径存在，但走 oracle** | `harness/fakerun.py:60` 两级 ReAct runner + `harness/phase1.py` 端到端可跑；但 ① 所有 `solve` 读 EvalServer 特权态（**ORACLE-M1A**），② 抓取点与 demo 约束解耦（B2）。**即使拿到成功率也无法归因给 demo 约束** |
 | **环 5** | 冻结后**跨 seed 泛化** | ❌ **未开始** | Phase 2 的 D/E seed 协议无代码无产物 |
 
 **结论：断点在环 2，且环 2 不依赖任何 infra 阻塞。**
-B4（姿态发散）/ B5（夹爪 7 DoF）/ B6（感知 oracle）挡的是**环 4 的执行力**，全部在 5090 与 knowin-world 侧；而环 2 是本仓纯 Python，mac 上就能写、能测、能出反事实证据。换句话说：**5090 全停机的日子，环 2 照样能推进**——今天没推进不是被挡住，是没排上。
+B4（姿态发散）/ ~~B5（夹爪 7 DoF）~~（**已解除，系误判**）/ B6（感知 oracle）挡的是**环 4 的执行力**，其余两条仍在 5090 与 knowin-world 侧；而环 2 是本仓纯 Python，mac 上就能写、能测、能出反事实证据。换句话说：**5090 全停机的日子，环 2 照样能推进**——今天没推进不是被挡住，是没排上。
 
 **环 2 的最小证伪实验**（不需要机器人、不需要 LLM）：把 `graph.json` 里 `region_grasp(tube_left, upper_body)` 改成 `bottom`，跑同一条 policy，比对 `solve("*_grasp_pose")` 的输出。**当前预期：逐比特相同 = 环 2 被证伪**。这条断言本身是 §3-B2 的直接推论，本次**未实跑**，标记 [未核实]，建议作为第一个落地测试。
 

@@ -5,8 +5,10 @@
 开始任何工作前必须依次读取：
 
 1. `AGENTS.md` §1–§7：方法边界、GT 防火墙、API 原则与验证纪律（长期稳定，路线变更不豁免）；
-2. `docs/PROPOSAL.md`（2026-07-29）：当前执行路线的权威来源，**取代 v1 期路线**（v1 提案与其余
-   4 份 v1 期文档已合并归档为 `docs/archive/ARCHIVE.md`；取代关系由 `docs/PROPOSAL.md:4` 自声明）；
+2. `docs/PROPOSAL.md`（v3，2026-07-30）：当前方法主张与框架的权威来源；实验设计、代码框架与
+   TODO 见 `docs/EXECUTION.md`。v2 已归档为 `docs/archive/PROPOSAL_v2.md`，其 **§1.2 独家证据**与
+   **§5 Phase 0 方法定义**仍有效（见 `docs/PROPOSAL.md` 抬头「v2 的存续部分」）；v1 期 5 份文档
+   合并归档为 `docs/archive/ARCHIVE.md`，取代关系由 `docs/archive/PROPOSAL_v2.md` 抬头自声明；
 3. `harness/PHASE0_ROUND2.md`、`harness/PHASE1_M1A_STATUS.md`：最近一轮实测数字与当前阻塞；
 4. `docs/archive/ARCHIVE.md` §3：方法规格与信息边界（v1 期方法假设的合并归档本）；
 5. `docs/PROGRESS.md`：历史实验总账（⚠️ 更新纪律未被执行，见 §8.5）。
@@ -223,7 +225,9 @@ Demo2Code、CaP-X 及相关工作构成强基线，因此“演示到代码”�
 | `AGENTS.md` §1–§7 | 方法边界、GT 防火墙、API 原则、验证与研究评价纪律 | ✅ 有效 |
 | `AGENTS.md` §8–§9 | 文档花名册、阅读顺序、产物纪律、仓库拓扑 | ✅ 2026-07-30 本次校订 |
 | `AGENTS.md` §10 | 代码边界（`components/` 快照、`method/`、`adapters/`） | ✅ 有效 |
-| `docs/PROPOSAL.md` | 当前研究主张、Phase 0/1/2 划分、Phase 0 验收门（§5.4）、infra 拓扑（§7） | ✅ 有效（2026-07-29） |
+| `docs/PROPOSAL.md` | 当前研究主张（v3）：框架分层（§3）、三条硬边界（§4）、冻结定义（§5）、假设与证伪 A1–A7（§6）、接口纪律（§8） | ✅ 有效（v3，2026-07-30） |
+| `docs/EXECUTION.md` | 实验与验收（§1）、代码框架与模块名（§2）、TODO 与推进顺序（§3）、预算与止损（§4）、环境约束（§5） | ✅ 有效（2026-07-30）；v3 的执行绑定 |
+| `docs/archive/PROPOSAL_v2.md` | v2 归档。**§1.2 独家证据**（B7 / slotgeom / B4-probe / B5.1）与 **§5 Phase 0 方法定义**（校验四层 §5.3、验收门 §5.4）仍有效；另是 §7 infra 拓扑的唯一成文出处 | ⚠️ 执行策略由 v3 + `EXECUTION.md` 取代；上述三块仍被活文档引用 |
 | `harness/README.md` | harness 目录约定、词表/提示词/金标/素材来源 | ✅ 有效 |
 | `harness/PHASE0_ROUND1.md` | Phase 0 v0.1 提取器结果、系统性错误谱系（A–F）、编译步首轮 | ✅ 有效（历史轮次；病因分类仍是 v0.3 backlog 依据） |
 | `harness/PHASE0_ROUND2.md` | Phase 0 v0.2 结果与**验收门终判** | ✅ 有效，Phase 0 最新一轮（2026-07-30） |
@@ -240,8 +244,9 @@ Demo2Code、CaP-X 及相关工作构成强基线，因此“演示到代码”�
 ### 8.2 新窗口阅读顺序（硬性）
 
 1. 本文件 §1–§7 —— 方法边界与 GT 防火墙，任何路线变更都不豁免；
-2. `docs/PROPOSAL.md` §0（主张与北极星）、§5（Phase 0 范围与验收门）、§6（Phase 1/2
-   预告）、§7（infra 与工作方式）；
+2. `docs/PROPOSAL.md` §0（TL;DR）、§3（框架总览与决策权）、§4（三条硬边界）、§5（冻结定义）、
+   §6（假设与证伪）；接着 `docs/EXECUTION.md` §1（实验与验收）、§2（代码框架）、§3（TODO 与
+   推进顺序）。Phase 0 的范围与验收门口径在 `docs/archive/PROPOSAL_v2.md` §5，infra 拓扑在其 §7；
 3. `harness/PHASE0_ROUND2.md` —— Phase 0 最新数字与终判；需要错误谱系与改进杠杆时回读
    `harness/PHASE0_ROUND1.md`；
 4. `harness/PHASE1_M1A_STATUS.md` —— 当前卡在哪、有哪些待裁决选项；
@@ -311,8 +316,8 @@ subagent 不直接编辑 `docs/PROGRESS.md`，只向主 agent 返回证据，避
 本仓对外名是 **demo-graph-lab**（不是 ksm）。当前拓扑三点：
 
 - **主仓 = 内网 Gitea 私有仓**（remote 名 `gitea`；主机与路径见 `git remote -v` 与
-  `docs/PROPOSAL.md:211`，不抄进本文件）。本地 `main` 跟踪 `gitea/main`，权威历史在此。
-- **实验机 = 5090 服务器**（主机与账号登记在 `docs/PROPOSAL.md:210`）。Phase 0 harness 与
+  `docs/archive/PROPOSAL_v2.md` §7，不抄进本文件）。本地 `main` 跟踪 `gitea/main`，权威历史在此。
+- **实验机 = 5090 服务器**（主机与账号登记在 `docs/archive/PROPOSAL_v2.md` §7）。Phase 0 harness 与
   Phase 1 的 sim / pipeline 都跑在这台；5090 侧用 mac 转发身份（`ssh -A`）执行 `git pull`，
   rsync 只作兜底。
 - **GitHub 远端（remote 名 `origin`）已降级为历史备份，不再维护**：不再向它 push，也不得把它
@@ -323,8 +328,8 @@ subagent 不直接编辑 `docs/PROGRESS.md`，只向主 agent 返回证据，避
 ### 9.2 已作废的旧边界（保留记录以免重犯）
 
 - 「唯一工作树 = 1022 `/mnt/data/wenqian/demo-graph-lab`」**已作废**：主战场自 2026-07-29 起是
-  5090（`docs/PROPOSAL.md:209-211`）。1022 与学生工作区降为**只读 upstream**，仅经
-  source manifest 登记后拉素材（`docs/PROPOSAL.md:213`、`harness/README.md:9`）。
+  5090（`docs/archive/PROPOSAL_v2.md` §7）。1022 与学生工作区降为**只读 upstream**，仅经
+  source manifest 登记后拉素材（`docs/archive/PROPOSAL_v2.md` §7、`harness/README.md:9`）。
 - 1024 NAS 基础仓 `/mnt/nas/knowin_sim/sim_workspace/` 的禁令**继续有效**：可只读借用其中的数据
   （如 `knowin-world-data`）与既有 venv；**禁止**写入、部署、改配置或启停其服务。历史上曾误把
   工作副本放进该树，操作指引不得再指向那里。

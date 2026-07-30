@@ -39,12 +39,12 @@
 | | |
 |---|---|
 | **裁决** | LLM 只允许出现在**编译期**（Phase 0：阶段切分 / 约束提取 / 三层漏斗 tie-break；graph→policy 编译一次）。**执行期 runtime 零 LLM**，闭环由约束残差驱动，不由模型驱动。 |
-| **日期** | 2026-07-29（`PROPOSAL.md` §4.8 定），2026-07-30 复申（`harness/DESIGN_GRASP_AND_LOOP.md` §4） |
+| **日期** | 2026-07-29（`archive/PROPOSAL_v2.md` §4.8 定），2026-07-30 复申（`harness/DESIGN_GRASP_AND_LOOP.md` §4） |
 | **背景** | 相邻路线全都把模型放进环里：ReKep / CoPa 每集 VLM 在环生成约束；VIA 式 agent 每步在环操作，成本 $4–15/集、≤1h/集。2026-07-30 讨论 `robocurve/inspect-robots` 时又一次冒出「用动作级 ReAct 顶掉伺服」的诱惑。 |
 | **理由** | ① 差异化：摊销是本课题相对 per-episode VLM 路线的**主要可防守点**，成本/延迟表要进论文；② 可审计：冻结代码后换 seed/layout 只有感知返回值变化，失败可归因到具体约束；③ 一旦运行期有 LLM，「冻结后跨场景复用」这个主张自毁——原文：「方法路径绝不把 LLM 放进运行期循环——否则核心主张自毁」。 |
 | **影响** | LLM 被切成三个工位：**A. bring-up/标定**（LLM 在环，仅当实验室仪器，学到的姿态可达域只能作 per-robot 标定烘进 L1 硬可行性层）；**B. 方法（冻结）**运行期无 LLM；**C. 基线**（no-demo frontier agent，每步在环，论文对照位）。A 和 C 用 LLM **不违反**本裁决，B 用即违反。代码上：`harness/cli.py` 把 `compile` 排除在 `all` 之外，编译是显式动作；`harness/phase1.py` / `harness/fakerun.py` / `harness/kwadapter.py` 全链无 LLM 客户端。 |
 | **状态** | **生效** |
-| **证据** | `PROPOSAL.md:147`（「执行期 runtime **无 LLM**」）、`:31`（摊销对照 VIA 成本）、`:69`（「LLM 只在此出现一次」）；`harness/DESIGN_GRASP_AND_LOOP.md:66-72`（三工位表）、`:77`（「B 不变…否则核心主张自毁」）；`harness/cli.py:65-67`（compile 独立子命令）与 `:68-75`（`all` 分支不含 compile）；`harness/kwadapter.py:1-8`（运行期 runtime 的模块 docstring，无 LLM 通路） |
+| **证据** | `archive/PROPOSAL_v2.md` §4.8（「执行期 runtime **无 LLM**」）、§1.1（摊销对照 VIA 成本）、§3（「LLM 只在此出现一次」）；⚠️ **与 v3 冲突，待 PI 复裁**：`PROPOSAL.md` §5 把「冻结」重定义为「运行期不注入任务特定信息」，且 §3.1 的 L5 有界修正本身就是运行期 LLM——本条「执行期零 LLM」的口径已被 v3 撤销，摊销与可审计两条理由仍成立；`harness/DESIGN_GRASP_AND_LOOP.md:66-72`（三工位表）、`:77`（「B 不变…否则核心主张自毁」）；`harness/cli.py:65-67`（compile 独立子命令）与 `:68-75`（`all` 分支不含 compile）；`harness/kwadapter.py:1-8`（运行期 runtime 的模块 docstring，无 LLM 通路） |
 
 ### D-02 H3 → H3'：伺服从独立闸门降级为「连续绑定」档位
 
@@ -56,7 +56,7 @@
 | **理由** | 绑定档位（静态 / 入口绑定 / 连续绑定）是连续谱，编译器按可观测性派发默认档，held-out 上同一约束反复挂 gate 则自动升档。这样失败归因产出的是**具体动作（换档）**，而不是笼统 retry；也避免「H3 关/开」这种在实现上根本切不干净的消融。止损：升档规则学不出就退化为固定派发表，仍算贡献。 |
 | **影响** | ① v1 里程碑文件中 7 处 H3 引用（原始行号 41/47/51/86/99/105/149，清单见 `archive/ARCHIVE.md` §6.2）作废；§M2.c 入口条件与「H3 关闭时整节跳过」**双向悬空**，`ServoSpec` TODO 需按绑定档位重写。② 消融 A（推导 Spec vs 手调常数）原挂伺服层，改挂「连续绑定」档位。③ 组 4 vs 5 的「闭环增量（视 H3）」改读为 H3' 的 gate/修正消融。 |
 | **状态** | **生效**（v1 的 H3 = **已撤销**） |
-| **证据** | `PROPOSAL.md:56`（H3' 原文）、`:133`（§4.5 绑定档位与失败升档）、`:247`（附录 A 差异行）；`archive/ARCHIVE.md` §6.2（逐条列出作废面与后果）、§1.1 消融 A 行（改挂「连续绑定」档位） |
+| **证据** | `archive/PROPOSAL_v2.md` §2（H3' 原文）、§4.5（绑定档位与失败升档）、附录 A（差异行）；v3 对应位在 `PROPOSAL.md` §2.3–§2.5（两级闭环与「不是伺服」的措辞修正）；`archive/ARCHIVE.md` §6.2（逐条列出作废面与后果）、§1.1 消融 A 行（改挂「连续绑定」档位） |
 
 ### D-03 demo 只给关系不给数值（typed holes）；文字变成对数值的检验函数
 
@@ -68,7 +68,7 @@
 | **理由** | ① 度量常数是泛化的死穴，也是 CaP-X 反模式的病灶；② 关系可跨 seed / 跨 layout / 跨本体复用，数值不行；③ 把「文字→检验函数」而不是「文字→数值」，让 demo 的粗标签（如 `region_grasp(obj, 中上部)`）编译成可计算谓词，落在三层漏斗第 2 层，可审计、可消融。 |
 | **影响** | ① 约束词表封闭（`axis_parallel` / `center_align` / `region_grasp` / `approach_direction` / `above` / `inside` / `order` / `carry` / `clearance` / `axis_vertical`），提取只准从表里选；② T3 度量字面量扫描器进 validate；③ VLM 不得输出数值、不得在 >3 候选中自由挑；④ 谓词阈值只准从通用几何推导或全任务共用一套，**禁 per-task 手调**。 |
 | **状态** | **生效（设计层）；Phase 1 运行期未兑现——见 §3-G1，这是当前最大的名实落差** |
-| **证据** | `PROPOSAL.md:13`（北极星）、`:99-101`（封闭词表 + 度量字面量即失败）、`:105`（检验函数原则）、`:120`（禁 per-task 手调）、`:38`（B7 证据）；`harness/DESIGN_GRASP_AND_LOOP.md:34`（L2「demo 提供，**只给关系不给数值**」）；`AGENTS.md:79-88`（typed hole 六要素）、`:133-136`（可以表达「夹持试管中段」，不能预填试管长度/孔心坐标） |
+| **证据** | `archive/PROPOSAL_v2.md` §0（北极星）、§4.1（封闭词表 + 度量字面量即失败）、§4.2（检验函数原则、禁 per-task 手调）、§1.2（B7 证据）；v3 对应位在 `PROPOSAL.md` §1（demo 的产物必须是约束图）、§2.1（候选筛选链条与三条纪律）、§5（字面量扫描）；`harness/DESIGN_GRASP_AND_LOOP.md:34`（L2「demo 提供，**只给关系不给数值**」）；`AGENTS.md:79-88`（typed hole 六要素）、`:133-136`（可以表达「夹持试管中段」，不能预填试管长度/孔心坐标） |
 
 ### D-04 GT 防火墙的边界：约束运行期数据流，不约束版本控制
 
@@ -108,7 +108,7 @@
 | **理由** | 私有仓让文档写实话；同时保留「已推送到 GitHub 的内容视为已公开」这条不可逆假设，避免事后自欺。 |
 | **影响** | ① 同步拓扑固定为 mac 编辑/commit → `git push gitea main` → 5090 用 `ssh -A`（agent forwarding 必需，`IdentitiesOnly` 钉住身份）`git pull`，Gitea 不可达时才 rsync 兜底（排除 `.git`、`runs/`、`knowin-world/`、`venvs/`、密钥、`configs/local/`，禁止盲目 `--delete`）；② 收工前核对 5090 HEAD 与 `gitea/main` 一致；③ 触发 D-07 的门禁分档；④ **待复核项**：GitHub 侧仓库当前可见性未核实，公开性假设需 PI 裁决后才能写回文档，裁决前按最严口径处理。 |
 | **状态** | **生效**（GitHub 公开性假设 = 待复核） |
-| **证据** | `PROPOSAL.md:212`；`AGENTS.md:316-324`（§9.1 拓扑三点）、`:339-350`（§9.3 同步工作流，`:350` 「`gitea/main` 是唯一权威历史」）；`SECURITY.md:3-4`；commit `179dede`（2026-07-29 19:14） |
+| **证据** | `archive/PROPOSAL_v2.md` §7（代码同步拓扑）；`AGENTS.md:316-324`（§9.1 拓扑三点）、`:339-350`（§9.3 同步工作流，`:350` 「`gitea/main` 是唯一权威历史」）；`SECURITY.md:3-4`；commit `179dede`（2026-07-29 19:14） |
 
 ### D-07 release check 分 private / public 两档
 
@@ -142,9 +142,9 @@
 | **日期** | 2026-07-30 |
 | **背景** | M1a 夜间冲刺撞墙：右臂 raw IK 过不了 x≈0.24，物体在 x≈0.44–0.61；顶抓姿态 IK 全拒（`self_collision_violation`，pos_error 仅 1.8 mm）；躯干电机在本 sim 的 zenoh 桥未接通（`ArmCtrl decode failed name=all_motors`）。旁证：eval-runs 历史成功（`stand_up_bottle` / `stack_bowls`）**全部经完整 KSM 技能栈（运动规划）**，1022 上 wht 的链也是经 KSM 规划——**raw IK 直达在本环境无成功先例**。当晚给出三选项：A 修 sim infra（治本，越出零污染边界）/ B 放行运动规划（绕行）/ C 换可达性友好的场景。 |
 | **理由** | 上游所有成功先例都走这条路；选项 B 的代价只是「`motion_planning` 服务在 `services/` 非 common 目录 = 原禁区」，按「ctrl 类可斟酌」的底座规则放行即可，adapter 一天内接上。相比之下 A 需要 infra 同学动手且破坏零污染（D-12），C 只是换场景不解决问题。 |
-| **影响** | 底座规则的「禁非 common reasoner」保持不变，本次放行只覆盖 **ctrl / 运动规划类**调用；`reference/PRIMITIVE_API.md:185` 已记 `motion_planning_stereo`（参数面 `q_current` / `q_goal` / `tcp_trajectory` / `grasp_item` / `planner_config` / `q_other_arm`）为 USABLE，可直接接。注意这不解除另一条阻塞：**夹爪通道在本栈不通（v3 控制器每臂只出 7 DoF），捏取类抓取当前不可能成功。** |
+| **影响** | 底座规则的「禁非 common reasoner」保持不变，本次放行只覆盖 **ctrl / 运动规划类**调用；`reference/PRIMITIVE_API.md:185` 已记 `motion_planning_stereo`（参数面 `q_current` / `q_goal` / `tcp_trajectory` / `grasp_item` / `planner_config` / `q_other_arm`）为 USABLE，可直接接。~~注意这不解除另一条阻塞：**夹爪通道在本栈不通（v3 控制器每臂只出 7 DoF），捏取类抓取当前不可能成功。**~~ ← **2026-07-30 晚更正（只更正事实，D-09 裁决本身不变）**：该「另一条阻塞」是误判，夹爪实测可动，此前判不通是我方用错参数名（`gpos=` 而非 `angle=`，静默无效却仍回 `ok=True`）；出处 `harness/DESIGN_GRASP_AND_LOOP.md` §5 已更正。**仍未解除的是姿态路径发散**（`rot_error` 16°→52°），那正是本裁决要解决的问题。 |
 | **状态** | **生效** |
-| **证据** | ⚠️ **口头裁决，无文档出处**——盘上只有待裁决的选项，没有裁决结论。选项与理由：`harness/PHASE1_M1A_STATUS.md:49-50`（选项 B 原文，「需老板裁决」）、`:41-42`（raw IK 零先例的旁证）、`:36-40`（三条墙的证据，`~/phase1/debug_grasp_evidence.json`，**产物在 5090，本 checkout 无**）；`harness/PHASE1_API_PLAN.md:3`（底座规则「ctrl 新增先斟酌」）；`reference/PRIMITIVE_API.md:185`（`motion_planning_stereo` USABLE）；`harness/DESIGN_GRASP_AND_LOOP.md:86`（夹爪 7 DoF 阻塞）。**建议**：下次改 `harness/PHASE1_M1A_STATUS.md` 时把裁决结论就地补记，否则这条会在下一轮被重新讨论。 |
+| **证据** | ⚠️ **口头裁决，无文档出处**——盘上只有待裁决的选项，没有裁决结论。选项与理由：`harness/PHASE1_M1A_STATUS.md:49-50`（选项 B 原文，「需老板裁决」）、`:41-42`（raw IK 零先例的旁证）、`:36-40`（三条墙的证据，`~/phase1/debug_grasp_evidence.json`，**产物在 5090，本 checkout 无**）；`harness/PHASE1_API_PLAN.md:3`（底座规则「ctrl 新增先斟酌」）；`reference/PRIMITIVE_API.md:185`（`motion_planning_stereo` USABLE）；~~`harness/DESIGN_GRASP_AND_LOOP.md:86`（夹爪 7 DoF 阻塞）~~ → 该出处已于 2026-07-30 晚就地更正为「夹爪可动，原判系调用参数名错误」，见 `harness/DESIGN_GRASP_AND_LOOP.md` §5；**此条证据的失效不影响 D-09 的裁决与理由**（D-09 立足于 raw IK 零成功先例，与夹爪无关）。**建议**：下次改 `harness/PHASE1_M1A_STATUS.md` 时把裁决结论就地补记，否则这条会在下一轮被重新讨论。 |
 
 ### D-10 投递目标定 RSS 2027，放弃 ICLR / ICRA 2027
 
@@ -156,20 +156,20 @@
 | **理由** | 形态匹配：本课题的主结果是机器人执行与泛化，RSS 的评审口径对得上；时间匹配：ICRA 2026-09 截稿要求 M2 提前完成且数字强，而 Phase 1 至 2026-07-30 尚未有一次非特权端到端成功。 |
 | **影响** | ① 里程碑按 RSS 2027 倒排——但 v2 §6 承诺的「另文更新」**至 2026-07-30 未产出**，这是一笔明账上的欠账；② v1 里程碑的 M1–M4 / W1–W16 全部日历日期（~08-23 / ~09-20 / ~10-18 / ~11-15）作废，执行单位改为 Phase 0/1/2；③ 其**止损判据与验收阈值仍然有效**，现由 `archive/ARCHIVE.md` §1 承载并继续作为闸门规范源被引用（含唯一成文的 20-seed 阈值：≥16/20 抓取+转正+对准、≥12/20 inserted+upright，见 §1.2）。 |
 | **状态** | **生效** |
-| **证据** | `PROPOSAL.md:5`（RSS 主 / ICLR 排除）、`:248`（附录 A：v1「RSS/ICRA 2027」→ v2「RSS 2027（定）」）、`:207`（「另文更新」承诺）；`archive/ARCHIVE.md` §6.7（ICRA stretch 作废）、§6.1（阈值仍有效、另文未产出）、§1.2（20-seed 阈值） |
+| **证据** | `archive/PROPOSAL_v2.md` 抬头「投递目标」行（RSS 主 / ICLR 排除）、附录 A（v1「RSS/ICRA 2027」→ v2「RSS 2027（定）」）、§6（「另文更新」承诺；⚠️ 该另文是否已由 `EXECUTION.md` 兑现，未裁决）；`archive/ARCHIVE.md` §6.7（ICRA stretch 作废）、§6.1（阈值仍有效、另文未产出）、§1.2（20-seed 阈值） |
 
 ---
 
 ### D-11 v1/v2 双树共存：按能力退役，不按代次删除
 
 - **裁决**（2026-07-30）：`method/` `adapters/` `experiments/` 三棵 v1 树**保留**，逐模块退役而非整树删除。
-  判断规则：**「`PROPOSAL.md` 或实验矩阵里，有没有哪条假设/消融/验收门需要它？」**
+  判断规则：**「`PROPOSAL.md` §6 的假设 A1–A7、或 `EXECUTION.md` §1 的实验与验收里，有没有哪条需要它？」**
   有 → 留（哪怕当前无人 import）；没有 → 删。
 - **背景**：所有者提出「v2 是最新方案，之前没用的就该删」。这个判断对普通工程仓成立，本仓不成立。
 - **理由**：v1 实现的不是「v1 的方案」，而是 **v2 的 H1 假设所依赖、`harness/` 尚未实现的部分**。
   实测 `grep 'freeze|frozen|digest|sha256|manifest' harness/*.py` 命中全是字符串字段——冻结协议
   在 harness 侧零实现；而 v2 §0 北极星与 H1 都明确要求「策略代码**冻结后**的 held-out 成功率」，
-  v2 §0 第 6 行写明「执行与冻结协议实验**后置到 Phase 1/2**」（后置，不是取消）。
+  v2 抬头「本轮决策」行写明「执行与冻结协议实验**后置到 Phase 1/2**」（后置，不是取消）。
   一句话：**v1 有纪律没数字，v2 有数字没纪律，RSS 2027 两样都要。**
 - **影响**：确认可删的只有 `adapters/runtime_doctor.py`（3 行 `import *` shim，本体在
   `adapters/knowin_world/runtime_doctor.py` 且有两条正规入口）。其余保留并加代次 README。
@@ -214,7 +214,7 @@
 
 | ID | 裁决 | 日期 | 理由摘要 | 状态 | 证据 |
 |---|---|---|---|---|---|
-| D-11 | Phase 0 先不动仿真机器人，只做「demo 视频理解」harness，执行与冻结协议后置到 Phase 1/2 | 2026-07-29 | 老板拍板；先把「理解层」做出可重复 CLI 与可量化指标，避免执行 infra 的不确定性淹没方法验证 | 生效（Phase 0 已于 2026-07-30 判达标：micro P=0.931 / R=0.865，两道门 P≥0.7、R≥0.8 全过，裁决「可开 Phase 1」） | `PROPOSAL.md:6`、`:151-155`、`:197-199`（明确不做清单）；`harness/PHASE0_ROUND2.md:16`、`:35-39` |
+| D-11 | Phase 0 先不动仿真机器人，只做「demo 视频理解」harness，执行与冻结协议后置到 Phase 1/2 | 2026-07-29 | 老板拍板；先把「理解层」做出可重复 CLI 与可量化指标，避免执行 infra 的不确定性淹没方法验证 | 生效（Phase 0 已于 2026-07-30 判达标：micro P=0.931 / R=0.865，两道门 P≥0.7、R≥0.8 全过，裁决「可开 Phase 1」） | `archive/PROPOSAL_v2.md` 抬头「本轮决策」行、§5.1（目标与范围）、§5.5（明确不做清单）；`harness/PHASE0_ROUND2.md:16`、`:35-39` |
 | D-12 | 零污染原仓：k1-sys / knowin-world **零文件改动**，自家感知服务全住本仓 `harness/perception_service/` | 2026-07-30 | 共享依赖 dirty 且不由我方掌控；改它等于把我方实验的可复现性押在别人的工作树上。也不经 pipeline 注册 remote-namespace（那需要重启共享 pipeline），适配器直连自家服务 | 生效 | `harness/PHASE1_API_PLAN.md:24-26`、`:3`（底座规则「零污染原仓」）；`AGENTS.md:358-360`（Knowin World 不作子目录/submodule/vendored） |
 | D-13 | Phase 0 的「歧义对区分 ≥3/4」验收门 ❌ 改判为**素材缺陷**，移交「素材构造」任务，不计入本轮门 | 2026-07-30 | 现有素材不含目标歧义：random 变体只随机布局，`deposit_coin` 单币单槽——门没过是素材问题不是方法问题 | 生效 | `harness/PHASE0_ROUND2.md:37-38`；⚠️ `AGENTS.md:278-279` 明令「引用时不得只报通过项」 |
 | D-14 | `push_T` 任务与 `push` 控制原语挂起，M1 不实现 | 2026-07-30（老板指示） | `push_T` 是 v0.2 唯一恶化任务（P 0.70→0.538、R 0.778→0.636），且 demo 本身有缺陷（粗推越推越歪）压低上限；非抓取类通路优先级低于主线 | 生效 | `harness/PHASE1_API_PLAN.md:69`（「push_T 挂起(老板指示)」）；`harness/kwadapter.py:574-575`（`raise NotImplementedError`）；`harness/PHASE0_ROUND2.md:14`、`:31` |

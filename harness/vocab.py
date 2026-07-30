@@ -1,7 +1,7 @@
 """[phase0 · 词表] 封闭约束词表 v0（代码即规范）。
 
 提取器只允许输出本词表中的约束；词表变更走 git review，禁止运行时扩词。
-设计依据见 docs/PROPOSAL.md §4.1；schema 对齐 docs/reference/constraint_graph_schema.md v0.2。
+设计依据见 docs/archive/PROPOSAL_v2.md §4.1(封闭词表 v0,v3 未收录);schema 对齐 docs/reference/constraint_graph_schema.md v0.2。
 铁律：约束参数里不允许出现世界坐标度量字面量——一切数值走 typed hole。
 """
 

@@ -2,7 +2,7 @@
 
 - 文档日期：2026-07-30
 - 适用 checkout：`demo-graph-lab` @ `3f603d1`（工作区干净，45 个 commit）
-- 定位：**细节视图**。想知道「这个方案是什么、为什么」看 `PROPOSAL.md`；想知道「进度和数字账本」看 `PROGRESS.md`；本文只回答「每一跳的输入/输出/由哪个文件哪一行实现，以及今天哪些地方是空的」。
+- 定位：**细节视图**。想知道「这个方案是什么、为什么」看 `PROPOSAL.md`（v3）；想知道「怎么做、按什么顺序」看 `EXECUTION.md`；想知道「进度和数字账本」看 `PROGRESS.md`；本文只回答「每一跳的输入/输出/由哪个文件哪一行实现，以及今天哪些地方是空的」。
 - 行号可信度：本文所有 `file:line` 均在 2026-07-30 于上述 commit 上逐条核对。代码一改行号即失效，引用前请重新 `grep`。
 
 ---
@@ -484,7 +484,7 @@ else:  # region_grasp/carry/order/clearance 等 M1a 不可几何判 → 记录�
 |---|---|---|
 | **reach 墙** | ✅ 已解决。真因是 v3/v4 **机器人代次错配**——C++ IK 加载 v4 碰撞模型而 Genesis 跑 v3 机器人，产生与目标点无关的恒定幽灵自碰 `pair_id=263`。零污染 v3 override 后右臂前伸 0.24→0.678 m 零拒绝 | `harness/PHASE1_M1A_STATUS.md` 顶部更新块 |
 | **姿态路径不可行** | ❌ 阻塞。`rot_error` 沿路点 16°→52° 发散而 `collision_free=true`；根因是手写 servo 贪心逼近，`_step_to` 的 docstring（`harness/kwadapter.py:402-403`）自陈「姿态交给 IK 自然漂移」 | 同上 + 代码自陈 |
-| **夹爪通道不通** | ❌ 阻塞。v3 控制器每臂只出 7 DoF，无夹爪通道；`set_gripper` 任意角度都不改变 `/state` 的爪子自由度，而 MotorNode 仍秒回 SUCCESS。**在通道接好前捏取类抓取不可能成功** | `harness/kwadapter.py:508-513` 的实测注释 |
+| ~~**夹爪通道不通**~~ → **夹爪可动** | ✅ **已解除（2026-07-30 晚实测）。原判「❌ 阻塞·v3 控制器每臂只出 7 DoF·`set_gripper` 任意角度都不改变 `/state` 爪子自由度」是误判，此处保留原文以留档。**真因是我方调用写错参数名：`gpos=` 调 `set_gripper` **静默无效**且 pipeline 仍回 `ok=True`，被误读成通道不通。正确形态 `kwargs={"arm_id":N,"angle":0..100}`（超值被 `max_angle=100` 截断）；腕相机 `left_hand/left` 在 `angle=0` 73938 B/md5 `4505170dd4`、`angle=100` 85611 B/md5 `3ef9e77851`，指垫可见开合。**仍成立**：①MotorNode 秒回 SUCCESS 是假阳性（`_wait_gripper` 比的是上一条指令值），不可当到位证据 ②开合角不可读 ③`is_gripping_sth` 恒假（`current_limit` 恒 0），但 PI 已裁定本方案不依赖它。**「能动」≠「能抓稳」，真实抓取成功率仍是 0 次** | `harness/DESIGN_GRASP_AND_LOOP.md` §5（出处，已更正）、`harness/kwadapter.py:507-513` 的实测注释（已更正） |
 | **路线裁决** | 用户已放行 motion planning 路线。上游所有成功先例都走 KSM 运动规划，raw IK 直达在本环境零先例 | `PHASE1_M1A_STATUS.md` 选项 B |
 
 **因此：任何 Phase 1 的「passed」都不得报为机器人效果。** `PHASE1_M1A_STATUS.md` 自己记着 stack_bowls stage 0-2 的 passed 是平凡真检查放行（物体没动）——这正是 `gates.py` 后来被引入的原因。
@@ -560,7 +560,9 @@ python3 -m harness.phase1 episode --task insert_tubes --task-id robodojo_insert_
 
 | # | 文档 | 权威范围 | 注意 |
 |---|---|---|---|
-| 1 | [`PROPOSAL.md`](PROPOSAL.md) | **当前唯一权威方案**：主张、假设 H1/H2/H3'、方法、验收门 | 2026-07-29；取代 v1 的执行策略 |
+| 1 | [`PROPOSAL.md`](PROPOSAL.md) | **当前唯一权威方案（v3）**：主张、框架分层、三条硬边界、冻结定义、假设 A1–A7 | v3，2026-07-30；v2 的 H1/H2/H3' 标签已由 A1–A7 取代 |
+| 1b | [`EXECUTION.md`](EXECUTION.md) | **执行文档**：实验与验收、代码框架、TODO、预算、环境约束 | 2026-07-30；取代 v2 §6 实验矩阵与 §8 TODO |
+| 1c | [`archive/PROPOSAL_v2.md`](archive/PROPOSAL_v2.md) | v2 归档；**§1.2 独家证据**、**§5 Phase 0 方法定义**、**§7 infra 拓扑**仍被活文档引用 | 执行策略作废，上述三块有效 |
 | 2 | [`harness/PHASE0_ROUND2.md`](../harness/PHASE0_ROUND2.md) | Phase 0 第二轮结果与终判 | 2026-07-30；P/R 数字以此为准 |
 | 3 | [`harness/PHASE1_M1A_STATUS.md`](../harness/PHASE1_M1A_STATUS.md) | Phase 1 现场状态与阻塞 | 顶部有 2026-07-30 上午的 reach 墙更新，先读顶部再读正文 |
 | 4 | [`harness/PHASE1_API_PLAN.md`](../harness/PHASE1_API_PLAN.md) | Phase 1 感知 API v1 设计 | **是计划不是现状**，12 个 API 零实现 |

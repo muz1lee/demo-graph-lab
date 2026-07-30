@@ -504,13 +504,18 @@ class KWRuntime:
         self._move([eef[0], eef[1], eef[2] + PREGRASP_DZ])
         _, q = self._cur_xquat()
         self._move(eef, quat=q, gpos=GRIP_OPEN)   # 下探时锁住已到位的腕姿,只走 z
-        # !! 2026-07-30 实测:本仿真栈的夹爪**根本不动**。set_gripper 任意角度、
-        # delta_move(gpos=...) 都不会改变 /state robot_qpos 里 12 个爪子自由度中的任何一个。
-        # 原因在栈侧:sim/robot_manager._apply_gripper_control 要 arm_id*8+7 这条控制通道,
-        # 而 v3 控制器每臂只出 7 个自由度(pipeline get_qpos 长度就是 7,没有夹爪通道)。
-        # MotorNode 还会秒回 result=SUCCESS——因为 _wait_gripper 拿"上一条指令值"跟目标比。
-        # 属于 k1-sys/knowin-world 的问题,不在我们可改范围;在通道接好之前捏取不可能成功。
-        # 另外 angle 会被 gripper.max_angle=100 截断,所以 160 实际等于 100(全闭)。
+        # !! 参数名只能是 angle。2026-07-30 晚更正:此前本注释断言"夹爪根本不动",
+        # 那是**测试用错参数名**得出的错误结论——用 gpos=... 调 set_gripper 会静默无效
+        # (pipeline 照样回 ok=True),导致画面零变化而被误读成通道不通。
+        # 用 angle=0..100 在 v4 栈(k1u_v4_w_claw_26w27_1d)上实测:腕部相机可见指垫开合,
+        # 图像 md5 与体积均变化。**夹爪可动,捏取不是不可能。**
+        # 仍然成立的三条:
+        #   ① angle 被 gripper.max_angle=100 截断,所以 160 实际等于 100(全闭);
+        #   ② MotorNode 会秒回 result=SUCCESS——_wait_gripper 拿"上一条指令值"跟目标比,
+        #      所以 SUCCESS 不能单独当"已到位"的证据,要看物理量或画面;
+        #   ③ is_gripping_sth 在本仿真恒假(见下),闭合无可靠回读。
+        # 教训:判断"通道通不通"前先确认参数名与调用形态,否则会把自己的调用错误
+        # 归因成栈的能力缺失。
         self._ctrl("set_gripper", angle=GRIP_CLOSE)
         time.sleep(3.5)   # 闭合无可靠回读(is_gripping_sth 在本仿真恒假),固定等待
 

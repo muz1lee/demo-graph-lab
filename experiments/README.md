@@ -19,7 +19,7 @@ Phase 1 已转到 5090 的 `arm_node + services/common`，所以**它作为活�
 2. **它是移植源**：`run_m1.py:152-160` 的冻结断言是**全仓唯一**把「冻结」做成可失败断言的代码。
    在把它搬进 `harness/phase1.py` 之前，不要动它。
    同理 `candidate_chain.py` 里三层漏斗每层的幸存者计数，是**消融 B 的原始数据入口**
-   （见 `../docs/PROPOSAL.md` §4.2 三层漏斗）。
+   （见 `../docs/PROPOSAL.md` §2.1 候选筛选链条；v2 原文在 `../docs/archive/PROPOSAL_v2.md` §4.2）。
 
 ## 退役条件
 

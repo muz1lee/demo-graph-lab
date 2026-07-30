@@ -79,6 +79,10 @@ def validate_action_args(skill, registry):
 
 #### 控制原语（`/ctrl/`）
 
+> ⚠️ **参数名不通用，且传错不报错。** `set_gripper` 只认 `angle`（0–100，被 `gripper.max_angle` 截断）；`gpos` 是 `qpos_move`/`xquat_move`/`delta_move` 的参数，传给 `set_gripper` 会被**静默丢弃且仍返回 `ok=True``**。
+> 2026-07-30 因此误判过一次「夹爪通道不通」，代价是十几轮排查。
+> 判据：`ok=True` 只说明请求被受理，**不说明参数被识别**——验证控制是否生效要看物理量或画面。
+
 | 端点 | 状态 | 真实参数（默认值） | LLM 可写参数 | 实现了但**写不出来**的参数 |
 |---|---|---|---|---|
 | `disable_arm` | BLOCKED | — | — | — |

@@ -6,7 +6,7 @@
 但**所有度量数值都留成洞**，执行时由现场感知填。同一条约束有两个消费者——既生成动作决策，
 又当阶段验收判据。编译一次、代码冻结，换场景只有感知返回值变，代码一个字节不动。
 
-权威方案 [`docs/PROPOSAL.md`](docs/PROPOSAL.md)（2026-07-29）· 投递目标 **RSS 2027**
+权威方案 [`docs/PROPOSAL.md`](docs/PROPOSAL.md)（v3，2026-07-30）· 执行文档 [`docs/EXECUTION.md`](docs/EXECUTION.md) · 投递目标 **RSS 2027**
 
 ---
 
@@ -88,7 +88,9 @@ python3 scripts/public_release_check.py
 
 | 先读 | |
 |---|---|
-| [`docs/PROPOSAL.md`](docs/PROPOSAL.md) | **当前唯一权威方案**：主张、假设、方法、验收门 |
+| [`docs/PROPOSAL.md`](docs/PROPOSAL.md) | **当前唯一权威方案（v3）**：主张、框架分层、硬边界、冻结定义、假设 A1–A7 |
+| [`docs/EXECUTION.md`](docs/EXECUTION.md) | **执行文档**：实验与验收、代码框架、TODO、预算、环境约束 |
+| [`docs/archive/PROPOSAL_v2.md`](docs/archive/PROPOSAL_v2.md) | v2 归档；**§1.2 独家证据**与 **§5 Phase 0 方法定义**仍有效（v3 未收录） |
 | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | 方法的细节视图 + 完整文档花名册 |
 | [`docs/STATUS.md`](docs/STATUS.md) | 现在到哪、卡在哪、下一步 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 关键裁决与理由（**改动前先查，避免重开已裁决的问题**） |
