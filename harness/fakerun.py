@@ -40,6 +40,7 @@ class FakeRuntime:
         self._log("verify", constraint=constraint.get("name"),
                   stage=constraint.get("_stage"))
         if (self._fail_once_at is not None and not self._failed_once
+                and not constraint.get("_probe")   # 入口探针不消耗注入的失败
                 and constraint.get("_stage") == self._fail_once_at):
             self._failed_once = True
             return False
@@ -57,9 +58,12 @@ class FakeRuntime:
 
 
 def run_policy(stage_handlers: dict, graph: dict, rt: FakeRuntime,
-               max_attempts: int = 2) -> dict:
-    """可信 runner:逐阶段 [handler → gate(acceptance 全过)],不过则重试,重试尽则回退标记。
-    两级 ReAct 的骨架在此,不在生成代码里。"""
+               max_attempts: int = 2, strict_gates: bool = True) -> dict:
+    """可信 runner:逐阶段 [入口快照 → handler → gate],不过则重试,重试尽则回退标记。
+    两级 ReAct 的骨架在此,不在生成代码里。
+    gate 由 harness.gates 判定:验收约束成立 **且** 世界确有变化(见该模块文档)。"""
+    from . import gates as gatemod
+
     result = {"stages": [], "ok": True}
     for st in graph["stages"]:
         idx = st["index"]
@@ -68,17 +72,21 @@ def run_policy(stage_handlers: dict, graph: dict, rt: FakeRuntime,
             result["stages"].append({"index": idx, "status": "no_handler"})
             result["ok"] = False
             continue
-        status = "failed"
+        status, verdict = "failed", None
         for attempt in range(max_attempts):
+            entry = gatemod.snapshot(rt, st)
             handler(rt)
-            gates = [dict(c, _stage=idx) for c in st.get("acceptance", [])]
-            if all(rt.verify(g) for g in gates):
+            verdict = gatemod.evaluate(rt, st, entry, strict=strict_gates)
+            if verdict["passed"]:
                 status = "passed" if attempt == 0 else f"passed_retry{attempt}"
                 break
         else:
             result["ok"] = False
-        result["stages"].append({"index": idx, "name": st["name"], "status": status})
+        result["stages"].append({"index": idx, "name": st["name"],
+                                 "status": status, "gate": verdict})
         if status == "failed":
             result["rollback_at"] = idx
             break
+    result["vacuous_pass_total"] = sum((s.get("gate") or {}).get("vacuous_pass", 0)
+                                       for s in result["stages"])
     return result

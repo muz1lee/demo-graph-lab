@@ -83,6 +83,46 @@ def test_enrich_propagation_and_order():
     assert propagate(graph) == 0        # derived 不作为来源,不链式扩散
 
 
+def test_gates_vacuity_and_effect():
+    """入口即为真的约束算空洞;操作类阶段必须有物体位移才放行。"""
+    from harness import gates
+
+    class FakeRT:
+        def __init__(self, positions, verdicts):
+            self.positions, self.verdicts = positions, verdicts
+
+        def _entities(self, max_age_s=0.0):
+            return {k: {"pos": v} for k, v in self.positions.items()}
+
+        def verify(self, c):
+            return self.verdicts.get(c["name"], True)
+
+    stage = {"index": 0, "name": "pick",
+             "stage_objects": {"manipulated": "bowl0", "target": "table"},
+             "acceptance": [{"name": "carry", "args": {}}]}
+
+    # 场景 A:约束入口即为真、物体没动 → 空洞,不放行
+    rt = FakeRT({"bowl0_prop": [0.5, 0.0, 0.79]}, {"carry": True})
+    entry = gates.snapshot(rt, stage)
+    v = gates.evaluate(rt, stage, entry)
+    assert v["constraints_hold"] and not v["passed"]
+    assert v["vacuous_pass"] == 1 and v["informative_pass"] == 0
+    assert "vacuous" in v["reason"]
+
+    # 场景 B:物体真的被抬起 → 放行
+    rt2 = FakeRT({"bowl0_prop": [0.5, 0.0, 0.79]}, {"carry": True})
+    entry2 = gates.snapshot(rt2, stage)
+    rt2.positions["bowl0_prop"] = [0.5, 0.0, 0.91]
+    v2 = gates.evaluate(rt2, stage, entry2)
+    assert v2["passed"] and v2["manip_displacement_m"] >= 0.05
+
+    # 场景 C:非操作类阶段(retreat)不要求位移
+    stage_c = dict(stage, name="retreat")
+    rt3 = FakeRT({"bowl0_prop": [0.5, 0.0, 0.79]}, {"carry": True})
+    v3 = gates.evaluate(rt3, stage_c, gates.snapshot(rt3, stage_c))
+    assert v3["passed"] and not v3["needs_effect"]
+
+
 def test_compile_static_check_rules():
     from harness.compilepolicy import static_check
     good = ("def stage_0(rt):\n    p = rt.solve('grasp_pose')\n    rt.grasp_at(p)\n"
