@@ -13,6 +13,10 @@ configs/pipeline_runtime.env
 /services/
 
 # Generated experiment artifacts
+# 注意:本段只放「可再生成的产物」。手写资产不要加到这里——
+# oracle/、tools/、*_AUDIT.md 曾被误列于此(它们是手写的),后果是 PREDICATE_AUDIT.md
+# 与 PROVENANCE_CORRECTION.md 已永久丢失、PRIMITIVE_API_AUDIT.md 在 5090 上取不到。
+# 2026-07-30 已移出并纳入版本控制。
 runs/
 outputs/
 artifacts/
@@ -22,12 +26,6 @@ audit/
 backups/
 camera_probe/
 demo_evidence/
-oracle/
-/tools/
-/DIRECTION_AUDIT_*.md
-/PRIMITIVE_API_AUDIT.md
-/PREDICATE_AUDIT.md
-/PROVENANCE_CORRECTION.md
 /*.jpg
 /*.png
 *.log

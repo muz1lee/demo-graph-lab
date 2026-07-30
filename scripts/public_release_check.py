@@ -65,6 +65,12 @@ SECRET_PATTERNS = {
     "AWS access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
     "Google API key": re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
+}
+
+# 只在「对外公开」时才算违规的模式。主仓 2026-07-29 起是内网 Gitea 私有仓,
+# 内部主机/端口在其中是正常且必要的(文档要能直接用),因此默认 profile=private
+# 时这些只报 WARN、不影响退出码;真要对外发布时跑 --profile public 清零。
+PUBLIC_ONLY_PATTERNS = {
     "internal service endpoint": re.compile(
         r"\b(?:"
         r"10(?:\.[0-9]{1,3}){3}|"
@@ -80,6 +86,7 @@ SECRET_PATTERNS = {
 class Violation:
     path: str
     reason: str
+    public_only: bool = False
 
 
 def release_candidate_paths(root: Path) -> list[Path]:
@@ -145,6 +152,9 @@ def scan(paths: list[Path], root: Path) -> list[Violation]:
         for label, pattern in SECRET_PATTERNS.items():
             if pattern.search(text):
                 violations.append(Violation(str(relative), f"possible {label}"))
+        for label, pattern in PUBLIC_ONLY_PATTERNS.items():
+            if pattern.search(text):
+                violations.append(Violation(str(relative), f"possible {label}", public_only=True))
     return violations
 
 
@@ -295,16 +305,32 @@ def validate_source_manifest(root: Path, candidates: list[Path]) -> list[Violati
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--profile",
+        choices=("private", "public"),
+        default="private",
+        help="private(默认,当前主仓形态):内部主机/端口只报 WARN;public:对外发布前的完整门禁",
+    )
     args = parser.parse_args()
     root = args.root.resolve()
     candidates = release_candidate_paths(root)
-    violations = scan(candidates, root)
-    violations.extend(validate_source_manifest(root, candidates))
-    if violations:
-        for violation in violations:
+    found = scan(candidates, root)
+    found.extend(validate_source_manifest(root, candidates))
+
+    if args.profile == "public":
+        errors, warnings = found, []
+    else:
+        errors = [v for v in found if not v.public_only]
+        warnings = [v for v in found if v.public_only]
+
+    for warning in warnings:
+        print(f"WARN {warning.path}: {warning.reason}", file=sys.stderr)
+    if errors:
+        for violation in errors:
             print(f"{violation.path}: {violation.reason}", file=sys.stderr)
         return 1
-    print("public release check: OK")
+    suffix = f" ({len(warnings)} warning)" if warnings else ""
+    print(f"release check [{args.profile}]: OK{suffix}")
     return 0
 
 
