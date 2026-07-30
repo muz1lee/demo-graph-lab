@@ -40,11 +40,11 @@
 | M1.b / M1b | **视频→图管线**（Codex T1/T2）（第 55 行） | **方法路径 v1**：dgl-perception 上线（感知 API #1–#9、GraspNet 移植），solve 切非特权（`:66-67`） | 语义完全不同 |
 | M1.c / M1c | 冻结协议 + **单任务 20 held-out seed**，双阈值 ≥16/20、≥12/20（第 65–71 行） | **首批数字**：insert_tubes + stack_bowls **各 20 seeds**（场景 000-164 现成），冻结 policy，首份成功率 + funnel（`:68-69`） | 语义相近但样本口径不同（1 任务 vs 2 任务）；PLAN 侧未写阈值 |
 
-历史引用面（决定「谁改名」的盘上证据）：`PROGRESS.md` 实验总账已有 **12 行 `M1.a` + 1 行 `M1.b`**（`PROGRESS.md:92-104`），全部是 v1 语义；`harness/PHASE1_M1A_STATUS.md` 通篇是 PLAN 语义。
+历史引用面（决定「谁改名」的盘上证据）：`PROGRESS.md` 实验总账已有 **12 行 `M1.a` + 1 行 `M1.b`**（`PROGRESS.md:156-168`），全部是 v1 语义；`harness/PHASE1_M1A_STATUS.md` 通篇是 PLAN 语义。
 
 ### S4 建议（**待 PI 拍板**；本次未改动正文任何编号）
 
-1. **推荐**：把 `harness/PHASE1_API_PLAN.md §5` 的三级阶梯改名为 **P1.1 集成冒烟（oracle 标注）/ P1.2 方法路径非特权 / P1.3 首批冻结数字**，本文件 M1.a/M1.b/M1.c 保持原编号作历史档案。理由：改动面 = PLAN §5 三处 + `harness/PHASE1_M1A_STATUS.md` 标题一处；反向改 v1 编号需动 `PROGRESS.md:92-104` 的 13 行历史实验索引，而那些行是已挣到的证据记录，改编号会打断可追溯性。
+1. **推荐**：把 `harness/PHASE1_API_PLAN.md §5` 的三级阶梯改名为 **P1.1 集成冒烟（oracle 标注）/ P1.2 方法路径非特权 / P1.3 首批冻结数字**，本文件 M1.a/M1.b/M1.c 保持原编号作历史档案。理由：改动面 = PLAN §5 三处 + `harness/PHASE1_M1A_STATUS.md` 标题一处；反向改 v1 编号需动 `PROGRESS.md:156-168` 的 13 行历史实验索引，而那些行是已挣到的证据记录，改编号会打断可追溯性。
 2. 同理建议 Phase 0 两轮提取器沿用 **P0.1 / P0.2** 指代（现为 `harness/PHASE0_ROUND1.md` / `PHASE0_ROUND2.md` 的 v0.1 / v0.2），全项目统一 **P\<phase\>.\<step\>** 命名。
 3. v2 §6 `:207` 承诺的「另文」建议只做两件事：按 RSS 2027（预计 2027-01/02 截稿）倒排 Phase 1/2 日期；把本文件正式降级为「闸门与止损判据规范源 + v1 历史排期」。正文的 M2.a 六组对照、M3 泛化阶梯、M4 写作清单建议整体搬入新文件，并按 v2 §6 补两条新基线（no-demo frontier agent、per-episode VLM 约束，`RESEARCH_PROPOSAL_V2.md:206`）。
 4. 若 PI 裁决相反（保 PLAN 编号、改本文件），则 §S3 表格的「本文件」列即为现成的改名映射表。
