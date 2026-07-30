@@ -572,7 +572,5 @@ python3 -m harness.phase1 episode --task insert_tubes --task-id robodojo_insert_
 | 10 | [`harness/DESIGN_GRASP_AND_LOOP.md`](../harness/DESIGN_GRASP_AND_LOOP.md) | 抓取姿态 / pose-in-hand / 闭环由谁来闭的设计裁定 | 2026-07-30；改的是方法设计不只是实现 |
 | 11 | [`harness/README.md`](../harness/README.md) | harness 目录说明 | ⚠️ 状态行停在 2026-07-29「脚手架」，**已过时** |
 | 12 | [`SECURITY.md`](SECURITY.md) | 发布策略与两档要求 | push 前必读 |
-| 13 | [`archive/MILESTONES.md`](archive/MILESTONES.md) | ⚠️ **SUPERSEDED**；仅**止损判据与验收阈值**仍有效（含唯一成文的 20-seed 阈值） | 顶部有逐条 SUPERSEDED 标注，正文行号是加注前的 |
-| 14 | [`archive/PROPOSAL_v1.md`](archive/PROPOSAL_v1.md) | v1（2026-07-26），执行策略已作废 | 只作历史参考 |
-| 15 | [`archive/DIRECTION_AUDIT.md`](archive/DIRECTION_AUDIT.md) / [`reference/PRIMITIVE_API.md`](reference/PRIMITIVE_API.md) | 竞品占位审计 / 控制原语审计 | 手写资产，曾被误列进 `.gitignore`，现已入库 |
-| 16 | [`archive/ALGORITHM_PLAN.md`](archive/ALGORITHM_PLAN.md) / [`archive/PLAN.md`](archive/PLAN.md) | v1 期规划 | 已被 v2 取代 |
+| 13 | [`archive/ARCHIVE.md`](archive/ARCHIVE.md) | v1 期 5 份文档（里程碑 / v1 提案 / 算法方案 / 首月计划 / 方向审计）的**合并归档本**：§1 止损判据与验收阈值、§2 实验矩阵与对照组、§3 方法规格与信息边界、§4 证据索引、§5 竞品与相关工作、§6 已作废方案及其原因 | ⚠️ **执行策略整体作废**；仅 **§1** 仍有效（含唯一成文的 20-seed 阈值）。文中「第 N 行」一律指各原文件的历史行号，不是本文件行号 |
+| 14 | [`reference/PRIMITIVE_API.md`](reference/PRIMITIVE_API.md) | 控制原语审计 | 手写资产，曾被误列进 `.gitignore`，现已入库 |

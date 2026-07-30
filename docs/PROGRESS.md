@@ -1,6 +1,6 @@
 # 进度总账：demo-graph-lab 约束图线
 
-项目方案见 `AGENTS.md`，算法细节见 `archive/ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
+项目方案见 `AGENTS.md`，算法细节见 `archive/ARCHIVE.md` §3。本文件只记「跑了什么、结果是什么、下一步」。
 最后更新 2026-07-30 15:51（HEAD `b726d62`；2026-07-29 18:40 `e1774f7` 起共 28 个 commit）。
 被 Git 忽略的 `configs/local/`。
 
@@ -24,7 +24,7 @@
 
 ## 0. 当前方向（2026-07-26 09:52 老板拍板）
 
-- **大方向不变**：`archive/ALGORITHM_PLAN.md`——演示视频 → 带约束图的子任务分解。核心约束四件事：**抓取的 DoF、放置的 DoF、抓取的位置、放置的点**。
+- **大方向不变**：`archive/ARCHIVE.md` §3.0——演示视频 → 带约束图的子任务分解。核心约束四件事：**抓取的 DoF、放置的 DoF、抓取的位置、放置的点**（定义见 `archive/ARCHIVE.md` §3.2）。
 - **效果优先，简化任务**：原话「我们要不就先实现抓一个试管放置也行，就先简化吧」。当前里程碑 **M1 = 单管：抓取 + 空中转 90° + 对准（+ 下插尝试）**，分五阶段漏斗打分（抓住/提起/转正/对准/插入尝试），容差放宽到孔半径量级。单管顺带绕开实例判别硬伤。
 - **仿真谓词的精度问题降级为「之后要修」**：原话「不是无休止去看最后插入多少 cm 或者 mm」。打分以阶段漏斗 + 视频为准。
 - **新颖性问题挂起**：原话「demo2code 这个方案我不知道有没有创新性……但先做出效果吧」。CaP-X 对照结论见第 3 节，先不纠结定位。
@@ -36,7 +36,7 @@
   这些量换名包装成 perception API。仿真真值只进隔离的 evaluator、sanity check 和 oracle 上界。
   主方法图必须保留 provenance 依赖链，任何依赖 `privileged_oracle` 的字段都应被拒绝。
 - **WHT 资产已沉淀为 components**：已有算法先保持原样，我们的新方法与 adapter 分目录增加。
-- **进度纪律**：每个里程碑更新本文件；新窗口依次读 `AGENTS.md`、`archive/ALGORITHM_PLAN.md` 和本文件。
+- **进度纪律**：每个里程碑更新本文件；新窗口依次读 `AGENTS.md`、`archive/ARCHIVE.md` §3 和本文件。
 - **当前运行状态**：pipeline 节点在 1022 以 GraspGen timeout 8 s / 外层 pick budget 10 s
   运行；没有 probe/grasp/录像进程。GraspGen worker 当前连接超时，候选生成仍是 fit-only
   降级链路。一次 grasp 控制授权已取得但尚未消费；只有只读日志确认 `graspgen>0` 后才继续，
@@ -60,8 +60,8 @@
 - **榜单结论**：RoboDojo 当前很难且适合作为目标，但本地 KW/KSM 是内部任务适配，不是官方
   Isaac Sim/XPolicyLab evaluator；截至审计时公开提交页仍是 Coming Soon。一个月先做 6-task
   mechanism suite，官方 adapter/full sweep 是 stretch goal，不能把 internal score 称为榜单成绩。
-- **信息边界修正**：`archive/ALGORITHM_PLAN.md` 中原先允许从 asset 几何/物理先验拿 DoF 和力阈值的两处
-  已删除。DoF 只能由演示/通用先验提出并经运行时感知验证；力阈值只能来自机器人通用安全上限和
+- **信息边界修正**：v1 算法方案中原先允许从 asset 几何/物理先验拿 DoF 和力阈值的两处
+  已删除（修正后的分层表见 `archive/ARCHIVE.md` §3.1）。DoF 只能由演示/通用先验提出并经运行时感知验证；力阈值只能来自机器人通用安全上限和
   有界主动探测。
 
 ### wht 动态（2026-07-28 22:15 调查，`runs/wht_progress_20260728/REPORT.md`）
@@ -206,7 +206,7 @@
 
 ## 2. 实验编号对照表
 
-`archive/ALGORITHM_PLAN.md` 的 B1–B4 是**四个对照组**（B1 只有指令 / B2 演示→纯文本 plan / B3 演示→约束图 / B4 人工 oracle 上界），今晚的 B4–B8 是**流水号**。只有 B4 碰巧重合。**不改矩阵定义，不重命名 run 目录，用这张表翻译。**
+`archive/ARCHIVE.md` §2.2 的 B1–B4 是**四个对照组**（B1 只有指令 / B2 演示→纯文本 plan / B3 演示→约束图 / B4 人工 oracle 上界），今晚的 B4–B8 是**流水号**。只有 B4 碰巧重合。**不改矩阵定义，不重命名 run 目录，用这张表翻译。**
 
 | 今晚流水号 | 矩阵位置 | 说明 |
 |---|---|---|
@@ -235,7 +235,7 @@
 - **唯一真正站得住的差异点是失败信用分配。** 案例研究原文："the model **retroactively implemented a fallback which only prevents the failure case it just encountered**"（附录编号：正文指向 **F.2.4**，不是 E.2.4）；Takeaway 3 里成功的 agent 靠自己插打印语句猜状态；他们的解法是并行集成（堆算力），而专门的 debug prompt 反而掉分（Table 5：68.29 → 65.43）。**但我们零证据**——B5 / B5.1 / B7 全是 `max_attempts=1` 单次采样，信用分配一次都没测过。
 - **Future Works 一节把我们的核心卖点写成了他们的一句话计划**："incorporating **optimization-based control primitives that allow agents to specify task-level constraints** and account for collision avoidance during motion planning"。不构成 prior work，但将来写 intro 必须正面引。
 - **对我们有利的两条**：同段承认 "remains brittle for **contact-rich** behaviors that require tight visual servoing and continuous feedback (e.g., **insertion** or pouring)"——插入是他们自认的软肋；附录自曝 "queries of 'alphabet soup can' to SAM 3 often results in segmentations of the 'tomato sauce can'"——和我们三根同型试管的实例判别失败是同一个病，他们也没解决。
-- **另外要自省一条**：B4 的 oracle 图没有按 `archive/ALGORITHM_PLAN.md` 自己的「typed hole」理念写。`world_z_offset_hint: 0.075` 是在"管竖直"隐含姿态下量的**世界系标量**，不是带类型和搜索域的洞；横躺场景下它直接导致夹爪在管上方 7 cm 闭合，0/3。
+- **另外要自省一条**：B4 的 oracle 图没有按 v1 算法方案自己的「typed hole」理念写（三要素判准见 `archive/ARCHIVE.md` §3.1，完整字段见 §3.10）。`world_z_offset_hint: 0.075` 是在"管竖直"隐含姿态下量的**世界系标量**，不是带类型和搜索域的洞；横躺场景下它直接导致夹爪在管上方 7 cm 闭合，0/3。
 
 ---
 

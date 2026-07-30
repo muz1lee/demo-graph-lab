@@ -1,10 +1,10 @@
 # Research Proposal v2：Demo → Constraint Programs（示范编译为约束程序）
 
 - 日期：2026-07-29
-- 状态：v2 草案，**取代 v1（`archive/PROPOSAL_v1.md`，2026-07-26）的执行策略**；方法主张与 v1 同源，路线重排
+- 状态：v2 草案，**取代 v1（2026-07-26）的执行策略**；方法主张与 v1 同源，路线重排。v1 提案及同期 4 份文档已合并归档为 `archive/ARCHIVE.md`
 - 投递目标：**RSS 2027**（主）；ICLR 2027 不再作为本线目标（时间与形态均不匹配，见 §1.3）
 - 本轮决策（老板 2026-07-29 拍板）：**Phase 0 先不动仿真机器人，只做「demo 视频理解」harness**，在 5090 服务器上以 4 个典型任务闭环；执行与冻结协议实验后置到 Phase 1/2
-- 关联：`archive/DIRECTION_AUDIT.md`（竞品与占位审计）、`PROGRESS.md`（实验总账，全部数字的权威出处）、`reference/constraint_graph_schema.md`（图 schema v0.2）
+- 关联：`archive/ARCHIVE.md` §5（竞品与占位审计）、`PROGRESS.md`（实验总账，全部数字的权威出处）、`reference/constraint_graph_schema.md`（图 schema v0.2）
 
 ---
 
@@ -203,8 +203,8 @@ harness/
 ## 6. Phase 1/2 与实验矩阵（预告，细化另文）
 
 - **Phase 1（执行绑定，5090 `knowin_sim_v2`）**：最小执行层对接 knowin-world；三层漏斗实装（wht `grasp_candidate_filter` 为第 1 层底座）；两级 ReAct；反事实法庭上线。
-- **Phase 2（冻结协议主实验）**：D/E seed 协议（T4 已有链路）；对照组沿 v1 六组，另加两条：**no-demo frontier agent**（VIA 式同 API，对攻击点-1）与 **per-episode VLM 约束**（ReKep 式，对攻击点-2）；成本/延迟摊销表；counterfactual 抓取场景（局部最优 vs 下游可行）。
-- 里程碑与止损沿 `archive/MILESTONES.md` 框架按 RSS 2027 倒排（另文更新）。
+- **Phase 2（冻结协议主实验）**：D/E seed 协议（T4 已有链路）；对照组沿 v1 六组（定义见 `archive/ARCHIVE.md` §2.1），另加两条：**no-demo frontier agent**（VIA 式同 API，对攻击点-1）与 **per-episode VLM 约束**（ReKep 式，对攻击点-2）；成本/延迟摊销表；counterfactual 抓取场景（局部最优 vs 下游可行）。
+- 里程碑与止损沿 `archive/ARCHIVE.md` §1（止损判据与验收阈值，v1 期唯一成文出处）按 RSS 2027 倒排。**该「另文」至 2026-07-30 仍未产出**；在它产出前，闸门与阈值一律直接引用 `archive/ARCHIVE.md` §1.1/§1.2/§1.4/§1.6。
 
 ## 7. Infra 与工作方式（2026-07-29 起）
 
@@ -231,7 +231,7 @@ harness/
 9. 按首轮结果修订 §5.4 阈值并留痕。
 
 **一月内**
-10. Phase 0 验收门裁决 → 启动 Phase 1（最小执行层设计另文）；RSS 2027 倒排里程碑更新进 `archive/MILESTONES.md`。
+10. Phase 0 验收门裁决 → 启动 Phase 1（最小执行层设计另文）；RSS 2027 倒排里程碑**新建一份活文档**承载（v1 里程碑已并入 `archive/ARCHIVE.md`，归档本不再接受更新；判据基线见其 §1，新文件应做的两件事见其 §1.4 末）。
 
 **学生（不新增负担）**
 - wht：继续执行侧；仅需一次性指认 4 任务素材的权威路径。
@@ -247,4 +247,4 @@ harness/
 | 伺服/H3 | 独立假设+闸门 | 并入两级 ReAct 的「连续绑定」档位（§4.4/4.5） |
 | 投递 | RSS/ICRA 2027（后被 ICLR 讨论覆盖） | **RSS 2027**（定） |
 | 新增 | — | 歧义对实验、三层漏斗纪律化、绑定档位、运动模式蒸馏、反事实法庭、no-demo/per-episode 两条新基线、理解层北极星 |
-| 证据索引 | 附录 A | 沿用 v1 附录 A 与 `PROGRESS.md`，不重复维护 |
+| 证据索引 | 附录 A | 沿用 v1 附录 A（现 `archive/ARCHIVE.md` §4.1）与 `PROGRESS.md`，不重复维护 |

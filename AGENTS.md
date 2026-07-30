@@ -5,10 +5,10 @@
 开始任何工作前必须依次读取：
 
 1. `AGENTS.md` §1–§7：方法边界、GT 防火墙、API 原则与验证纪律（长期稳定，路线变更不豁免）；
-2. `docs/PROPOSAL.md`（2026-07-29）：当前执行路线的权威来源，**取代 v1
-   `docs/archive/PROPOSAL_v1.md`**（取代关系由 `docs/PROPOSAL.md:4` 自声明）；
+2. `docs/PROPOSAL.md`（2026-07-29）：当前执行路线的权威来源，**取代 v1 期路线**（v1 提案与其余
+   4 份 v1 期文档已合并归档为 `docs/archive/ARCHIVE.md`；取代关系由 `docs/PROPOSAL.md:4` 自声明）；
 3. `harness/PHASE0_ROUND2.md`、`harness/PHASE1_M1A_STATUS.md`：最近一轮实测数字与当前阻塞；
-4. `docs/archive/ALGORITHM_PLAN.md`：方法假设与四阶段拆解；
+4. `docs/archive/ARCHIVE.md` §3：方法规格与信息边界（v1 期方法假设的合并归档本）；
 5. `docs/PROGRESS.md`：历史实验总账（⚠️ 更新纪律未被执行，见 §8.5）。
 
 完整文档花名册与每份文档的权威范围见 §8.1；逐份阅读顺序与禁读清单见 §8.2。
@@ -211,8 +211,8 @@ workflow 无报错执行完不等于任务成功。评价应同时保留：
 
 Demo2Code、CaP-X 及相关工作构成强基线，因此“演示到代码”或“结构化中间表示”本身不能直接
 作为新颖性结论。潜在贡献必须由机制和实验支持，例如几何 typed holes、约束双向编译、
-跨节点资源约束或失败信用分配。新颖性判断与最新文献结论记录在 `docs/archive/ALGORITHM_PLAN.md` 或
-专门的研究笔记中，不写在本文件。
+跨节点资源约束或失败信用分配。新颖性判断与最新文献结论记录在 `docs/archive/ARCHIVE.md`
+（§3.8 机制/竞品判断、§5.1 已被占据的主张）或专门的研究笔记中，不写在本文件。
 
 ## 8. 产物与上下文管理
 
@@ -233,11 +233,8 @@ Demo2Code、CaP-X 及相关工作构成强基线，因此“演示到代码”�
 | `harness/goldset/RUBRIC.md` | 金标标注口径 | ✅ 有效 |
 | `docs/reference/constraint_graph_schema.md` | 约束图 schema v0.2 | ✅ 有效 |
 | `docs/reference/PRIMITIVE_API.md` | 现有 ctrl 原语的 USABLE 参数面 | ✅ 有效；Phase 1 ctrl 映射依据（`harness/PHASE1_API_PLAN.md:52`） |
-| `docs/archive/DIRECTION_AUDIT.md` | 竞品与占位审计 | ⚠️ 自标「讨论稿」，但被 `docs/PROPOSAL.md:7` 列为关联文档 |
-| `docs/archive/ALGORITHM_PLAN.md` | 方法假设与四阶段拆解 | ⚠️ 2026-07-26 后未修订，与 v2 的 Phase 划分未对齐 |
+| `docs/archive/ARCHIVE.md` | v1 期 5 份文档的合并归档本：§1 止损判据与验收阈值、§2 实验矩阵与对照组、§3 方法规格与信息边界、§4 证据索引、§5 竞品与相关工作、§6 已作废方案及其原因 | ⚠️ **执行策略整体作废**（周排期、里程碑单位、部署拓扑、投递目标已由 v2 取代）；但 **§1 的闸门与阈值仍然有效**，且是全项目唯一成文出处 |
 | `docs/PROGRESS.md` | 历史实验总账（B7、slotgeom、D1–D5、wht 动态的原始证据路径） | ⚠️ stale，见 §8.5；「唯一动态总账」的**制度**位置不变 |
-| `docs/archive/PROPOSAL_v1.md` | v1 路线 | ❌ 执行策略已被 v2 取代（`docs/PROPOSAL.md:4`） |
-| `docs/archive/PLAN.md`、`docs/archive/MILESTONES.md` | 首月迁移计划与里程碑框架 | ❌ 部署拓扑已作废（仍写 1022/1024，见 §9.2） |
 | `README.md`、`docs/SECURITY.md` | 对外说明与安全边界 | ⚠️ 仍含过时 1022/1024 边界，待按 §9 同步修订 |
 
 ### 8.2 新窗口阅读顺序（硬性）
@@ -251,9 +248,9 @@ Demo2Code、CaP-X 及相关工作构成强基线，因此“演示到代码”�
 5. 要动 API / 适配器 / 抓取选择时补读 `harness/PHASE1_API_PLAN.md` 与
    `harness/DESIGN_GRASP_AND_LOOP.md`；
 6. `docs/PROGRESS.md` —— 只当**历史证据库**查（B7、slotgeom、D1–D5、wht 动态），不要当作当前状态；
-7. `docs/archive/ALGORITHM_PLAN.md`、`docs/reference/constraint_graph_schema.md` —— 需要方法层或 schema 细节时查。
+7. `docs/archive/ARCHIVE.md` §3、`docs/reference/constraint_graph_schema.md` —— 需要方法层或 schema 细节时查。
 
-❌ 不得以 `docs/archive/PROPOSAL_v1.md`（v1）、`docs/archive/PLAN.md`、`docs/archive/MILESTONES.md` 作为当前路线依据。
+❌ 不得以 `docs/archive/ARCHIVE.md` 里的 v1 期**执行策略**（周排期、里程碑单位、部署拓扑、投递目标）作为当前路线依据；该文件只有 **§1 的止损判据与验收阈值**仍然有效并可直接引用。
 
 ### 8.3 run 产物、里程碑更新与并发纪律
 
@@ -332,9 +329,9 @@ subagent 不直接编辑 `docs/PROGRESS.md`，只向主 agent 返回证据，避
   （如 `knowin-world-data`）与既有 venv；**禁止**写入、部署、改配置或启停其服务。历史上曾误把
   工作副本放进该树，操作指引不得再指向那里。
 - ⚠️ 同一段过时的 1022/1024 边界文本在仓内仍有多处副本：`README.md:16,18`、`docs/PROGRESS.md:9-14`、
-  `docs/SECURITY.md:18,20`，另有 `docs/archive/PLAN.md:164-165`、`docs/archive/MILESTONES.md:30,161`、
-  `experiments/insert_tubes/README.md:3-4` 及 `components/` 下若干 README。本次只改本文件，其余
-  需单独补丁同步；未同步前一律以本节为准。
+  `docs/SECURITY.md:18,20`、`experiments/insert_tubes/README.md:3-4` 及 `components/` 下若干
+  README。本次只改本文件，其余需单独补丁同步；未同步前一律以本节为准。（v1 期文档里的同段文本
+  已随 `docs/archive/ARCHIVE.md` §6.7 归档为「已作废」，不再需要同步。）
 
 ### 9.3 Git 同步工作流（mac ↔ 内网 Gitea ↔ 5090）
 
