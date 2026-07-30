@@ -1,4 +1,4 @@
-"""公共工具:.env 加载、run 目录、成本账本、JSON IO。零第三方依赖。"""
+"""[common · 路径锚点] 公共工具:.env 加载、run 目录、成本账本、JSON IO。零第三方依赖。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""metrics:对照 report.html 导出的金标 JSON 计算提取指标。
+"""[phase0 9/9 · metrics] metrics:对照 report.html 导出的金标 JSON 计算提取指标。
 
 金标格式(report.exportGold 产物): stages{<idx>: {constraints:[{key,verdict,note}],
 acceptance:[...], missing:[{name,args,note}]}}。

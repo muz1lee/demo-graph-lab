@@ -1,4 +1,4 @@
-"""compile:graph.json + API 契约 → policy.py(Opus 一次性)→ AST 静态双检 → fake 干跑。"""
+"""[compile] compile:graph.json + API 契约 → policy.py(Opus 一次性)→ AST 静态双检 → fake 干跑。"""
 
 from __future__ import annotations
 

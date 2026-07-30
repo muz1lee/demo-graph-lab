@@ -1,4 +1,4 @@
-"""report:单文件 report.html——关键帧+提取结果+校验+金标标注(导出 JSON)。"""
+"""[phase0 8/9 · report] report:单文件 report.html——关键帧+提取结果+校验+金标标注(导出 JSON)。"""
 
 from __future__ import annotations
 

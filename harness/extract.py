@@ -1,4 +1,4 @@
-"""extract:逐阶段调 Opus 提取 {constraints, acceptance, holes},k 采样多数票合并。"""
+"""[phase0 5/9 · extract] extract:逐阶段调 Opus 提取 {constraints, acceptance, holes},k 采样多数票合并。"""
 
 from __future__ import annotations
 

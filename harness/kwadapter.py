@@ -1,4 +1,4 @@
-"""KWRuntime:contract.Runtime 的 knowin-world 实现(M1a ORACLE 模式)。
+"""[phase1] KWRuntime:contract.Runtime 的 knowin-world 实现(M1a ORACLE 模式)。
 
 - ctrl → pipeline :8000(现有原语,arm_id 0=左/1=右;零新增)
 - solve → M1a 用 EvalServer GET /state 的特权实体态(显式 ORACLE 标注,仅集成测试/上界;

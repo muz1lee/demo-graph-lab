@@ -1,4 +1,4 @@
-"""validate:V1 结构/词表校验 + 度量字面量扫描。铁律:args 里不得出现数值。"""
+"""[phase0 7/9 · validate] validate:V1 结构/词表校验 + 度量字面量扫描。铁律:args 里不得出现数值。"""
 
 from __future__ import annotations
 

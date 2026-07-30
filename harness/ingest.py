@@ -1,4 +1,4 @@
-"""ingest:定位任务视频与 refined trace → 抽帧 + meta.json 写入新 run 目录。"""
+"""[phase0 1/9 · ingest] ingest:定位任务视频与 refined trace → 抽帧 + meta.json 写入新 run 目录。"""
 
 from __future__ import annotations
 

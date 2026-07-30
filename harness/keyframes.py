@@ -1,4 +1,4 @@
-"""keyframes:每阶段按时间窗取 K 帧(首/末+等分),从视频精确抓取。v1 不做事件检测。"""
+"""[phase0 3/9 · keyframes] keyframes:每阶段按时间窗取 K 帧(首/末+等分),从视频精确抓取。v1 不做事件检测。"""
 
 from __future__ import annotations
 

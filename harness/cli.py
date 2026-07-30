@@ -1,4 +1,4 @@
-"""Demo 理解 harness CLI(Phase 0,无仿真)。设计见 RESEARCH_PROPOSAL_V2.md §5。
+"""[entry] Demo 理解 harness CLI(Phase 0,无仿真)。设计见 RESEARCH_PROPOSAL_V2.md §5。
 
 用法:
   python -m harness.cli ingest    --task insert_tubes [--video <mp4>] [--trace <json>]

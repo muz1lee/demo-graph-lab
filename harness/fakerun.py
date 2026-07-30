@@ -1,4 +1,4 @@
-"""Fake 运行时 + 可信 runner(两级 ReAct 骨架)。Phase 0 干跑用;Phase 1 换真适配器。"""
+"""[runtime] Fake 运行时 + 可信 runner(两级 ReAct 骨架)。Phase 0 干跑用;Phase 1 换真适配器。"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""objects:全视频物体注册表(一次 Opus 调用)。下游提取强制引用 registry id,治共指。"""
+"""[phase0 4/9 · objects] objects:全视频物体注册表(一次 Opus 调用)。下游提取强制引用 registry id,治共指。"""
 
 from __future__ import annotations
 

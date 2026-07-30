@@ -1,4 +1,4 @@
-"""Phase 1 CLI(在 5090 上运行,repo 根目录):
+"""[phase1 · entry] Phase 1 CLI(在 5090 上运行,repo 根目录):
 
   python -m harness.phase1 smoke   --task-id robodojo_insert_tubes_000
   python -m harness.phase1 episode --task insert_tubes --task-id robodojo_insert_tubes_000 \\

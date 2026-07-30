@@ -1,4 +1,4 @@
-"""封闭约束词表 v0（代码即规范）。
+"""[phase0 · 词表] 封闭约束词表 v0（代码即规范）。
 
 提取器只允许输出本词表中的约束；词表变更走 git review，禁止运行时扩词。
 设计依据见 RESEARCH_PROPOSAL_V2.md §4.1；schema 对齐 schema/constraint_graph_schema.md v0.2。

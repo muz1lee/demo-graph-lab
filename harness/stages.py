@@ -1,4 +1,4 @@
-"""stages:优先用 refined trace 的 segments;无 trace 时才走 VLM 切分(需人审)。
+"""[phase0 2/9 · stages] stages:优先用 refined trace 的 segments;无 trace 时才走 VLM 切分(需人审)。
 
 trace 格式(components/robot-subtask-seg/tests 为准): segments[{index,start_sec,end_sec,
 label,eef_event?,motion_type?,manipulated_object?,target_object?,role?,confidence?}]。
