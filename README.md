@@ -104,8 +104,10 @@ python3 scripts/public_release_check.py
 
 | 目录 | 定位 |
 |---|---|
-| **`harness/`** | ✅ **当前主线**：Phase 0 流水线 + Phase 1 适配器 `kwadapter.py` + 两级 gate `gates.py` |
-| `method/` `adapters/` `experiments/` | v1 期代码，**不删**——仍被测试与 `adapters.m1_bindings` 引用 |
+| **`harness/`** | ✅ **当前主线（v2）**：出**数字**。每个模块 docstring 第 1 行带阶段标签，`head -1 harness/*.py` 即归属图。见 [`harness/README.md`](harness/README.md) |
+| `method/` | **v1 协议与不变量层**：出**纪律**——冻结协议、provenance 防火墙、RunManifest、隔离沙箱，**harness 侧均无等价物**。这些是 v2 的 H1 假设所依赖、但还没写到的部分，不是旧代码。见 [`method/README.md`](method/README.md) |
+| `adapters/` | v1，但含唯一一条通往主线的活边（`kwadapter.py:17` → `knowin_world/pipeline.py`）。见 [`adapters/README.md`](adapters/README.md) |
+| `experiments/` | v1 期入口，现为**移植源**（冻结断言、消融 B 的幸存者计数）。见 [`experiments/README.md`](experiments/README.md) |
 | `components/` | WHT 组件的字节级只读快照，来源与脱敏记录在 `SOURCE_MANIFEST.json` |
 | `oracle/` `tools/` `schema/` `third_party/` | 手写资产。曾被误列进 `.gitignore`，代价是两份审计文档**已永久丢失** |
 | `runs/` `harness/runs/` | 实验产物，不进 git（**新 checkout 是空的**） |

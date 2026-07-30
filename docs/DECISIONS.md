@@ -160,6 +160,56 @@
 
 ---
 
+### D-11 v1/v2 双树共存：按能力退役，不按代次删除
+
+- **裁决**（2026-07-30）：`method/` `adapters/` `experiments/` 三棵 v1 树**保留**，逐模块退役而非整树删除。
+  判断规则：**「`RESEARCH_PROPOSAL_V2.md` 或实验矩阵里，有没有哪条假设/消融/验收门需要它？」**
+  有 → 留（哪怕当前无人 import）；没有 → 删。
+- **背景**：所有者提出「v2 是最新方案，之前没用的就该删」。这个判断对普通工程仓成立，本仓不成立。
+- **理由**：v1 实现的不是「v1 的方案」，而是 **v2 的 H1 假设所依赖、`harness/` 尚未实现的部分**。
+  实测 `grep 'freeze|frozen|digest|sha256|manifest' harness/*.py` 命中全是字符串字段——冻结协议
+  在 harness 侧零实现；而 v2 §0 北极星与 H1 都明确要求「策略代码**冻结后**的 held-out 成功率」，
+  v2 §0 第 6 行写明「执行与冻结协议实验**后置到 Phase 1/2**」（后置，不是取消）。
+  一句话：**v1 有纪律没数字，v2 有数字没纪律，RSS 2027 两样都要。**
+- **影响**：确认可删的只有 `adapters/runtime_doctor.py`（3 行 `import *` shim，本体在
+  `adapters/knowin_world/runtime_doctor.py` 且有两条正规入口）。其余保留并加代次 README。
+- **状态**：生效。逐树说明见 `method/README.md`、`adapters/README.md`、`experiments/README.md`。
+
+### D-12 `harness/` 不建阶段子包，改用 docstring 阶段标签
+
+- **裁决**（2026-07-30）：`harness/` 下 19 个 `.py` **保持平铺**，在每个模块 docstring 第 1 行
+  加阶段前缀（`[phase0 N/9]` / `[compile]` / `[runtime]` / `[phase1]` / `[common]`）。
+  `head -1 harness/*.py` 即完整归属图。
+- **背景**：所有者反馈「19 个文件平铺，看不出谁属于哪个阶段，太失控」。诉求正当，
+  原方案是建 `phase0/` `compile/` `phase1/` `common/` 子包。
+- **理由**（对抗审阅的 4 条 blocker，均盘上复核成立）：
+  1. `util.py:11` 的 `HARNESS_ROOT` 是全 harness 唯一 `__file__` 锚点，`prompts`/`runs`/`.env`
+     三类资产由它派生；下移一层会**静默**把产物写到新位置，50MB 旧 `runs/` 变孤儿且不报错。
+  2. `util.py:18` 的 `.env` 不存在时静默跳过——本地已 `export` key 则一切照跑，到 5090 才炸。
+  3. `phase1.py → phase1/runner.py` 会硬破 `python -m harness.phase1`（破口在仓外，5090 上的
+     tmux/wrapper 本机 grep 覆盖不到）。
+  4. `contract.py` + `fakerun.py` 进 `phase1/` 会造成 **compile → phase1 反向依赖**
+     （`compilepolicy.py:14` import contract），与 phase0→compile→phase1 流向相反。
+  收益侧：目标「一眼看出归属」已被标签方案 100% 达成，成本约为移动方案的 1%
+  （每文件恰好 1 增 1 删、行数不变 → 23 行 import 全不动、72 条 md 带行号锚零漂移）。
+- **例外**：`contract.py` 豁免标签、**内容一字节不改**——见 D-13。
+- **重开条件**：目录结构变更只在两个时点允许：(1) 进入 Phase 2 冻结协议前的「结构定型」；
+  (2) 开源复现包发布前。理由：`docs/` 的 file:line 引用是 provenance 链的一部分，
+  其失效成本与代码变更频率成正比，而 `kwadapter.py`/`gates.py` 当前仍是高频变更目标。
+- **状态**：生效（commit `458f37c`）。
+
+### D-13 `harness/contract.py` 是版本化的 prompt 资产，改内容按改提示词的纪律走
+
+- **裁决**（2026-07-30）：`contract.py` 的**文件内容**受提示词级别的变更纪律约束；
+  改文件名安全，改内容不安全。它豁免 D-12 的阶段标签。
+- **理由**：`compilepolicy.py:83` 用 `inspect.getsource(contract)` 把**整个文件（含模块 docstring）**
+  拼进编译提示词的 `## CONTRACT SOURCE` 段。改内容会**静默改变 LLM 的输入**，可能改变生成的
+  policy，而**没有任何工具会报这个错**——测试不覆盖 LLM 输出，门禁不看提示词内容。
+  改名安全是因为反射走 `module.__file__` 而非硬编码路径。
+- **影响**：任何对 `contract.py` 的内容改动，都应与「改 `harness/prompts/*.md`」同等对待：
+  单独 commit、说明对生成结果的预期影响、必要时重跑编译对照。
+- **状态**：生效。已记入 `harness/README.md`。
+
 ## 3. 次级裁决（同样已裁决，别重开）
 
 | ID | 裁决 | 日期 | 理由摘要 | 状态 | 证据 |

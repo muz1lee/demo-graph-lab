@@ -1,13 +1,24 @@
 # adapters：可信运行时边界
 
+> **代次**：v1（2026-07-26 定型），但**含唯一一条通往 v2 主线的活边** · **主线**：部分
+> **与主线的依赖边**：`harness/kwadapter.py:17 → adapters/knowin_world/pipeline.py`
+> （66 行纯 stdlib HTTP 客户端）。这是 harness 与本目录之间的**全部**代码通路。
+> **导入策略**：`__init__.py` 已于 2026-07-30 改惰性（PEP 562），`import harness.kwadapter`
+> 不再拖起 `method.*` 的 13 个模块。
+
 本目录只放**宿主侧**适配器，不把 Knowin World / GraspNet 源码或权重拷进仓库。
 
-| 子包 | 职责 |
-|---|---|
-| `knowin_world/` | EvalServer `reset/skill/finalize`、开发态 pipeline `/run`、runtime doctor |
-| `demo_bundle/` | 加载脱敏演示证据；遇特权标记 fail-closed |
-| `grasp_proposals/` | GraspNet 外部服务薄客户端 + 候选转 `ActionCandidate` |
-| `observability/` | Method API 审计落盘、拼装 `RunManifest` |
+| 子包 | 职责 | 状态 |
+|---|---|---|
+| `knowin_world/` | EvalServer `reset/skill/finalize`、开发态 pipeline `/run`、runtime doctor | `pipeline.py` **活**（Phase 1 在用）；`adapter.py` 的 `execute_skill` 范式已过时，但 `reset`/`finalize`/失败分类学无替代 |
+| `demo_bundle/` | 加载脱敏演示证据；遇特权标记 fail-closed | 被 harness 代码显式点名为「将来接入点」 |
+| `grasp_proposals/` | GraspNet 外部服务薄客户端 + 候选转 `ActionCandidate` | 当前无 importer，但正对准在飞的 GraspNet 移植（见 `harness/DESIGN_GRASP_AND_LOOP.md`） |
+| `observability/` | Method API 审计落盘、拼装 `RunManifest` | 服务 H1 冻结协议，harness 侧零等价物 |
+
+> ⚠️ `adapter.py`（本目录）与 `harness/kwadapter.py` **方向相反**：前者是 GT 防火墙客户端、
+> **拒绝** `GET /state`；后者是 ORACLE-M1A 模式下的 `/state` 读取器。名字像，用途相反。
+
+退役条件与逐模块理由见 `../method/README.md` 的通用规则与 `../docs/DECISIONS.md`。
 
 根模块还保留：
 
