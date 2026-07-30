@@ -7,7 +7,7 @@
     "byte_exact_check": "Post-import rsync checksum verification produced no differences for all allowlisted files before sanitization; after sanitization it produced exactly one expected difference at robot-subtask-seg/src/robot_subtask_seg/cli.py.",
     "aggregate_input_format": "For each component: sorted <relative_path>\\t<file_sha256>\\n; global: sorted <component_name>\\t<component_aggregate_sha256>\\n. SOURCE_MANIFEST.json is excluded from all digests."
   },
-  "global_aggregate_sha256": "4dc0b82ed46522ec6696cf814e9bb46e3fc0344fbaed1b3fb6372462e49ac4b8",
+  "global_aggregate_sha256": "59e26bb53f184d51406f283831d6d4a5f7be29aa17d4a58e686cfb3f18fbaab2",
   "component_count": 4,
   "file_count": 136,
   "components": {
@@ -44,7 +44,7 @@
         "*.pyc"
       ],
       "file_count": 66,
-      "aggregate_sha256": "d5a09fa287cbd0dc4a5266569ac215149d9ec10ef54426271c3af0a3916ec559",
+      "aggregate_sha256": "bb7870468fb6a101eb4d10d4bf6b2e8b8383abae8810d1bfe5521a8c898144af",
       "files": [
         {
           "path": "aspire_skill_library/feedback_repair.md",
@@ -78,8 +78,14 @@
         },
         {
           "path": "docs/README.md",
-          "size_bytes": 1432,
-          "sha256": "08a1cc4ac2d123c67655358006de48a0bf8c9329f23cecd653ff8774d3e99bae"
+          "size_bytes": 1758,
+          "sha256": "fe5f5ff11933eebb09d50ec874e4aa154a309b8607f5301df09e101a2757e8df",
+          "provenance": {
+            "upstream_sha256": "08a1cc4ac2d123c67655358006de48a0bf8c9329f23cecd653ff8774d3e99bae",
+            "sanitized_sha256": "fe5f5ff11933eebb09d50ec874e4aa154a309b8607f5301df09e101a2757e8df",
+            "patch_reason": "remove internal host paths and superseded deployment guidance",
+            "patch_scope": "Replace absolute /mnt/workspace/wht/... paths with placeholders and correct the stated iteration host; documentation only, no code, configuration default, or call flow changed."
+          }
         },
         {
           "path": "ksm/__init__.py",
@@ -293,8 +299,14 @@
         },
         {
           "path": "README.md",
-          "size_bytes": 4136,
-          "sha256": "502cb52cfa2b463f1a6f7afe0601f2a389f8c2e80a4af36f66046895c5308125"
+          "size_bytes": 4349,
+          "sha256": "ee5c75910d2b4a712197e771facca69a5e91e730d5433546df932a933fd5beb8",
+          "provenance": {
+            "upstream_sha256": "502cb52cfa2b463f1a6f7afe0601f2a389f8c2e80a4af36f66046895c5308125",
+            "sanitized_sha256": "ee5c75910d2b4a712197e771facca69a5e91e730d5433546df932a933fd5beb8",
+            "patch_reason": "remove internal host paths and superseded deployment guidance",
+            "patch_scope": "Replace absolute /mnt/workspace/wht/... paths with placeholders and correct the stated iteration host; documentation only, no code, configuration default, or call flow changed."
+          }
         },
         {
           "path": "robodojo_stage_guides/put_single_object_into_container.yaml",
@@ -665,7 +677,7 @@
         "*.pyc"
       ],
       "file_count": 7,
-      "aggregate_sha256": "477abd2d3652ac1cfbfcb9cae988d790e28999c4242a15db8ff8fd6021fc002d",
+      "aggregate_sha256": "38fb8f7f279d85f5534ffaa3731653a5ffb69815c9fce49f67bfc953d16d16d6",
       "files": [
         {
           "path": "pyproject.toml",
@@ -674,8 +686,14 @@
         },
         {
           "path": "README.md",
-          "size_bytes": 1016,
-          "sha256": "e179ead005bdbea05abf9cf4d7b90f2f2e9176fbb7cb749cec1dd0c99ef7e9ce"
+          "size_bytes": 1209,
+          "sha256": "4c27e6bafc3a99b90d39f320e8bca8e733533ca2ee08ad20195c2d318f5b5379",
+          "provenance": {
+            "upstream_sha256": "e179ead005bdbea05abf9cf4d7b90f2f2e9176fbb7cb749cec1dd0c99ef7e9ce",
+            "sanitized_sha256": "4c27e6bafc3a99b90d39f320e8bca8e733533ca2ee08ad20195c2d318f5b5379",
+            "patch_reason": "remove internal host paths and superseded deployment guidance",
+            "patch_scope": "Replace absolute /mnt/workspace/wht/... paths with placeholders and correct the stated iteration host; documentation only, no code, configuration default, or call flow changed."
+          }
         },
         {
           "path": "src/video_perception_service/__init__.py",
@@ -726,7 +744,7 @@
         "*.pyc"
       ],
       "file_count": 17,
-      "aggregate_sha256": "fb301cf13e0601ef4152b2f1739caa299ba3bbdee0f55ffc4bc117b7a9035c1e",
+      "aggregate_sha256": "a5f1cde5fe1df16054c3991c87f08fc900fc9187b0860c6d4cdb8afff46f41e6",
       "files": [
         {
           "path": "independent_tools/graspnet/__init__.py",
@@ -805,8 +823,14 @@
         },
         {
           "path": "independent_tools/graspnet/service/README.md",
-          "size_bytes": 1871,
-          "sha256": "17c0473d1214ec4c1f2d0d5a9644a2513d4473a1d7509beadca4b9b15b823195"
+          "size_bytes": 1901,
+          "sha256": "bb325a22b85de04e78d471695f109e818453abe1d9c7350f612c601d401c1de4",
+          "provenance": {
+            "upstream_sha256": "17c0473d1214ec4c1f2d0d5a9644a2513d4473a1d7509beadca4b9b15b823195",
+            "sanitized_sha256": "bb325a22b85de04e78d471695f109e818453abe1d9c7350f612c601d401c1de4",
+            "patch_reason": "remove internal host paths and superseded deployment guidance",
+            "patch_scope": "Replace absolute /mnt/workspace/wht/... paths with placeholders and correct the stated iteration host; documentation only, no code, configuration default, or call flow changed."
+          }
         },
         {
           "path": "independent_tools/graspnet/tests/test_graspnet_tools.py",
@@ -860,6 +884,38 @@
       "sanitized_sha256": "fda08dd787284fdf875d3036895bbb94db300ee0145974d512dbb672c0d5cb21",
       "patch_reason": "remove internal default endpoint",
       "behavior_boundary": "default configuration only; no algorithm or call flow changed"
+    },
+    {
+      "component": "knowin-skill-manager",
+      "path": "README.md",
+      "upstream_sha256": "502cb52cfa2b463f1a6f7afe0601f2a389f8c2e80a4af36f66046895c5308125",
+      "sanitized_sha256": "ee5c75910d2b4a712197e771facca69a5e91e730d5433546df932a933fd5beb8",
+      "patch_reason": "remove internal host paths and superseded deployment guidance",
+      "behavior_boundary": "documentation only; no algorithm, API, or runtime behavior changed"
+    },
+    {
+      "component": "knowin-skill-manager",
+      "path": "docs/README.md",
+      "upstream_sha256": "08a1cc4ac2d123c67655358006de48a0bf8c9329f23cecd653ff8774d3e99bae",
+      "sanitized_sha256": "fe5f5ff11933eebb09d50ec874e4aa154a309b8607f5301df09e101a2757e8df",
+      "patch_reason": "remove internal host paths and superseded deployment guidance",
+      "behavior_boundary": "documentation only; no algorithm, API, or runtime behavior changed"
+    },
+    {
+      "component": "video-perception-service",
+      "path": "README.md",
+      "upstream_sha256": "e179ead005bdbea05abf9cf4d7b90f2f2e9176fbb7cb749cec1dd0c99ef7e9ce",
+      "sanitized_sha256": "4c27e6bafc3a99b90d39f320e8bca8e733533ca2ee08ad20195c2d318f5b5379",
+      "patch_reason": "remove internal host paths and superseded deployment guidance",
+      "behavior_boundary": "documentation only; no algorithm, API, or runtime behavior changed"
+    },
+    {
+      "component": "grasp-proposal-tools",
+      "path": "independent_tools/graspnet/service/README.md",
+      "upstream_sha256": "17c0473d1214ec4c1f2d0d5a9644a2513d4473a1d7509beadca4b9b15b823195",
+      "sanitized_sha256": "bb325a22b85de04e78d471695f109e818453abe1d9c7350f612c601d401c1de4",
+      "patch_reason": "remove internal host paths and superseded deployment guidance",
+      "behavior_boundary": "documentation only; no algorithm, API, or runtime behavior changed"
     }
   ]
 }

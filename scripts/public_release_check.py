@@ -28,7 +28,6 @@ FORBIDDEN_PARTS = {
     "knowin-world-data",
     "logs",
     "models",
-    "oracle",
     "outputs",
     "repos",
     "runs",
@@ -36,6 +35,9 @@ FORBIDDEN_PARTS = {
     "venv",
     "weights",
 }
+# 只在对外公开时才排除的目录。`oracle/` 是人工手写的上界基准图,属研究资产,
+# 需要版本控制;GT 防火墙约束的是运行期数据流(方法代码不得读它),不是版本控制。
+PUBLIC_ONLY_PARTS = {"oracle"}
 FORBIDDEN_NAMES = {
     ".env",
     ".openaikey",
@@ -120,6 +122,10 @@ def scan(paths: list[Path], root: Path) -> list[Violation]:
         if parts & FORBIDDEN_PARTS or any(part.startswith(".venv") for part in parts):
             violations.append(Violation(str(relative), "forbidden path"))
             continue
+        if parts & PUBLIC_ONLY_PARTS:
+            violations.append(
+                Violation(str(relative), "path excluded from public release", public_only=True)
+            )
         if _forbidden_name(path):
             violations.append(Violation(str(relative), "forbidden filename or file type"))
             continue
