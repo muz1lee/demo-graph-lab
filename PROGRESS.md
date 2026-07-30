@@ -1,7 +1,7 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-27 12:00。路径若无前缀均相对本仓根目录；主机、密钥与本地 runtime 路径只保存在
+最后更新 2026-07-27 12:35。
 被 Git 忽略的 `configs/local/`。
 
 ## 硬边界更正（2026-07-26 用户紧急纠正）
@@ -15,7 +15,7 @@
 - GitHub 远程为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)
   （由旧名重命名）；本地 `origin` 已指向新 URL。
 
-**一句话状态**：selector=0 根因已定位为 **IK seed 缺当前 qpos**（32/32 `ik_residual_too_large`，`qpos_seeded=false`）；runtime 已补传 `left_qpos`/`right_qpos`（本地单测 14/14）。**硬阻塞**：GraspPipeline_Re `:5093` connection refused，纪律禁止重启 → D3 preflight / D4 grasp **未跑**（授权保留）。SAM3 :6068 healthy；GraspGen worker 5079 timeout 仍为记录性。
+**一句话状态**：qpos seed 修复已在原 `:5093` 实机验证（`qpos_seeded=true`，远端 `使用请求 qpos 作为 IK seed`）；但试管 pick **0/3** 仍 `selected=0`（100% `ik_residual_too_large`×32）。P3 grasp **未执行**（门禁未过，授权保留）。新硬阻塞从「缺 qpos」转为「seed 后 IK residual 仍全拒」。P1 自部署 `:5193` 进行中（源码已 rsync 至 `/mnt/data/wenqian/services/grasp_pipeline/`，venv/依赖安装中；宿主 GLIBC 2.35 需重编 `_poe_ik_cpp`）。SAM3 :6068 / sim 存活；GraspGen 5079 仍记录性超时。
 
 ## 0. 当前方向（2026-07-26 09:52 老板拍板）
 
@@ -59,6 +59,26 @@
   已删除。DoF 只能由演示/通用先验提出并经运行时感知验证；力阈值只能来自机器人通用安全上限和
   有界主动探测。
 
+### wht 动态（2026-07-28 22:15 调查，`runs/wht_progress_20260728/REPORT.md`）
+
+- **执行侧跨过了 7/26 的坎**：链路 sim 相机 → SAM3 binding → object_mask_3d → GraspNet `/predict` →
+  新服务 `grasp_candidate_filter`（排序+输出 arm base xquat）→ Function Call Adapter 单动作 wrapper
+  （`/ctrl/xquat_move`）→ KSM 执行。今晚 insert_tube 复测 t01–t10，抽查 5/5 单管插入成功（after 截图证据）。
+  **注意**：是确定性 python policy（人写脚本），不是 LLM 从图写代码；成功判定只有视觉抽样，
+  没找到谓词/评分文件，且未确认他是否修了谓词、rack 碰撞体在他用的运行时里是否有效。
+- **基础设施**：7/27 把组件 git 化（gitea 裸仓+bundle 备份），搭了 `knowin-world-next` 运行时和
+  `knowin-world-data-next` 数据根规范——与老板 7/26 提示的官方数据树
+  `/mnt/workspace/knowin_sim/sim_workspace/knowin-world-data` 可能同源，**我们那几条仿真物理缺陷
+  在 next 树里是否消失待验证**（数据树对比审计当时被中止，未出结论）。
+- **视频管线 7/23 后零变化**：insert_tubes 仍是 6 段粗 trace，无约束图产出。**演示→约束这半边
+  （矩阵 B3）仍然完全空着，这正是我们能帮上的位置。**
+- 他没有引用我们的任何产出（v2 谓词、PREDICATE_AUDIT、图 schema）。
+- **更正（7/28 23:00 核实）**：`/mnt/workspace/wht` 与 `/mnt/data/wht` 是**同一 CPFS 卷的两个挂载点**
+  （inode 一致），1021（他的容器）和 1022（我们的容器）看到的是同一份数据，不存在"本机不可见的
+  工作树"。真正容器本地的只有他的 `/root`（1021 可见），里面也没有 policy 脚本——python policy 的
+  驱动源码至今没落盘定位到；t10 的 `codex_harness_function_calls/*` 目录存在但为空（22:13，当时仍在跑）。
+  他 `/root/.qwen` 存在，复测大概率是 agent CLI 会话驱动而非独立脚本。
+
 ---
 
 ## 1. 实验总账
@@ -69,6 +89,7 @@
 | **B.1 · T2** | 关键帧夹爪-物体相对关系提取器 | 三次抓取均输出 `upper_body / axial / cross_axis`；与人工标注 **3/3** 一致；置信度 **0.9439 / 0.9639 / 0.7972** | 单关键帧 + CoTracker + object mask 可恢复粗粒度关系；未建全轨迹、未输出毫米级相对位姿 | `runs/t2_keyframe_relations_20260726_163026/{cases.json,relations.json}` | ✅ 盘上 3/3 |
 | **B.1 · T3** | 度量字面量静态扫描与冻结 gate | B7 已知照搬阳性 **3/3** 文件命中，共 **11** 条（4/5/2）；干净 `m1_fake.py` **0** 误报 | Python/YAML/JSON 扫描器可拒绝场景特定 pose/slot/offset 字面量；同一 gate 已接入 T4 冻结流程 | `runs/t3_metric_scan_20260726_163133/{b7_positive_scan.json,clean_policy_scan.json}` | ✅ 阳性 + 阴性 |
 | **B.1 · T4** | D/E seed 协议 fake backend 干跑 | D **3/3**、E **20/20** 完整执行；五阶段漏斗各为 3/3、20/20；**23** 份 RunManifest 仅 **1** 个 code digest；配置覆盖 E=100 | 冻结、seed 隔离、批量调度、manifest 与 funnel 链路通过；`effect_claims_allowed=false`，fake 结果不作机器人效果声明 | `runs/t4_seed_protocol_20260726_164708/{REPORT.md,protocol_snapshot.json,metric_scan.json,funnel_report.json,development/,held_out/}` | ✅ fake-only 干跑 |
+| **M1.a qposverify · 5093 窗口** | 原实例恢复窗口内验证 qpos seed + 条件 grasp | P2 probe **0/3**：三次均 `qpos_seeded=true` 但 selector=0（`ik_residual_too_large`×32）；候选链 fit16→IK32、graspgen=0/error；P3 未跑；P4 tube0 **21.53 mm / 22.90×**；实例=`:5093` | 修复侧生效；效果侧未过门禁；授权未消耗 | `runs/m1_preflight_qposverify_20260727_115721/` | ❌ T1 fail-closed；无控制 |
 | **M1.a selector=0 · qpos seed** | 定位 selected=0 并最小修复后验证 | D1：`ik_residual_too_large×32` + `qpos_seeded=false`；默认 seed=零位。D2：runtime 从 `/info/get_qpos` 取双臂 qpos 传入 `qwen_dof_xquat`（不改 knowin-world/5093）；单测 14/14。D3/D4：**:5093 宕机**未验证/未 grasp | 修复已就位；需周振秋恢复 5093 后再跑 probe×3（目标 ≥2/3 selected>0）与一次 grasp | `runs/m1_preflight_qposfix_20260727_115214/` + `runs/m1_preflight_probe_20260727_114334/` | ⚠️ 代码修复；实机验证硬阻塞 |
 | **M1.a grasp · SAM3 恢复后 T1** | SAM3 恢复后只读 preflight→条件允许则 grasp | SAM3 healthy；probe **0/3**，均 fit16→IK32、graspgen=0/error、**selector=0**；gating=`grasp_pose`；T2 未跑；T3 tube0 **22.22 mm / 0.94 = 23.64×** | 阻塞从 SAM3 refused 转移到 DOF selector；授权未消耗 | `runs/m1_preflight_probe_20260727_114334/` | ❌ T1 fail-closed；无控制 |
 | **M1.a preflight** | 在任何新控制前复核非特权感知入口 | 新鲜只读 probe **0/3** 通过：attempt 1/2 为 `grasp_pose + holder_pose` 未解；attempt 3 的 grasp/axis 可用，但 `holder_pose` 报 `place xquats empty` | 旧 probe 成功不能替代当前可执行性；当前感知/IK 输出有波动，未满足进入 `grasp/full` 的新鲜前置条件。全程 `control_sent=false` | `runs/m1_preflight_20260726_172712/{summary.json,probe_*.json,probe_*.exit,probe_*.stderr}` | ❌ 当前入口未通过；无控制 |
@@ -156,7 +177,7 @@
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo：** 等周振秋恢复 GraspPipeline_Re `:5093` 后，用已合入的 qpos seed 修复连跑只读 probe×3（目标 ≥2/3 `selected>0` 且 grasp `gating_holes=[]`），通过后立刻一次 `--mode grasp`。`--mode full` 仍禁止。证据 `runs/m1_preflight_qposfix_20260727_115214/`。
+1. **当前唯一主线 next todo：** P2 已确认 qpos seed 生效但仍 selected=0；并行完成 P1 自部署 `:5193`（重编 IK + 健康检查）后，用自有实例复跑 probe×3；通过后再一次 `--mode grasp`。`--mode full` 仍禁止。证据 `runs/m1_preflight_qposverify_20260727_115721/`。
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。
