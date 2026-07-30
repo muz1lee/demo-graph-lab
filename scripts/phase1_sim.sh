@@ -12,7 +12,7 @@ tmux new-session -d -s "$SESSION" \
   "cd $KNOWIN_REPO && .venv/bin/python -m sim.runtime \
      --data-root $KNOWIN_DATA_ROOT --tasks $SUITE \
      --serve --serve-port 7480 --backend cuda \
-     --web-host 0.0.0.0 --web-port 8080 \
+     --web-host 0.0.0.0 --web-port 8081 \
      --pipeline-url http://127.0.0.1:8000 \
      --k1-skill-root $KNOWIN_K1_SYS_ROOT \
      --runs-root $HOME/phase1/eval-runs \
