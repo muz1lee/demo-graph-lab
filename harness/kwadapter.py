@@ -25,13 +25,14 @@ IDLE_ARM = {0: 1, 1: 0}              # 右臂作业时先把左臂归位,反之�
 # ---- v3 实机标定(2026-07-30,phase1/orient_probe.py 扫描 + robot.urdf 核对)----
 # 1) 四元数一律 xyzw:arm_node.local_rotation_move 用 scipy R.from_quat(xquat[3:]),
 #    scipy 默认 xyzw;get_xquat 回读与 xquat_move 下发同序。
-# 2) **接近轴是工具 +x,不是 +z**。robot.urdf 里 r_joint7 的 child 是 r_claw_base_link
-#    (即 IK/FK 的 r_link7 帧),两根手指关节挂在 +x=0.097~0.104、绕 (0,0,1) 转、
-#    分居 y=±0.0398 → 爪子沿工具 +x 伸出,开合方向是工具 ±y。
-#    因此旧常数 GRASP_QUAT_TOPDOWN=[0,1,0,0] 让爪子指向世界 -x(水平朝后),根本不是
-#    top-down;实测该姿态族 4 个 yaw 全部到不了(pitch 只能到 8.7°~26.9°,位置还漂
-#    0.05~0.12 m)。正确的竖直姿态是 Ry(+90):把工具 +x 转到世界 -z。
-TDX0 = [0.0, 0.70710678, 0.0, 0.70710678]   # Ry(+90),爪子垂直朝下,指开合方向沿世界 +y
+# 2) **接近轴是工具 +Z**(2026-07-30 用户指出并经腕部相机实证纠正)。
+#    先前依 urdf 里手指连杆挂在 +x 而推断"接近轴=+x",并把姿态改成 Ry(+90) —— 错误。
+#    实证:在该姿态下腕部相机拍到**地平线**(桌沿 + 上方空背景),说明爪子是水平前伸;
+#    朝下时腕相机应被桌面填满。手指连杆的 +x 偏置是爪体自身的几何,不是 TCP 接近方向。
+#    → 恢复 Ry(180):把工具 +z 转到世界 -z,即爪子垂直朝下(与旧常数一致)。
+TDX0 = [0.0, 1.0, 0.0, 0.0]   # Ry(180):工具 +z → 世界 -z,爪子垂直朝下
+APPROACH_AXIS_IDX = 2         # _tool_axes 返回 (x,y,z);接近轴取 +z
+FINGER_AXIS_IDX = 1           # 开合轴 = 工具 +y
 # 3) 爪尖在 EEF 帧下方 CLAW_TIP_DZ 处(竖直朝下时)。标定:空桌面上方竖直下探,
 #    ee_extforce 从 ~1.1 N 跳到 56.8 N 时 EEF z=0.817,桌面 z=0.765 → 0.052 m。
 CLAW_TIP_DZ = 0.052
@@ -101,15 +102,15 @@ def _tool_axes(q):
 
 
 def _tdx(psi_deg):
-    """竖直朝下 + 绕接近轴(竖直轴)把开合方向转 psi;finger_axis == (sin psi, cos psi, 0)"""
-    return _qnorm(_qmul(TDX0, _qaxis([1, 0, 0], psi_deg)))
+    """竖直朝下 + 绕接近轴(工具 +z)把开合方向转 psi。"""
+    return _qnorm(_qmul(TDX0, _qaxis([0, 0, 1], psi_deg)))
 
 
 def _topdown_like(q):
     """离当前腕姿最近的竖直抓取姿态:pitch 压到朝下,但**保留腕部自己的 yaw**。
     实测该臂在够物区能把 pitch 做到 85~89°,但 yaw 转不动——强行改 yaw 会撞
     pair_id=178 (r_link5×r_link7),IK 直接拒绝、机械臂一动不动。"""
-    _, f, _ = _tool_axes(q)
+    f = _tool_axes(q)[FINGER_AXIS_IDX]
     return _tdx(math.degrees(math.atan2(f[0], f[1])))
 
 
