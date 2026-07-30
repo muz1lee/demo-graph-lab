@@ -1,3 +1,16 @@
+> **2026-07-30 上午更新:reach 墙已拆除。** 真因是**机器人代次错配**——C++ IK 加载 v4
+> 碰撞模型(`configs/sim_cfg.runtime.yaml:3`,7/28 commit `fe9cf85` 引入)而 Genesis 跑 v3
+> 机器人(场景 yaml),导致一个**与目标点无关的恒定幽灵自碰撞**(`pair_id=263`,v4 独有的
+> 头部云台 `gim_p` × **左**臂 `l_joint3`,`dmin≡-0.0479`),右臂每个笛卡尔解都被否决。
+> 按零污染方案修复:渲染我方 `~/phase1/cfg/sim_cfg.v3.yaml`(model + v3 `home/rest_qpos`
+> 取自 v4 引入前的 commit `e33369c`)、经 `ROBOT_CONFIG`/`ROBOT_MODEL` env 重启 pipeline,
+> **他们仓库零改动**。结果:幽灵碰撞 0 次;右臂 home x 0.08→**0.552**,前伸极限
+> 0.24→**0.678 零拒绝**;所有目标物体(碗 0.51/0.59/0.61、管 0.436)进入包络。
+> 附带结论:Remote IK 与本问题无关(`KNOWIN_IK_MODE` 在 Linux 无消费者,remote 服务包的
+> 是同一个 C++ 求解器);`knowin_sim_v4verify` 是 v2 的祖先 commit,**不迁**。
+> 剩余阻塞已换类:①姿态路径不可行(`rot_error` 沿路点 16°→52° 发散,`collision_free=true`)
+> ②gate 空过(已修,见 `harness/gates.py`)。详见下文与 PHASE1_API_PLAN。
+
 # Phase 1 M1a 夜间冲刺状态(2026-07-30 03:40 收工)
 
 ## 一句话
