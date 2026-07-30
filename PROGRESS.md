@@ -1,10 +1,15 @@
 # 进度总账：demo-graph-lab 约束图线
 
 项目方案见 `AGENTS.md`，算法细节见 `ALGORITHM_PLAN.md`。本文件只记「跑了什么、结果是什么、下一步」。
-最后更新 2026-07-27 12:35。
+最后更新 2026-07-30 15:51（HEAD `b726d62`；2026-07-29 18:40 `e1774f7` 起共 28 个 commit）。
 被 Git 忽略的 `configs/local/`。
 
 ## 硬边界更正（2026-07-26 用户紧急纠正）
+
+> ⚠️ **本节是 2026-07-26 的历史记录，不是当前规则**（2026-07-30 加注）。实验场地已于
+> 2026-07-29 迁至 5090，主仓改为内网 Gitea 私有仓、GitHub 停止维护。当前拓扑见
+> `AGENTS.md` §9 与 `README.md`。**保留本节的唯一目的是「禁止再做」那几条仍然有效**：
+> 不去 1024 NAS 部署、不写入其配置、不启停其服务。
 
 - **唯一技能迭代场地**：1022 `/mnt/data/wenqian/demo-graph-lab`（本地镜像：本仓）。对外名
   `demo-graph-lab`，不是 ksm。
@@ -15,7 +20,7 @@
 - GitHub 远程为 [`muz1lee/demo-graph-lab`](https://github.com/muz1lee/demo-graph-lab)
   （由旧名重命名）；本地 `origin` 已指向新 URL。
 
-**一句话状态**：qpos seed 修复已在原 `:5093` 实机验证（`qpos_seeded=true`，远端 `使用请求 qpos 作为 IK seed`）；但试管 pick **0/3** 仍 `selected=0`（100% `ik_residual_too_large`×32）。P3 grasp **未执行**（门禁未过，授权保留）。新硬阻塞从「缺 qpos」转为「seed 后 IK residual 仍全拒」。P1 自部署 `:5193` 进行中（源码已 rsync 至 `/mnt/data/wenqian/services/grasp_pipeline/`，venv/依赖安装中；宿主 GLIBC 2.35 需重编 `_poe_ik_cpp`）。SAM3 :6068 / sim 存活；GraspGen 5079 仍记录性超时。
+**一句话状态**：**Phase 0（演示→约束图，理解层）已达标**——v0.2 五任务 micro **P=0.931 / R=0.865**，两道验收门（P≥0.7、R≥0.8）全过，裁决「可开 Phase 1（执行绑定）」（`harness/PHASE0_ROUND2.md:16,39`；五个 run 的 `metrics.json` 已盘上逐个核对一致）。**Phase 1 只到 M1a·ORACLE 模式**：软件链 sim → EvalServer → `kwadapter` → 编译 policy → 两级 gate → episode 报告已通，reach 墙的真因定位为 **v3/v4 机器人代次错配**并按零污染方案绕过（右臂前伸极限 0.24→0.678），但**真实抓取 0 次**。当前两条阻塞：①姿态路径不可行（`rot_error` 沿路点 **16°→52°** 发散、`collision_free=true`）；②夹爪通道在本栈不通（v3 控制器每臂只出 7 DoF），捏取类抓取暂不可能成功。**Phase 1 全部产物带 `ORACLE-M1A` 标签，不得报为方法结果**；证据在 5090 `~/phase1/artifacts/`，**本 checkout 内没有任何 episode 产物**，相关数字均为文档声称、未盘上核实。旧的 1022 `:5093` / 自部署 `:5193` IK-seed 路线**不再是主线**（实验机与主仓已迁 5090，见 `RESEARCH_PROPOSAL_V2.md` §7），历史记录保留在第 1 节 M1.a 各行。
 
 ## 0. 当前方向（2026-07-26 09:52 老板拍板）
 
@@ -81,10 +86,69 @@
 
 ---
 
+## 0.5 Phase 0（演示理解层）验收 · 2026-07-29 → 2026-07-30
+
+两轮跑完 **5 任务 × k=5 提取 + 独立金标标注 + 指标**。**裁决：Phase 0 理解层达标，可开 Phase 1（执行绑定）**（`harness/PHASE0_ROUND2.md:39`）。v0.2 的杠杆：object registry / 同类阶段传播+order / `holds` 时序标记 / cone=接触法向 / cleanup 段入图 / 窗口与装配告警。金标 v2 由独立标注者重标（未读 v1 金标），产物 `harness/goldset/*_gold_v2.json`（5 任务齐，✅ 盘上核实）。
+
+### 0.5.1 v0.1 → v0.2 逐任务 P/R
+
+数字取自 `harness/PHASE0_ROUND2.md:9-16`，不重算。
+
+| 任务 | P（v0.1→v0.2） | R（v0.1→v0.2） | 备注 |
+|---|---|---|---|
+| insert_tubes | 0.919→**0.978** | 0.872→**0.882** | 双升 |
+| stack_bowls | 0.818→**1.0** | 0.621→**0.976** | 最差变最好；registry 治好「一碗三名」 |
+| deposit_coin | 1.0→0.957 | 0.792→0.786 | 持平；`coin.plane ∥ slot` 装配缺口仍在 |
+| push_T | 0.70→**0.538** | 0.778→**0.636** | 唯一恶化，病因见 0.5.3 |
+| push_T_random | 1.0→0.889 | 0.818→0.800 | 压线 |
+| **micro 合计** | **0.897→0.931** | **0.777→0.865** | 两道门全过 |
+
+✅ 盘上核实：五个 v0.2 run 的 `metrics.json` 中 `precision`/`recall` 与上表逐个一致——`harness/runs/harness_insert_tubes_20260730_003434`、`harness_stack_bowls_20260730_004159`、`harness_deposit_coin_20260730_005022`、`harness_push_T_20260730_005609`、`harness_push_T_random_20260730_005924`。第一轮的对应 run 目录是同名的 `..._20260729_2*`（`harness/PHASE0_ROUND1.md`）。
+
+### 0.5.2 验收门终判（对照 `RESEARCH_PROPOSAL_V2.md:195` §5.4）
+
+| 门 | 阈值 | v0.2 结果 | 判定 |
+|---|---|---|---|
+| 金标齐备 | 4/4 | 5/5 | ✅ |
+| precision | ≥0.7 | 0.931 | ✅ |
+| recall | ≥0.8 | 0.865 | ✅（v0.1 的 0.777 差 0.023 近失） |
+| 自一致性 | ≥0.8 | k=5 全 5/5 解析 | ✅ |
+| 零度量字面量违例 | 0 | 0 | ✅ |
+| 单任务端到端成本 | ≤$5 | 单任务 $0.5–1.9 | ✅ |
+| 歧义对区分 | ≥3/4 | 现有素材不含目标歧义（random 变体只随机布局；deposit_coin 单币单槽） | ❌ → **改判定义**：移交「素材构造」任务（多目标录制或 Phase 1 仿真），不计入本轮门 |
+
+零度量字面量这条 ✅ 盘上核实：五个 v0.2 run 的 `validation.json` 全部 `violations: []`、`passed: true`。
+
+成本：第一轮全天 **151** 次 Opus 调用共 **$6.49**（`harness/PHASE0_ROUND1.md:17`）；第二轮文档记「全轮 ~$8、单任务 $0.5–1.9」（`harness/PHASE0_ROUND2.md:36`）。⚠️ **待核**：盘上五个 v0.2 run 的 `cost.jsonl` 合计 **$5.79**、单任务 $0.66–1.62，与文档口径不一致（疑文档合并了第一轮的重跑），以文档为准，差异待复核。
+
+歧义对这条要在论文里留痕：它是提案 §5.4 写死的门，被现有素材证伪的是**素材**不是方法，**不能事后写成「门降低了」**。
+
+### 0.5.3 两个机制结论
+
+- **derived 传播项 15 判 13 correct / 2 incidental / 0 wrong**（`harness/PHASE0_ROUND2.md:18`）。一致性传播加的召回几乎零精度代价；2 条 incidental 恰是对称自由的抓取锥，落在规则预测内。`holds` 时序标记按设计工作：「约束为真、时序标错」首次可分离（insert_tubes s4 的 `throughout` 判 wrong，而 acceptance 的 `at_end` 版本正确）。cone=接触法向落地正确（悬顶腕姿被正确判 side）。
+- **push_T 恶化的三个新病灶**（`harness/PHASE0_ROUND2.md:24-31`）：① registry 缺机器人本体——cleanup 段想表达「撤臂避让块」，registry 里没有 EE/机械臂对象，模型把 clearance 绑成 (块, pad)，字面上成了任务目标的否定；② `holds` 让主张可证伪——v0.1 同样的错误藏在模糊时序里没被计价，v0.2 显式 scope 后被帧证据击毙，**这部分「恶化」实为测量变诚实**；③ 投票聚合不过滤自我否定候选（`_comment_ignored` 仍 4/5 票通过）。另：push_T demo 自身缺陷（粗推越推越歪）继续压低该任务上限。
+
+### 0.5.4 v0.3 backlog（按性价比，`harness/PHASE0_ROUND2.md:41-50`）
+
+1. registry 必含 EE/机械臂，且不漏台面实例（insert_tubes 漏了一根管、`tube_left` 跨阶段指两根管），并收录干扰物（透明支架仍缺）。
+2. 装配缺口修复调用：deposit_coin 的 `coin.plane ∥ slot` 轴约束仍缺（洞在、约束没组装），补一个针对性 repair 微调用。⚠️ 待核：盘上 `validation.json` 的装配缺口告警实际只在 **push_T_random s0** 触发，deposit_coin run 的 `warnings` 为空——告警覆盖面与文档表述不一致。
+3. 镜头切变检测：push_T_random 源视频在 cleanup 段结束前切片，关键帧混入无关场景。
+4. 投票聚合过滤自我否定候选；order 序列应含 cleanup 段；符号漂移归一（`up_axis` vs `stack_axis`）。
+5. 待 PI 复核：push_T_random s0 `axis_parallel` 两轮判定相反（两个 demo 事实不同、口径一致，是天然的标注一致性样本）；push_T cleanup `clearance` 双 wrong 的补录 args。
+
+### 0.5.5 编译步（graph → policy）
+
+`harness compile` 上线：Opus 按 `harness/contract.py`（API 契约单一真源）把五个任务的图各编译成 Python policy，**5/5 全绿**（`harness/PHASE0_ROUND1.md:64-73`）。✅ 盘上核实：五个 v0.2 run 的 `compile_report.json` 均 `static_violations: []`、`dryrun.normal.ok=true`、`dryrun.retry_injection.ok=true`——即 AST 静态检查零违例（禁数字字面量 / 禁 import / 只准 `rt.*` 契约内调用）、fake 干跑 normal 全过、注入 gate 失败的重试分支全部正确恢复。关键设计：`rt.solve()` 返回**不透明句柄**，policy 拿得到值、读不出数字，「写不出硬编码」从事后扫描升级为结构性质；两级 ReAct 骨架住在可信 runner（`harness/fakerun.py`），LLM 只编译不写控制循环。**这一步全部是 fake 干跑，不构成任何机器人效果声明。**
+
+---
+
 ## 1. 实验总账
 
 | 编号 | 目的 | 结果数字 | 结论 | 产物 | 核实 |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|| **P1 · M1a 集成冒烟**（`ORACLE-M1A`） | 把编译好的 policy 接到 knowin-world，验证适配器/控制链端到端通并取 oracle 上界 | 软件链 sim（insert_tubes/stack_bowls 场景）→ EvalServer → `kwadapter`（oracle solve + pipeline ctrl）→ 编译 policy → 两级 gate → episode 报告，端到端可重复；episode 报告 insert_tubes **×3**、stack_bowls **×1**；**真实抓取 0 次**；当晚 LLM 成本 $0（纯 infra） | 只证明集成接缝，不证明方法。solve 走 `GET /state` 特权实体位姿，产出一律带 `ORACLE-M1A` 标签（`harness/kwadapter.py:19`），**不得报为方法结果，也不得写成成功率**；夹爪通道在本栈不通——v3 控制器每臂只出 **7 DoF**（`pipeline get_qpos` 长度即 7，`harness/kwadapter.py:510`），捏取类抓取当前不可能成功 | 代码 `harness/phase1.py`、`harness/kwadapter.py`、`harness/gates.py`、`scripts/phase1_sim.sh`；episode 产物在 5090 `~/phase1/artifacts/<task>/episode_*.json` | ⚠️ 代码盘上核实；**本 checkout 无任何 episode 产物**，×3/×1 与「端到端可重复」均为 `harness/PHASE1_M1A_STATUS.md:31` 文档声称，未核实 |
+| **P1 · reach 墙根因** | 定位「两臂伸不进工作区」到底是算法还是 infra | C++ IK 加载 **v4** 碰撞模型而 Genesis 跑 **v3** 机器人 → 与目标点无关的**恒定幽灵自碰** `pair_id=263`（v4 独有的头部云台 `gim_p` × 左臂 `l_joint3`，`dmin≡-0.0479`），右臂每个笛卡尔解都被否决；零污染 v3 override 后幽灵碰撞 **0** 次，右臂 home x **0.08→0.552**、前伸极限 **0.24→0.678 零拒绝**，全部目标物体（碗 0.51/0.59/0.61、管 0.436）进入包络 | reach 墙不是图/策略问题，是**机器人代次错配**（v4 模型由 7/28 commit `fe9cf85` 经 `configs/sim_cfg.runtime.yaml:3` 引入）。修复方式：自渲染 `~/phase1/cfg/sim_cfg.v3.yaml` + `ROBOT_CONFIG`/`ROBOT_MODEL` env 重启 pipeline，**他们仓库零改动**。附带结论：`KNOWIN_IK_MODE` 在 Linux 无消费者、remote IK 与本问题无关；`knowin_sim_v4verify` 是 v2 的祖先 commit，**不迁** | `harness/PHASE1_M1A_STATUS.md:1-12`；原始证据 `~/phase1/debug_grasp_evidence.json`（5090） | ⚠️ 全部为文档声称；本 checkout 无 `debug_grasp_evidence.json`，数字未盘上核实 |
+| **P1 · gate 空过修复** | 堵住「谓词碰巧为真 = 阶段成功」 | stack_bowls stage 0/1/2 报 `passed`，而三个碗位移全 **0.0000**——它们满足的是 reset 时就已成立的谓词（`axis_aligned` margin **43.9**、复合 `any_of` margin **3.6e-07** 近乎恒真）；stage 3 如实 failed | 与 B4 probe「空断言 70/70 步跑完、场景零变化」是同一个病，只是换到 oracle 模式复发。`harness/gates.py` 加两道：①**空洞性**——阶段入口就已为真的约束不计为成功证据；②**效果**——操作类阶段必须观测到被操作物体位移 ≥ `MIN_DISPLACEMENT_M` = **0.005 m**（`harness/gates.py:19-24`）。`vacuous_pass` 计数本身是研究数据 | `harness/gates.py`（commit `e826e67`） | ✅ 代码与阈值盘上核实；⚠️ **修复后未重跑**，无修复前后对照数字 |
+| **P1 · 当前阻塞：姿态路径发散** | reach 墙拆除后剩下的硬阻塞 | 沿路点 `rot_error` **16°→52°** 发散，同时 `collision_free=true`（`harness/PHASE1_M1A_STATUS.md:11`）；接近轴一天内两次判错——先按工具 **+X** 标定（`921bd82`），后订正为工具 **+Z** 并 revert 掉 bogus 的 Ry(90)（`c870a69`） | 设计裁定：姿态**不再作为命令值下发**，降级为「选择时的可行性约束（实测可达姿态域，属 per-robot 标定、非场景数值）+ 执行后的 pose-in-hand 待估状态」（`harness/DESIGN_GRASP_AND_LOOP.md:9-24`）。「算一个标准竖直四元数命令手臂去到它」这条做法已被证伪两次，不再重试 | `harness/DESIGN_GRASP_AND_LOOP.md`、`harness/PHASE1_M1A_STATUS.md` | ⚠️ 16°→52° 来自文档，未见原始 log；两次证伪的方向已由 commit `921bd82`/`c870a69` 盘上核实 |
 | **B.1 · T1** | 视频 → 非度量约束图提取器 | 索引 **14** 个 refined trace；`insert_tubes` 形成 **3** 个操作周期、**15** 节点、**18** 个完整 typed holes；7 项覆盖检查全真；度量扫描 **0** 条 | ConstraintGraph v0.2 可加载；覆盖 grasp region/DoF、reorientation、placement DoF、target axis/clearance、postcondition、recovery；全部 constraint provenance 为 `demo_video` | `runs/t1_graph_extraction_20260726_163107/{constraint_graph.json,diagnostics.json,metric_scan.json}` | ✅ 盘上 schema 加载 + T3 扫描 |
 | **B.1 · T2** | 关键帧夹爪-物体相对关系提取器 | 三次抓取均输出 `upper_body / axial / cross_axis`；与人工标注 **3/3** 一致；置信度 **0.9439 / 0.9639 / 0.7972** | 单关键帧 + CoTracker + object mask 可恢复粗粒度关系；未建全轨迹、未输出毫米级相对位姿 | `runs/t2_keyframe_relations_20260726_163026/{cases.json,relations.json}` | ✅ 盘上 3/3 |
 | **B.1 · T3** | 度量字面量静态扫描与冻结 gate | B7 已知照搬阳性 **3/3** 文件命中，共 **11** 条（4/5/2）；干净 `m1_fake.py` **0** 误报 | Python/YAML/JSON 扫描器可拒绝场景特定 pose/slot/offset 字面量；同一 gate 已接入 T4 冻结流程 | `runs/t3_metric_scan_20260726_163133/{b7_positive_scan.json,clean_policy_scan.json}` | ✅ 阳性 + 阴性 |
@@ -177,7 +241,7 @@
 
 ## 4. 待办与未解问题
 
-1. **当前唯一主线 next todo：** P2 已确认 qpos seed 生效但仍 selected=0；并行完成 P1 自部署 `:5193`（重编 IK + 健康检查）后，用自有实例复跑 probe×3；通过后再一次 `--mode grasp`。`--mode full` 仍禁止。证据 `runs/m1_preflight_qposverify_20260727_115721/`。
+1. **当前唯一主线 next todo：** Phase 1 M1a 收尾 → M1b。① **解姿态路径发散**（`rot_error` 16°→52°）：按 `harness/DESIGN_GRASP_AND_LOOP.md` 的裁定，不再命令标准竖直四元数，改为「实测可达姿态域（per-robot 标定）+ pose-in-hand 反推」；bring-up 阶段用 LLM-在环的操作员（该文 §4 位置 A，**实验室仪器不是方法**）替人手调伺服常数——手调已两次调错（接近轴、卡死阈值）。② **重跑验证 gate 修复**：`harness/gates.py` 的空洞性/效果两道 gate 已提交但未重跑，需在 insert_tubes / stack_bowls 上复跑并复核 `vacuous_pass` 计数与修复前后对照。③ **M1b 方法路径 v1**：dgl-perception 上线（`harness/PHASE1_API_PLAN.md` §2 的 #1–#9，GraspNet 从 1022 移植），solve 切非特权，同任务重跑并报五阶段 funnel；前置探测 5090 `services/common` 的 sam/qwen/gdino 权重可用性（该文 §6 风险 1）。全部 M1a 产物带 `ORACLE-M1A` 标签，**不得报为方法结果**。**旧的 1022 `:5093` / 自部署 `:5193` 路线不再是主线**（实验机与主仓已迁 5090，见 `RESEARCH_PROPOSAL_V2.md` §7），连带 `--mode full` 禁令一并作为 1022 栈遗留挂起；历史证据仍在 `runs/m1_preflight_qposverify_20260727_115721/`。
 2. **不扩写大而全 API/协议**：只补当前 M1 真正调用的 perception、info、ctrl 薄接口。
    代码以一个 graph、一个 Python runner 和一个 Knowin adapter 为主。
 3. **D 组 / Baug″ / B6 已中止**（09:43），未出结果。若将来恢复：D 的判据是 ≥5/8 则约束图价值归零到负；B6 的图 v2（实测孔心版）只能用于隔离 oracle 上界，不能进入主方法。
