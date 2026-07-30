@@ -17,9 +17,9 @@ Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1�
 
 ## 2. 三个 Phase 状态表
 
-| Phase | 定义（`RESEARCH_PROPOSAL_V2.md:151` / `:205-206`） | 状态 | 判据 | 证据路径 |
+| Phase | 定义（`PROPOSAL.md:151` / `:205-206`） | 状态 | 判据 | 证据路径 |
 |---|---|---|---|---|
-| **Phase 0** 理解层 | demo 视频 → 带 typed holes 的约束程序，不碰仿真 | **已达标** | H2 门：P≥0.7、R≥0.8、金标 5/5、自一致性 k=5 全解析、零度量字面量（`RESEARCH_PROPOSAL_V2.md:55`） | micro **P=0.931 / R=0.865** [已核实]，逐任务见 §2.1；`harness/PHASE0_ROUND2.md` |
+| **Phase 0** 理解层 | demo 视频 → 带 typed holes 的约束程序，不碰仿真 | **已达标** | H2 门：P≥0.7、R≥0.8、金标 5/5、自一致性 k=5 全解析、零度量字面量（`PROPOSAL.md:55`） | micro **P=0.931 / R=0.865** [已核实]，逐任务见 §2.1；`harness/PHASE0_ROUND2.md` |
 | **Phase 1** 执行绑定 | 最小执行层对接 knowin-world；三层漏斗实装；两级 ReAct；反事实法庭 | **进行中（软件通、物理未通、感知全 oracle）** | 需：非 oracle 感知 + 真实抓取成功 + 约束真正参与决策 | 软件链见 `harness/phase1.py`、`harness/fakerun.py:60`、`harness/kwadapter.py`；episode 产物**只在 5090** `~/phase1/artifacts/<task>/episode_*.json`，**本 checkout 无任何 `episode_*.json`** [已核实] |
 | **Phase 2** 冻结协议 | D/E seed 协议、六组对照 + no-demo frontier / per-episode VLM 两条新基线 | **未开** | 冻结后 held-out seed 成功率与泛化 gap | 无代码、无产物 [已核实：仓内无 seed 协议实现] |
 
@@ -61,14 +61,14 @@ Phase 0（demo 理解层）已过验收门并有盘上产物可复核；Phase 1�
 
 ## 4. 主张链的健康度（核心）
 
-主张（`RESEARCH_PROPOSAL_V2.md:13`）：「一段 demo 教的是**每个阶段什么必须成立**，不是照抄哪条轨迹。」
+主张（`PROPOSAL.md:13`）：「一段 demo 教的是**每个阶段什么必须成立**，不是照抄哪条轨迹。」
 把它拆成 5 个**可证伪**环节；链条强度 = 最弱环强度。
 
 | 环 | 命题 | 状态 | 证据 / 缺什么 |
 |---|---|---|---|
 | **环 1** | demo 能提取约束 | ✅ **已证** | micro **P=0.931 / R=0.865**，5 任务 `metrics.json` 盘上可核（§2.1）。风险：金标由独立 agent 标注，人工复核范围**未核实** |
 | **环 2** | 约束能编译成**检验函数** | ❌ **零代码 —— 断点在这里** | 无「约束 → 可执行判据」的编译步骤。现状是 10 选 5 的硬编码几何 switch（`harness/kwadapter.py:582-615`），hole 的 `type/solver_hint/frame` 无消费者（`solver_hint` 无任何程序消费点，`.py` 源码里只有渲染：`harness/report.py:58-60`；`confidence` 唯一程序读取点是排序：`harness/extract.py:58`）。`stage['constraints']` 整个字段零运行期读者（`harness/gates.py:51/63/65`） |
-| **环 3** | 检验函数能**筛掉坏候选** | ❌ **未开始** | 既无候选生成器（`sample_grasps` = `PHASE1_API_PLAN.md:39` 第 8 条，零实现），也无筛选器；`RESEARCH_PROPOSAL_V2.md:103`（§4.2）的三层漏斗未实装 |
+| **环 3** | 检验函数能**筛掉坏候选** | ❌ **未开始** | 既无候选生成器（`sample_grasps` = `PHASE1_API_PLAN.md:39` 第 8 条，零实现），也无筛选器；`PROPOSAL.md:103`（§4.2）的三层漏斗未实装 |
 | **环 4** | 筛出的候选**成功率更高** | ⚠️ **路径存在，但走 oracle** | `harness/fakerun.py:60` 两级 ReAct runner + `harness/phase1.py` 端到端可跑；但 ① 所有 `solve` 读 EvalServer 特权态（**ORACLE-M1A**），② 抓取点与 demo 约束解耦（B2）。**即使拿到成功率也无法归因给 demo 约束** |
 | **环 5** | 冻结后**跨 seed 泛化** | ❌ **未开始** | Phase 2 的 D/E seed 协议无代码无产物 |
 

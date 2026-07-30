@@ -49,7 +49,7 @@ API 实现即文档(抄 CaP-X `combined_doc`:inspect.signature+docstring 自动�
 
 approach/transport/align→`xquat_move`(z_arc 插值);grasp_at→`xquat_move`+`set_gripper`;
 lift→`delta_move`(+z);lower_until→`delta_move`(−z,小步+state 轮询);push→`follow_delta_trajectory`;
-release→`set_gripper`。参数面严格按 `PRIMITIVE_API_AUDIT.md` 的 USABLE 列。
+release→`set_gripper`。参数面严格按 `../docs/reference/PRIMITIVE_API.md` 的 USABLE 列。
 抄 GaP 的 tag+限额:感知/控制调用各设预算,防调用爆炸。
 
 ## 4. 防火墙细则(比两仓都严的差异点)

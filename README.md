@@ -6,7 +6,7 @@
 但**所有度量数值都留成洞**，执行时由现场感知填。同一条约束有两个消费者——既生成动作决策，
 又当阶段验收判据。编译一次、代码冻结，换场景只有感知返回值变，代码一个字节不动。
 
-权威方案 [`RESEARCH_PROPOSAL_V2.md`](RESEARCH_PROPOSAL_V2.md)（2026-07-29）· 投递目标 **RSS 2027**
+权威方案 [`docs/PROPOSAL.md`](docs/PROPOSAL.md)（2026-07-29）· 投递目标 **RSS 2027**
 
 ---
 
@@ -60,7 +60,7 @@ policy.py + graph.json
 > `region_grasp` 在运行期被丢弃，抓取点来自 oracle 几何 + 硬编码偏移——
 > 把图里的 region 改成任何值，输出逐比特相同。这是主张与实现之间最大的一条裂缝。
 
-进展、阻塞、主张链健康度见 [`docs/STATUS.md`](docs/STATUS.md)；历史实验总账见 [`PROGRESS.md`](PROGRESS.md)。
+进展、阻塞、主张链健康度见 [`docs/STATUS.md`](docs/STATUS.md)；历史实验总账见 [`docs/PROGRESS.md`](docs/PROGRESS.md)。
 
 ---
 
@@ -88,11 +88,11 @@ python3 scripts/public_release_check.py
 
 | 先读 | |
 |---|---|
-| [`RESEARCH_PROPOSAL_V2.md`](RESEARCH_PROPOSAL_V2.md) | **当前唯一权威方案**：主张、假设、方法、验收门 |
+| [`docs/PROPOSAL.md`](docs/PROPOSAL.md) | **当前唯一权威方案**：主张、假设、方法、验收门 |
 | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | 方法的细节视图 + 完整文档花名册 |
 | [`docs/STATUS.md`](docs/STATUS.md) | 现在到哪、卡在哪、下一步 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 关键裁决与理由（**改动前先查，避免重开已裁决的问题**） |
-| [`PROGRESS.md`](PROGRESS.md) | 实验总账，所有数字的出处与「⚠️ 待核」标记 |
+| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 实验总账，所有数字的出处与「⚠️ 待核」标记 |
 | [`AGENTS.md`](AGENTS.md) | 工作边界 / 信息边界 / 代码边界 |
 
 代码即规范：[`harness/contract.py`](harness/contract.py)（53 行，读完就知道生成代码能干什么）、
@@ -109,7 +109,7 @@ python3 scripts/public_release_check.py
 | `adapters/` | v1，但含唯一一条通往主线的活边（`kwadapter.py:17` → `knowin_world/pipeline.py`）。见 [`adapters/README.md`](adapters/README.md) |
 | `experiments/` | v1 期入口，现为**移植源**（冻结断言、消融 B 的幸存者计数）。见 [`experiments/README.md`](experiments/README.md) |
 | `components/` | WHT 组件的字节级只读快照，来源与脱敏记录在 `SOURCE_MANIFEST.json` |
-| `oracle/` `tools/` `schema/` `third_party/` | 手写资产。曾被误列进 `.gitignore`，代价是两份审计文档**已永久丢失** |
+| `oracle/` `tools/` `third_party/` | 手写资产。曾被误列进 `.gitignore`，代价是两份审计文档**已永久丢失** |
 | `runs/` `harness/runs/` | 实验产物，不进 git（**新 checkout 是空的**） |
 
 ---
@@ -119,4 +119,4 @@ python3 scripts/public_release_check.py
 - **实验场地**：5090（仓库 checkout + `~/phase1`）。2026-07-29 起自 1022 迁出。
 - **Knowin World / 仿真数据**：外部共享依赖，**只读借用**，不 vendoring 进本仓；禁止写入、部署、改配置或启停其服务。
 - **主仓 = 内网 Gitea 私有仓**（remote `gitea`）；GitHub `origin` 自 2026-07-29 **停止维护**，其上内容视为已公开。
-- 5090 用 `ssh -A` 拉取（agent forwarding 必需）。push 前跑门禁，详见 [`SECURITY.md`](SECURITY.md)。
+- 5090 用 `ssh -A` 拉取（agent forwarding 必需）。push 前跑门禁，详见 [`docs/SECURITY.md`](docs/SECURITY.md)。

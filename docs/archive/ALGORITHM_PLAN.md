@@ -14,7 +14,7 @@
 
 ### B. trace → 约束图（新贡献，本方案的核心）
 
-图 = 节点（子任务）+ 边（顺序 / 资源 / 碰撞），每个节点挂约束。schema 见 `schema/constraint_graph_schema.md`。
+图 = 节点（子任务）+ 边（顺序 / 资源 / 碰撞），每个节点挂约束。schema 见 `../reference/constraint_graph_schema.md`。
 
 关键点：**约束按"是否 2D 可提取"分层**，这是回避"视频 3D 提取效果差"的设计（详见下面"信息边界"）。
 

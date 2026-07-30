@@ -4,7 +4,7 @@
 
 - 日期：2026-07-26
 - 状态：草案 v1（对应仓库 `muz1lee/demo-graph-lab`，实验环境 1022 `/mnt/data/wenqian/demo-graph-lab`）
-- 关联文档：`AGENTS.md`（项目边界）、`ALGORITHM_PLAN.md`（方法假设）、`PROGRESS.md`（实验总账）、`PLAN.md`（首月执行计划）
+- 关联文档：`AGENTS.md`（项目边界）、`ALGORITHM_PLAN.md`（方法假设）、`../PROGRESS.md`（实验总账）、`PLAN.md`（首月执行计划）
 - 本文所有度量数字均给出出处（见附录 A 证据索引）；未验证的主张显式标注证据闸门
 
 ---
@@ -259,19 +259,19 @@ ServoSpec(
 
 ### B.0 强制纪律（每条都有历史翻车教训，违反即作废当次工作）
 
-1. 开工前依次读 `AGENTS.md` → `ALGORITHM_PLAN.md` → `PROGRESS.md`；用户当前指令优先。
+1. 开工前依次读 `AGENTS.md` → `ALGORITHM_PLAN.md` → `../PROGRESS.md`；用户当前指令优先。
 2. **唯一工作场地**：1022 `/mnt/data/wenqian/demo-graph-lab`（本地镜像同构）。**禁止**对 1024 `/mnt/nas/knowin_sim/sim_workspace/` 做任何写入/部署/改配置；NAS 的 data/venv 只读借用。
 3. **GT 防火墙**（4.6 节）：主方法不得读 scene/asset 文件、精确 pose、GT mask、孔位、evaluator 答案，也不得将其换名包装成感知 API。
 4. **执行完整 ≠ 任务成功**（B4 probe 教训）：一切成功声明必须来自隔离 evaluator 的 v2 谓词判定 + 盘上产物核实；不得以"代码跑完没报错"或单测通过冒充效果。
 5. **发控制指令（grasp/full trial）必须先获用户明确批准**；只读 probe 不受限。
-6. 不擅自 commit/push；不删 `runs/` 历史；每个有效实验后更新 `PROGRESS.md`（结果数字 + 产物路径 + 核实状态）。
+6. 不擅自 commit/push；不删 `runs/` 历史；每个有效实验后更新 `../PROGRESS.md`（结果数字 + 产物路径 + 核实状态）。
 7. 永不 `git add .`；改动走 allowlist；push 前跑 `scripts/public_release_check.py`。
 
 ### B.1 阶段一：可立即开工（无闸门，可并行）
 
 **T1（关键路径）：视频→约束图提取器**
 - 输入：`components/robot-subtask-seg` 已有的 `demonstration_bundle.json` 与 14 个 refined 目录（`insert_tubes` 当前为 6 段粗 trace）。
-- 输出：符合 `schema/constraint_graph_schema.md` 的 ConstraintGraph JSON，含四类核心约束（4.2 节）+ typed holes + 逐条 `provenance=demo_video`。
+- 输出：符合 `../reference/constraint_graph_schema.md` 的 ConstraintGraph JSON，含四类核心约束（4.2 节）+ typed holes + 逐条 `provenance=demo_video`。
 - 验收：① schema 校验通过；② 图中零世界坐标度量字面量（T3 扫描器过）；③ `insert_tubes` 图覆盖 grasp region/DoF、reorientation、axis/clearance、postcondition、recovery（即补齐风险 #2 列出的缺项）；④ 单测。
 - 位置：`method/demo_graph/` 新增提取模块，经 `adapters/demo_bundle` 读输入。
 
@@ -293,7 +293,7 @@ ServoSpec(
 **T5：对齐物理 + 非特权感知下的带控制 trial**
 - 前置：probe 已通过（`runs/m1_probe_20260726_132419/probe.json`）；物理已对齐（`bf714099` + `priority=1`）。
 - 顺序：先 `--mode grasp`（单抓取 + 附着验证），后 `--mode full`（全链）。
-- 产出：per-trial 目录（视频 + 记录）；按 5.4 节归因插入结果；裁决 H3 闸门（3 节）；更新 `PROGRESS.md` 与本提案 6 节状态。
+- 产出：per-trial 目录（视频 + 记录）；按 5.4 节归因插入结果；裁决 H3 闸门（3 节）；更新 `../PROGRESS.md` 与本提案 6 节状态。
 - **未获用户批准前，本任务及其后所有任务不得启动。**
 
 ### B.3 阶段三：闸门后（按裁决结果分叉）
@@ -328,4 +328,4 @@ T3 ──┼──→ T4 ──────────────────�
 | 谓词 v2 回归 | v2 够用 | 1 正例判 True，3 负例判 False | `runs/predicate_v2_regression_20260726_102557/` |
 | M1 五 trial | 特权诊断（冻结） | t5 到第 4 阶段：提起 124.9 mm、转正 7.34°、对准 1.42 mm、下插 33.8/100 mm（管底距顶板 11 mm）；rack 感知误差 25 mm > 孔半径 14.9 mm | `runs/m1_single_tube_20260726_095818/` |
 | 非特权 probe | 感知洞闭合 | grasp/`tube_axis`/`holder_pose` 全获得，`perceptual_holes=[]`（对齐物理下） | `runs/m1_probe_20260726_132419/probe.json` |
-| 机制发现 | 转正机制 | 重力 + 抓点在质心上方（非腕转）；qwen_xquat 竖直盲区 | `PROGRESS.md` 已钉死事实 |
+| 机制发现 | 转正机制 | 重力 + 抓点在质心上方（非腕转）；qwen_xquat 竖直盲区 | `../PROGRESS.md` 已钉死事实 |

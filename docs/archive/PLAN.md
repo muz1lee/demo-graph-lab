@@ -33,7 +33,7 @@
 demo-graph-lab/
 ├── AGENTS.md
 ├── ALGORITHM_PLAN.md
-├── PROGRESS.md
+├── ../PROGRESS.md
 ├── components/
 │   ├── knowin-skill-manager/       # WHT KSM 原样快照
 │   ├── robot-subtask-seg/          # 视频拆解与 demo bundle
@@ -55,7 +55,7 @@ demo-graph-lab/
 
 1. 首个 commit 只建立 `.gitignore`、安全规则和第三方依赖说明。
 2. 第二个 commit 按明确 allowlist 导入四个 WHT 组件，算法文件保持字节不变；保存逐文件 SHA-256 manifest，并打 `wht-import-20260726` tag。
-3. 第三个 commit 才加入现有 `AGENTS.md`、`ALGORITHM_PLAN.md`、`PROGRESS.md`、净化后的 schema/tools。
+3. 第三个 commit 才加入现有 `AGENTS.md`、`ALGORITHM_PLAN.md`、`../PROGRESS.md`、净化后的 schema/tools。
 4. 后续所有 graph、Python backend、runtime adapter、servo 都放在 `method/` 或 `adapters/`，不混进 WHT import commit。
 5. 永远不执行 `git add .`；只添加 allowlist，并在推送前做 secret、文件大小、许可证和 GT 泄露扫描。
 
@@ -74,8 +74,8 @@ demo-graph-lab/
 
 - `AGENTS.md`：稳定项目原则、GT 防火墙和强制阅读顺序，不放动态 TODO。
 - `ALGORITHM_PLAN.md`：方法架构和研究假设。
-- `PROGRESS.md`：最后验证时间、当前目标、最新实验、阻塞项、接下来三项任务及恢复命令。
-- 每次有效实验或合并后必须更新 `PROGRESS.md`；原始 runs 不入 Git，只提交脱敏汇总。
+- `../PROGRESS.md`：最后验证时间、当前目标、最新实验、阻塞项、接下来三项任务及恢复命令。
+- 每次有效实验或合并后必须更新 `../PROGRESS.md`；原始 runs 不入 Git，只提交脱敏汇总。
 
 ## 3. 方法与系统架构
 

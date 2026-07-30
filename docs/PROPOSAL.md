@@ -1,10 +1,10 @@
 # Research Proposal v2：Demo → Constraint Programs（示范编译为约束程序）
 
 - 日期：2026-07-29
-- 状态：v2 草案，**取代 v1（`RESEARCH_PROPOSAL.md`，2026-07-26）的执行策略**；方法主张与 v1 同源，路线重排
+- 状态：v2 草案，**取代 v1（`archive/PROPOSAL_v1.md`，2026-07-26）的执行策略**；方法主张与 v1 同源，路线重排
 - 投递目标：**RSS 2027**（主）；ICLR 2027 不再作为本线目标（时间与形态均不匹配，见 §1.3）
 - 本轮决策（老板 2026-07-29 拍板）：**Phase 0 先不动仿真机器人，只做「demo 视频理解」harness**，在 5090 服务器上以 4 个典型任务闭环；执行与冻结协议实验后置到 Phase 1/2
-- 关联：`DIRECTION_AUDIT_20260726.md`（竞品与占位审计）、`PROGRESS.md`（实验总账，全部数字的权威出处）、`schema/constraint_graph_schema.md`（图 schema v0.2）
+- 关联：`archive/DIRECTION_AUDIT.md`（竞品与占位审计）、`PROGRESS.md`（实验总账，全部数字的权威出处）、`reference/constraint_graph_schema.md`（图 schema v0.2）
 
 ---
 
@@ -98,7 +98,7 @@ GRAPH = [
 
 `axis_parallel(a,b)` / `axis_vertical(a)` / `center_align(a,b)` / `region_grasp(obj, region∈{顶部,中上,中部,底部,边沿,把手})` / `approach_direction(锥∈{顶抓,侧抓,斜抓})` / `above(a,b)` / `inside(a,b)` / `order(阶段序)` / `carry(搬运中保持的关系)` / `clearance(a,b)`。
 
-每条约束 = `{name, args(对象/轴/区域为符号引用), holes(数值槽), provenance=demo_video, evidence_frames, confidence}`。schema 沿用 `schema/constraint_graph_schema.md` v0.2，词表以扩展字段进入。**图中出现任何世界坐标度量字面量即校验失败**（T3 扫描器接入）。
+每条约束 = `{name, args(对象/轴/区域为符号引用), holes(数值槽), provenance=demo_video, evidence_frames, confidence}`。schema 沿用 `reference/constraint_graph_schema.md` v0.2，词表以扩展字段进入。**图中出现任何世界坐标度量字面量即校验失败**（T3 扫描器接入）。
 
 ### 4.2 文字→数值的桥：抓取候选三层漏斗
 
@@ -204,7 +204,7 @@ harness/
 
 - **Phase 1（执行绑定，5090 `knowin_sim_v2`）**：最小执行层对接 knowin-world；三层漏斗实装（wht `grasp_candidate_filter` 为第 1 层底座）；两级 ReAct；反事实法庭上线。
 - **Phase 2（冻结协议主实验）**：D/E seed 协议（T4 已有链路）；对照组沿 v1 六组，另加两条：**no-demo frontier agent**（VIA 式同 API，对攻击点-1）与 **per-episode VLM 约束**（ReKep 式，对攻击点-2）；成本/延迟摊销表；counterfactual 抓取场景（局部最优 vs 下游可行）。
-- 里程碑与止损沿 `RESEARCH_MILESTONES.md` 框架按 RSS 2027 倒排（另文更新）。
+- 里程碑与止损沿 `archive/MILESTONES.md` 框架按 RSS 2027 倒排（另文更新）。
 
 ## 7. Infra 与工作方式（2026-07-29 起）
 
@@ -231,7 +231,7 @@ harness/
 9. 按首轮结果修订 §5.4 阈值并留痕。
 
 **一月内**
-10. Phase 0 验收门裁决 → 启动 Phase 1（最小执行层设计另文）；RSS 2027 倒排里程碑更新进 `RESEARCH_MILESTONES.md`。
+10. Phase 0 验收门裁决 → 启动 Phase 1（最小执行层设计另文）；RSS 2027 倒排里程碑更新进 `archive/MILESTONES.md`。
 
 **学生（不新增负担）**
 - wht：继续执行侧；仅需一次性指认 4 任务素材的权威路径。

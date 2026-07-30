@@ -69,7 +69,7 @@ docstring 标签方案已经 100% 达成；建子包却要付上面两个静默�
 
 ## 相关文档
 
-设计与验收门以 `../RESEARCH_PROPOSAL_V2.md` §5 为唯一权威。
+设计与验收门以 `../docs/PROPOSAL.md` §5 为唯一权威。
 本目录另有阶段性现场文档：`PHASE0_ROUND1.md` / `PHASE0_ROUND2.md`（Phase 0 两轮结果）、
 `PHASE1_API_PLAN.md`（感知 API 计划，**是计划不是现状**）、`PHASE1_M1A_STATUS.md`（现场状态）、
 `DESIGN_GRASP_AND_LOOP.md`（抓取与闭环的设计裁定）。

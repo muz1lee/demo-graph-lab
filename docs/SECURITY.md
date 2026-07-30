@@ -17,7 +17,7 @@
 WARN）；**对外发布前必须跑 `--profile public` 且清零**。
 
 > 2026-07-30 记：`oracle/`、`tools/`、`*_AUDIT.md` 此前被误列进 `.gitignore` 的「可再生成产物」
-> 段，导致 `PREDICATE_AUDIT.md` 与 `PROVENANCE_CORRECTION.md` 永久丢失、`PRIMITIVE_API_AUDIT.md`
+> 段，导致 `PREDICATE_AUDIT.md` 与 `PROVENANCE_CORRECTION.md` 永久丢失、`reference/PRIMITIVE_API.md`
 > 在实验机上取不到。已移出并纳管。**把手写资产排除出版本控制不是安全措施，是数据丢失。**
 
 ## GT 防火墙
