@@ -42,8 +42,15 @@ CLAW_TIP_DZ = 0.052
 #    腕部大幅 yaw 会撞 self_collision pair_id=178 (r_link5×r_link7)。
 #    → 绝不整段下发目标,只下发"限幅子目标",闭环重解。
 SERVO_STEP_M, SERVO_STEP_DEG = 0.05, 14.0
-SERVO_ITERS, SERVO_POS_TOL, SERVO_ROT_TOL = 9, 0.015, 8.0
-SERVO_STALL_EPS_M, SERVO_STALL_EPS_DEG = 0.003, 1.0
+SERVO_POS_TOL, SERVO_ROT_TOL = 0.015, 8.0
+# 5) **欠行程**:MotorNode 的平滑让实际位移只有指令的 ~20%(实测发 0.02 m 只走
+#    0.002~0.005 m)。所以 ①卡死不能按"单步位移小"判——真实步进本来就小,旧阈值
+#    3 mm 比步进还大,会把正在前进的下探误判成卡死;改为按**与目标的剩余距离是否
+#    在缩小**判。②迭代预算按剩余距离动态给,并按实测效率放大指令步长(有上限)。
+SERVO_ITERS = 40
+SERVO_STEP_MAX_M = 0.12          # 效率补偿后单条指令的位移上限
+SERVO_PROGRESS_EPS_M, SERVO_PROGRESS_EPS_DEG = 0.0015, 0.4
+SERVO_PATIENCE = 3               # 连续无进展多少轮判定真卡死
 
 
 # ---------- 工具端四元数运算(xyzw;与 /state 里物体的 wxyz 区分开) ----------
@@ -342,7 +349,7 @@ class KWRuntime:
             ok = ok and math.dist(p, list(xyz)) <= tol
         if quat is not None:
             ok = ok and _qang(q, quat) <= rot_tol
-        self._log("verify", op=op, ok=ok, moved=round(moved, 4), turned=round(turned, 2),
+        self._log("verify_moved", src=op, ok=ok, moved=round(moved, 4), turned=round(turned, 2),
                   pos_gap=round(math.dist(p, list(xyz)), 4) if xyz is not None else None,
                   rot_gap=round(_qang(q, quat), 2) if quat is not None else None)
         return ok, moved, turned
@@ -409,9 +416,10 @@ class KWRuntime:
             self._ctrl("delta_move", **kw)
             self._wait_settle(timeout_s=14.0)
             _, moved, _ = self._verify_moved(before, op="step_to")
-            if moved < SERVO_STALL_EPS_M:
+            # 欠行程下"单步位移小"是常态,判卡死要放到进展语义上(见 SERVO_* 注释 5)
+            if moved < SERVO_PROGRESS_EPS_M:
                 stall += 1
-                if stall >= 2:
+                if stall >= SERVO_PATIENCE:
                     self._log("step_to", reason="stalled",
                               gap=round(math.dist(self._cur_xquat()[0], list(xyz)), 4))
                     return False
@@ -428,7 +436,7 @@ class KWRuntime:
         所以每轮只下发一个**限幅子目标**(平移 <=SERVO_STEP_M、旋转 <=SERVO_STEP_DEG),
         settle 后回读真实位姿再解下一步——每步都从更展开的构型重解 IK,顺带避开了
         一次大跳才会踩到的自碰撞解。quat=None 时取"离当前腕姿最近的竖直姿态"。"""
-        stall = 0
+        no_progress, best_dp, best_dr, eff = 0, None, None, 1.0
         for i in range(SERVO_ITERS):
             p, q = self._cur_xquat()
             tq = _topdown_like(q) if quat is None else list(quat)
@@ -437,24 +445,34 @@ class KWRuntime:
                 self._log("move", reason="reached", i=i,
                           pos_gap=round(dp, 4), rot_gap=round(dr, 2))
                 return True
-            f = min(1.0, SERVO_STEP_M / dp) if dp > 1e-9 else 1.0
+            # 进展判据:剩余距离/角度是否较历史最好值有实质缩小
+            improved = ((best_dp is None)
+                        or (best_dp - dp) > SERVO_PROGRESS_EPS_M
+                        or (best_dr - dr) > SERVO_PROGRESS_EPS_DEG)
+            best_dp = dp if best_dp is None else min(best_dp, dp)
+            best_dr = dr if best_dr is None else min(best_dr, dr)
+            if improved:
+                no_progress = 0
+            else:
+                no_progress += 1
+                if no_progress >= SERVO_PATIENCE:
+                    self._log("move", reason="no_progress", i=i,
+                              pos_gap=round(dp, 4), rot_gap=round(dr, 2))
+                    return False
+            step_m = min(SERVO_STEP_MAX_M, SERVO_STEP_M / max(eff, 0.15))
+            f = min(1.0, step_m / dp) if dp > 1e-9 else 1.0
             t = min(1.0, SERVO_STEP_DEG / dr) if dr > 1e-9 else 1.0
             kw = {"target_xyz": [round(p[j] + (xyz[j] - p[j]) * f, 4) for j in range(3)],
                   "target_quat": [round(v, 6) for v in _qslerp(q, tq, t)],
                   "interpolation": interpolation}
             if gpos is not None:
                 kw["gpos"] = gpos
+            cmd_m = math.dist(p, kw["target_xyz"])
             self._ctrl("xquat_move", **kw)
             self._wait_settle(target_xyz=kw["target_xyz"], timeout_s=18.0)
             _, moved, turned = self._verify_moved((p, q), op="move")
-            if moved < SERVO_STALL_EPS_M and turned < SERVO_STALL_EPS_DEG:
-                stall += 1
-                if stall >= 2:
-                    self._log("move", reason="stalled", i=i,
-                              pos_gap=round(math.dist(self._cur_xquat()[0], list(xyz)), 4))
-                    return False
-            else:
-                stall = 0
+            if cmd_m > 1e-4:   # 在线估计行程效率,用于补偿指令步长
+                eff = 0.6 * eff + 0.4 * max(0.05, min(1.0, moved / cmd_m))
         p, q = self._cur_xquat()
         ok = math.dist(p, list(xyz)) <= SERVO_POS_TOL
         self._log("move", reason="budget", ok=ok, pos_gap=round(math.dist(p, list(xyz)), 4))
