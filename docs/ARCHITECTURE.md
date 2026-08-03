@@ -162,7 +162,7 @@ G1  自由组合   observe / segment / get_depth / mask_to_points / compute_obb 
 | # | 破口 | 位置 | 落点 |
 |---|---|---|---|
 | ① | **GT 防火墙破在控制原语内部**（不是 evaluator 里）：`lower_until` 用 oracle 谓词 `rt.probes()` 的 `root_in_bbox ∧ axis_aligned` 当停止判据；`lift` 读 oracle 实体位姿判 attached | `kwadapter.py:566` · `:522-577` | P0-02 / **P0-14**（改用 `get_ee_extforce` ✅ 空载≈1N / 触桌≈57N + `get_xquat` z 收敛） |
-| ② | **`verify()` fail-open**：未检查项 `detail="unchecked"` 仍 `ok=True`，异常也 `ok=True`；`gates.py:110` 的 `passed` 由 `constraints_hold` 与出 ⇒ 「**根本没检查**」与「检查通过」在报告里是同一个值 | `kwadapter.py:616`/`:618` + `gates.py:44`/`:55`/`:68`（共五处） | P0-04 / **P0-05**（三值 + margin，`unchecked` 归零） |
+| ② | ~~**`verify()` fail-open**：未检查项 `detail="unchecked"` 仍 `ok=True`，异常也 `ok=True`；`passed` 由（旧名不副实的）`constraints_hold` 与出 ⇒ 「**根本没检查**」与「检查通过」在报告里是同一个值~~ **【已修 P0-05】** 五处 fail-open 全部归零:`kwadapter.verify3`/`verify` 与 `gates` 走 `harness.predicates` 三值(PASS/FAIL/UNKNOWN + margin);检查不了 = UNKNOWN 记账(`n_unknown`/`unknown_frac`),不再静默 True;`effect_status` 显式记不可观测=UNKNOWN。 | `kwadapter.py` verify/verify3 + `gates.py` _verify3/effect_status（原五处) | P0-04 / **P0-05** ✅ |
 | ③ | **5 个契约参数静默丢弃**：`align.axis`（**最要命**——`align:542-545` 与 `transport:537-540` 实现只差 `ALIGN_DZ=0.06` vs `PREGRASP_DZ=0.10` 一个常数，而生成的 policy 调 `align` 达 **24 次**）、`align.obj`、`lower_until.stop_condition`、`transport.obj`、`approach.cone` | `kwadapter.py` | **P0-15**（消费或显式 `UNSUPPORTED` 记账，二选一，**不许继续静默**） |
 
 **为什么必须在 P0**：此刻还没产任何真 episode，去特权成本最低；一旦开始产 ep 再改验收通道，**硬边界 1（在线模型输出绝不进验收）直接判该批数据作废**。

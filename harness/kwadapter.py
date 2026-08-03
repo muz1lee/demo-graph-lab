@@ -17,6 +17,7 @@ import urllib.request
 from adapters.knowin_world.pipeline import PipelineClient
 
 from . import binding
+from . import predicates
 from . import regions
 
 ORACLE_BANNER = "ORACLE-M1A"      # 本模式产出一律带此标签,不得报为方法结果
@@ -143,18 +144,6 @@ def _flatten(v):
     for x in (v if isinstance(v, (list, tuple)) else [v]):
         out.extend(_flatten(x) if isinstance(x, (list, tuple)) else [x])
     return out
-
-
-def _quat_to_z_axis(q):  # wxyz → 物体局部 +z 在世界系的方向
-    w, x, y, z = q
-    return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
-
-
-def _angle_deg(a, b):
-    na = math.sqrt(sum(v * v for v in a)) or 1e-9
-    nb = math.sqrt(sum(v * v for v in b)) or 1e-9
-    dot = max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b)) / (na * nb)))
-    return math.degrees(math.acos(dot))
 
 
 class KWRuntime:
@@ -605,41 +594,36 @@ class KWRuntime:
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         time.sleep(1.2)
 
-    # ---------- contract: 验证(词表几何检查,oracle 态) ----------
+    # ---------- contract: 验证(词表几何三值检验,oracle 态) ----------
+    def _ent_snapshot(self, constraint: dict) -> dict:
+        """把约束 args 里引用到的实体解析成 predicates 吃的快照 {name: ent}。
+        参照物按约束 args 逐个 _resolve;解析不到的略过(谓词侧据此判 UNKNOWN)。"""
+        snap = {}
+        for v in (constraint.get("args", {}) or {}).values():
+            base = str(v).split(".")[0]
+            if not base:
+                continue
+            try:
+                snap[base] = self._ent(base)
+            except Exception:
+                pass                       # 解析不到 → 快照缺该键 → 谓词返回 UNKNOWN(不 fail-open)
+        return snap
+
+    def verify3(self, constraint: dict, **ctx):
+        """三值检验(P0-05,破口②):委派 harness.predicates,返回 Predicate。
+        检查不了(未覆盖/缺参照/异常)一律 UNKNOWN——不再静默 True。"""
+        snap = self._ent_snapshot(constraint)
+        pred = predicates.check(constraint, snap, **ctx)
+        self._log("verify", name=constraint.get("name"), stage=constraint.get("_stage"),
+                  status=pred.status, margin=pred.margin, detail=pred.detail)
+        return pred
+
     def verify(self, constraint: dict) -> bool:
-        name, args = constraint.get("name"), constraint.get("args", {}) or {}
-        ok, detail = True, ""
-        try:
-            if name == "axis_vertical":
-                obj = str(list(args.values())[0]).split(".")[0]
-                ang = _angle_deg(_quat_to_z_axis(self._ent(obj)["quat"]), [0, 0, 1])
-                ok, detail = min(ang, 180 - ang) < 20.0, f"angle={ang:.1f}"
-            elif name == "axis_parallel":
-                vs = [str(v).split(".")[0] for v in args.values()]
-                a1 = _quat_to_z_axis(self._ent(vs[0])["quat"])
-                ang = _angle_deg(a1, [0, 0, 1])  # 孔轴按竖直近似(oracle 简化)
-                ok, detail = min(ang, 180 - ang) < 25.0, f"angle={ang:.1f}"
-            elif name in ("above", "inside"):
-                vals = list(args.values())
-                a, b = self._ent(str(vals[0]).split(".")[0]), self._ent(str(vals[1]).split(".")[0])
-                if name == "above":
-                    ok = a["pos"][2] > b["pos"][2]
-                else:
-                    bx = b["aabb"]
-                    lo, hi = (bx["min"], bx["max"]) if isinstance(bx, dict) else bx
-                    ok = (lo[0] - 0.02 <= a["pos"][0] <= hi[0] + 0.02
-                          and lo[1] - 0.02 <= a["pos"][1] <= hi[1] + 0.02)
-            elif name == "center_align":
-                vals = list(args.values())
-                a, b = self._ent(str(vals[0]).split(".")[0]), self._ent(str(vals[1]).split(".")[0])
-                d = math.dist(a["pos"][:2], b["pos"][:2])
-                ok, detail = d < 0.05, f"xy_dist={d:.3f}"
-            else:  # region_grasp/carry/order/clearance 等 M1a 不可几何判 → 记录不拦截
-                detail = "unchecked"
-        except Exception as e:
-            ok, detail = True, f"verify_error:{e}"   # oracle 检查失败不误杀,记录待查
-        self._log("verify", name=name, stage=constraint.get("_stage"), ok=ok, detail=detail)
-        return ok
+        """契约 bool 接口(gate 用 verify3 拿三值;此处保留兼容)。
+        **fail-open 归零**:UNKNOWN 不再返回 True——映射为 False 并显式记 status=UNKNOWN,
+        计数进 ledger(不是静默默认);PASS→True / FAIL→False。判定方向由 status 决定,不由异常吞成 True。"""
+        pred = self.verify3(constraint)
+        return pred.status == predicates.PASS
 
     # ---------- 旁路:官方谓词快照 ----------
     def probes(self):
