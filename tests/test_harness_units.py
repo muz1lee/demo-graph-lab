@@ -3,6 +3,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness.extract import merge_samples
@@ -194,6 +196,26 @@ def test_norm_item_salvages_toplevel_args():
     assert it["args"]["region"] == "upper_body"
     assert it["args"]["object"] == "tube0"
     assert "confidence" not in it["args"]
+
+
+def test_as_numbers_parses_numpy_style_string():
+    """回归:pipeline 对 ndarray 直接 str(),回来是空格分隔、无逗号的字符串。
+
+    json.loads / literal_eval 都解析不了它,wire_value 于是原样返回字符串,
+    旧代码的 `float(那串)` 抛异常被吞成 None —— get_ee_extforce 全程读不到,
+    接触检测失明(EP-2 touch test:连续 12 步 force_n=null,指尖压到管心下方
+    5.7 cm 仍无触底判定)。这条测试钉住这个形态能被解析。
+    """
+    from harness.kwadapter import _as_numbers
+    got = _as_numbers("[[-25.47078369 -11.25156104  38.69975227]]")
+    assert got == pytest.approx([-25.47078369, -11.25156104, 38.69975227])
+    assert max(abs(v) for v in got) == pytest.approx(38.69975227)
+    # 常规形态照旧
+    assert _as_numbers([[1.0, -2.0], [3.0]]) == pytest.approx([1.0, -2.0, 3.0])
+    assert _as_numbers("1.5e-3 -2") == pytest.approx([0.0015, -2.0])
+    # 解析不出数字 → 空列表(调用方判"读不到",不 fail-open 成 0)
+    assert _as_numbers("nothing here") == []
+    assert _as_numbers(None) == []
 
 
 if __name__ == "__main__":

@@ -27,8 +27,9 @@ class Runtime:
     def approach(self, target, cone=None):
         """接近目标(target=物体名或句柄;cone=图中 approach_direction 的离散标签)。"""
 
-    def grasp_at(self, grasp_pose):
-        """按抓取位姿句柄合爪。"""
+    def grasp_at(self, grasp_pose, axis=None):
+        """按抓取位姿句柄合爪。axis(可选)= 被抓物长轴,开合方向取其正交向
+        (夹横躺的棍状物时必需;缺省退回竖直下探锁腕姿)。"""
 
     def lift(self, obj):
         """提起物体。"""
