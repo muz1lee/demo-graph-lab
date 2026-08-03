@@ -17,6 +17,7 @@ import urllib.request
 from adapters.knowin_world.pipeline import PipelineClient
 
 from . import binding
+from . import regions
 
 ORACLE_BANNER = "ORACLE-M1A"      # 本模式产出一律带此标签,不得报为方法结果
 PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
@@ -475,13 +476,44 @@ class KWRuntime:
         e = self._ent(target if isinstance(target, str) else str(target))
         return list(e["pos"])
 
+    # 任务无关的候选 approach 方向调色板(单位向量,世界系)。**与 cone 无关地生成**:
+    # cone 只在下面的排序步进入,绝不参与候选生成(否则 E-CAUSAL 变同义反复,见 TODO C-5)。
+    # 覆盖竖直下探 / 四个水平朝向 / 四个斜向,足以让任一 cone 排序都有可分的 top-1。
+    _APPROACH_DIR_CANDIDATES = (
+        {"id": "down",   "approach_dir": [0.0, 0.0, -1.0]},
+        {"id": "east",   "approach_dir": [1.0, 0.0, 0.0]},
+        {"id": "west",   "approach_dir": [-1.0, 0.0, 0.0]},
+        {"id": "north",  "approach_dir": [0.0, 1.0, 0.0]},
+        {"id": "south",  "approach_dir": [0.0, -1.0, 0.0]},
+        {"id": "obl_e",  "approach_dir": [1.0, 0.0, -1.0]},
+        {"id": "obl_w",  "approach_dir": [-1.0, 0.0, -1.0]},
+        {"id": "obl_n",  "approach_dir": [0.0, 1.0, -1.0]},
+        {"id": "obl_s",  "approach_dir": [0.0, -1.0, -1.0]},
+    )
+
     def approach(self, target, cone=None):
-        """先把闲置臂归位,再纯位置靠到物体正上方(此时不锁腕姿),最后才把腕姿压成
+        """先把闲置臂归位,再纯位置靠到物体的**预抓取位**(此时不锁腕姿),最后才把腕姿压成
         竖直——顺序很关键:腕部 yaw 在够物区转不动,只有先到位、再取"当前腕姿的竖直版"
-        才解得出来。"""
+        才解得出来。
+
+        C-5:`cone` 真正参与排序 —— 候选 approach 方向由任务无关调色板生成(不看 cone),
+        再用 regions.rank_by_cone 按 cone 偏好(与锥轴夹角越小越优)排序,top-1 方向决定
+        预抓取偏置的朝向。cone=None 时保持旧行为(正上方下探)。**候选生成不消费 cone**。"""
         self._park_idle_arm()
         xyz = self._target_xyz(target)
-        xyz[2] += PREGRASP_DZ + CLAW_TIP_DZ
+        off = PREGRASP_DZ + CLAW_TIP_DZ
+        if cone is None:
+            xyz[2] += off                       # 无 cone:沿用竖直下探(向下 → 偏置在正上方)
+        else:
+            # 候选与 cone 无关地生成;cone 仅在此排序步进入。
+            best = regions.rank_by_cone(self._APPROACH_DIR_CANDIDATES, cone)[0]
+            d = best["approach_dir"]
+            n = math.sqrt(sum(v * v for v in d)) or 1.0
+            u = [v / n for v in d]
+            # 预抓取位在物体沿「−approach 方向」偏置 off:approach 向下→偏置在上方(旧行为),
+            # approach 侧向→偏置在侧方。方向由 cone 排序 top-1 决定,幅度是既有标定常量。
+            xyz = [xyz[i] - u[i] * off for i in range(3)]
+            self._log("approach_cone", cone=cone, dir=best["id"])
         self._step_to(xyz)
         return self._move(xyz)
 

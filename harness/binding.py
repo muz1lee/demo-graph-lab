@@ -49,6 +49,10 @@ class UnsolvedHole(Exception):
 # 「单洞求解」时给一个代表性抓取高度。rim/handle 无法只凭 AABB 竖直带定位 → UNCHECKABLE,
 # 求解器退回物体质心高度并在句柄标注(不许用区间硬凑,D-03 同规)。
 # --------------------------------------------------------------------------
+# 同调性(P0-03):这些代表点须落在 harness.regions 偏好函数的高分区,方向一致。
+# 对照表见 regions.py 尾部 _COHERENCE 注释;middle 与 argmax 精确重合,
+# upper_body/top 的偏好极值在 s=1.0,band center(0.80/0.95)是留顶端余量的工程代表点,
+# 方向同调、以 TODO §1.2 偏好函数为准,常量无需改动。
 _REGION_BAND_CENTER = {
     "bottom": 0.15,
     "middle": 0.50,

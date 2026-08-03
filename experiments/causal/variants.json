@@ -1,0 +1,45 @@
+{
+  "status": "DRAFT-待PI签字",
+  "note": "「排序偏好」裁决(2026-07-30)后的判据重预注册草案。这是草案,不是生效判据。生效须 PI 签字后 commit,开跑前不许改(EXECUTION §0 预注册纪律:事后调整必须留 git 记录并声明该批数据作废)。判据原文出处 docs/TODO.md §1.3 表与 §3 D0 表。",
+  "drafted_at": "2026-08-03",
+  "supersedes_context": "硬阈值语义(CC-1 的『≥0.5×物体高』、CC-2 的『24 格淘汰』、P-3 的『L2 否决率 ∈(0,0.8)』)在无死线的排序语义下均无对象,故整体重写为 CC-0/CC-1′/CC-2′/P-3′。",
+  "criteria": [
+    {
+      "id": "CC-0",
+      "kind": "新增(新裁决新引入的风险,原方案无对应条目)",
+      "criterion": "筛选力下限:K≥3 的样本中,改 region 标签导致 top-1 改变的比例 ≥60%。",
+      "measurement": "K≥3 候选集;逐样本比较不同 region 标签下 rank_by_region 的 top-1 是否改变;统计改变比例。",
+      "threshold": "改变率 ≥ 0.60",
+      "fail_transition": "低于此 ⇒ L2 层退化为恒等映射,「排序偏好」取舍失败。二选一并当面报 PI(不许悄悄回退):(a) 回到带死线的区间筛(承认人为常数);(b) 承认 L2 层无筛选力、三层漏斗表述改两层。",
+      "supersedes": null,
+      "gate": "D0 独立闸门"
+    },
+    {
+      "id": "CC-1′",
+      "kind": "改写",
+      "criterion": "同一候选集(K≥3)分别在 region_grasp(obj,'upper_body') 与 region_grasp(obj,'bottom') 下排序:① top-1 的 height_fraction 满足 s_upper > s_bottom;② 两次排序的 Kendall τ < 0。两条同时成立。",
+      "measurement": "反事实测试 tests/test_constraint_causality.py 先红后绿;断言只比较排序与符号,不比较绝对数值。",
+      "threshold": "s_upper > s_bottom 且 τ < 0(两条同时)",
+      "fail_transition": "主张从「约束筛候选」收缩到「约束判成败」(约束只进 gate 不进 solve)。重大主张收缩,必须写进 docs/DECISIONS.md 并当面通知 PI。",
+      "supersedes": "CC-1(『≥0.5×物体高』硬阈值,已作废)"
+    },
+    {
+      "id": "CC-2′",
+      "kind": "改写",
+      "criterion": "6 region × 4 任务 = 24 格:≥22 格产生不同的 top-1 或 τ<1;regions.py 任务名扫描 0 命中。",
+      "measurement": "对 graphs.lock 钉定语料的 4 任务(insert/stack/deposit/push_T_random;push_T 挂起不计)× 6 region,用固定 mock 候选集(K=5,种子固定)算 top-1 是否随 region 改变与 Kendall τ。参考冒烟脚本 scripts/cc2_region_matrix.py(工程冒烟,非正式数字)。",
+      "threshold": "≥22/24 格 top-1 或排序改变;regions.py 任务名命中 = 0",
+      "fail_transition": "同 CC-1′。",
+      "supersedes": "CC-2(『≥22/24 产生不同 pose』在无淘汰的排序语义下不可测,已作废)"
+    },
+    {
+      "id": "P-3′",
+      "kind": "改写(D1 收口判据)",
+      "criterion": "funnel 非平凡:L1 通过率 ∈[0.1,0.9];L2 top-1 改变率 ≥60%(= CC-0 在真候选上的复核);L3 在 counterfactual 上 ≥1 次改 top-1。",
+      "measurement": "真候选(非 mock)上复核 L1/L2/L3 三层;L2 复核口径与 CC-0 相同。",
+      "threshold": "L1∈[0.1,0.9] 且 L2 改变率≥0.60 且 L3 counterfactual 改 top-1 ≥1 次",
+      "fail_transition": "L1≈0 或≈1 → 谓词阈值取法有问题,回 P0-05 改谓词不许改任务;L2 改变率不达标 → 见 CC-0 转向;L3 从不改 top-1 → PROPOSAL §2.1「下游约束反推」被证伪,机制 3 降为实现细节,三层漏斗表述改两层。",
+      "supersedes": "P-3(『L2 否决率 ∈(0,0.8)』在无淘汰语义下作废)"
+    }
+  ]
+}
