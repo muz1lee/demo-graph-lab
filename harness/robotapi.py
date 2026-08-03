@@ -47,6 +47,14 @@ MP_SCENE_CAMERA_DEFAULT = "head"  # 非特权 head 立体相机;hand 模式另�
 QPOS_CONVERGE_TOL = 0.05          # rad/关节
 EXEC_SETTLE_TIMEOUT_S = 8.0       # 单航点收敛墙钟上限
 EXEC_POLL_S = 0.2                 # get_qpos 轮询间隔
+# ---- EP-2 提速(2026-08-03)----
+# 旧实现对**每个**航点做 _wait_qpos 收敛轮询,实测单点 ~0.5 s,一段 40 点的路径要 20 s +,
+# 单 stage 因此上到 10 min 量级。但"MotorNode 大跳收不敛"这条旧顾虑只对**大幅跳变**成立;
+# 规划返回的是密集小增量航点,逐点等收敛是在为不存在的风险付全额代价。
+# 改为:中间点按固定间隔流式连发(不回读),**只对终点做收敛确认**(沿用 _wait_qpos)。
+EXEC_STREAM_DT_S = 0.2            # 中间航点连发间隔(PI 指定 0.15~0.25 区间取中)
+EXEC_MAX_WAYPOINTS = 20           # 超过则均匀抽稀,抽稀后 ≤ 此值且必含终点
+EXEC_ENDPOINT_RETRY = 3           # 终点不收敛时重发末尾几点的次数
 
 
 class PlanFailed(Exception):
@@ -215,12 +223,16 @@ def plan_joint_path(rt, arm, q_goal_or_pose, *, q_current=None, q_other_arm=None
 
 def execute_path(rt, waypoints, *, arm=None, gpos=None,
                  converge_tol=QPOS_CONVERGE_TOL, settle_timeout_s=EXEC_SETTLE_TIMEOUT_S):
-    """逐航点下发关节目标并核对收敛,返回 ExecResult。
+    """流式下发关节航点,只对终点核对收敛,返回 ExecResult。
 
     底层 ctrl:qpos_move 逐点 + info:get_qpos 回读核对(EXECUTION §2.2 helper 5)。
-    **绝不整段下发大跳**:MotorNode 对大幅 qpos 跳变收不敛(停在 70~80% 处放弃),故逐航点走,
-    每点等到各关节残差 < converge_tol 或超时再发下一点。ctrl 是 fire-and-forget(HTTP ok=True
-    不代表到位,见 PRIMITIVE_API §控制原语),唯一可信判据是 get_qpos 回读。
+    **仍然绝不整段下发大跳**——大跳收不敛的老问题(MotorNode 停在 70~80% 处放弃)靠
+    "走密集小增量航点"来规避,而不是靠"每点都等收敛"。EP-2 实测:逐点收敛轮询
+    单点 ~0.5 s,是单 stage 十分钟级耗时的主因;中间点本就是过渡姿态,精度不被验收。
+    故中间点按 EXEC_STREAM_DT_S 连发不回读,终点走 _wait_qpos 确认,
+    不收敛则重发末尾几点(≤ EXEC_ENDPOINT_RETRY 次)。
+    航点数 > EXEC_MAX_WAYPOINTS 时先均匀抽稀(必含终点)。
+    ctrl 是 fire-and-forget(HTTP ok=True 不代表到位),唯一可信判据仍是 get_qpos 回读。
 
     waypoints : N 个 7-DoF 关节航点(PlanResult.waypoints 或裸 list[list])。
     arm       : 0/1;None 时取 rt.arm_id。
@@ -231,29 +243,63 @@ def execute_path(rt, waypoints, *, arm=None, gpos=None,
     pipe = _pipe(rt)
     arm_id = int(arm) if arm is not None else int(getattr(rt, "arm_id", 1))
 
-    n_converged, per_dev = 0, []
-    for idx, wp in enumerate(waypoints):
-        wp = _as_floats(wp, JOINTS_PER_WAYPOINT, f"waypoint[{idx}]")
+    pts = [_as_floats(wp, JOINTS_PER_WAYPOINT, f"waypoint[{i}]")
+           for i, wp in enumerate(waypoints)]
+    n_planned = len(pts)
+    if not pts:
+        _log(rt, "execute_path_done", n_sent=0, n_converged=0, reached=False)
+        return ExecResult(reached=False, n_sent=0, n_converged=0, per_waypoint_maxdev=[])
+    pts = _downsample(pts, EXEC_MAX_WAYPOINTS)
+    if len(pts) != n_planned:
+        _log(rt, "waypoints_downsampled", n_planned=n_planned, n_kept=len(pts))
+
+    def send(wp):
         kw = {"arm_id": arm_id, "qpos": wp}
         if gpos is not None:
             kw["gpos"] = gpos
         pipe.call("ctrl", "qpos_move", kw)
-        converged, dev = _wait_qpos(pipe, arm_id, wp, converge_tol, settle_timeout_s)
-        per_dev.append(round(dev, 5))
-        if converged:
-            n_converged += 1
-        _log(rt, "execute_waypoint", arm=arm_id, i=idx, converged=converged,
-             maxdev=round(dev, 5))
 
-    reached = n_converged == len(waypoints) and len(waypoints) > 0
-    _log(rt, "execute_path_done", n_sent=len(waypoints), n_converged=n_converged,
-         reached=reached)
+    # 中间点:流式连发,不回读。它们只是把末端"带过去"的过渡姿态,
+    # 单点是否精确到位不影响最终精度——终点才是被验收的那个。
+    for wp in pts[:-1]:
+        send(wp)
+        time.sleep(EXEC_STREAM_DT_S)
+
+    # 终点:必须确认收敛。不收敛时重发末尾几点(不是重跑整条路径)。
+    goal = pts[-1]
+    send(goal)
+    converged, dev = _wait_qpos(pipe, arm_id, goal, converge_tol, settle_timeout_s)
+    retries = 0
+    while not converged and retries < EXEC_ENDPOINT_RETRY:
+        retries += 1
+        for wp in pts[-min(3, len(pts)):]:
+            send(wp)
+            time.sleep(EXEC_STREAM_DT_S)
+        converged, dev = _wait_qpos(pipe, arm_id, goal, converge_tol, settle_timeout_s)
+        _log(rt, "execute_endpoint_retry", arm=arm_id, attempt=retries,
+             converged=converged, maxdev=round(dev, 5))
+
+    _log(rt, "execute_path_done", n_planned=n_planned, n_sent=len(pts),
+         endpoint_converged=converged, endpoint_maxdev=round(dev, 5),
+         retries=retries, reached=converged)
+    # n_converged 只统计终点(中间点按设计不回读),保持 ExecResult 语义不撒谎。
     return ExecResult(
-        reached=reached,
-        n_sent=len(waypoints),
-        n_converged=n_converged,
-        per_waypoint_maxdev=per_dev,
+        reached=converged,
+        n_sent=len(pts),
+        n_converged=1 if converged else 0,
+        per_waypoint_maxdev=[round(dev, 5)],
     )
+
+
+def _downsample(pts, max_n):
+    """均匀抽稀到 ≤ max_n 个点,**必含终点**(终点是唯一被收敛确认的点,不能丢)。"""
+    if len(pts) <= max_n:
+        return pts
+    k = math.ceil(len(pts) / max_n)
+    kept = pts[::k]
+    if kept[-1] is not pts[-1]:
+        kept.append(pts[-1])
+    return kept
 
 
 def _wait_qpos(pipe, arm_id, target, tol, timeout_s):
