@@ -105,7 +105,8 @@ def test_gates_vacuity_and_effect():
     rt = FakeRT({"bowl0_prop": [0.5, 0.0, 0.79]}, {"carry": True})
     entry = gates.snapshot(rt, stage)
     v = gates.evaluate(rt, stage, entry)
-    assert v["constraints_hold"] and not v["passed"]
+    assert v["acceptance_hold"] and not v["passed"]   # C-6:旧 constraints_hold 改名 acceptance_hold
+    assert v["constraints_hold"]   # 该 stage 无 constraints → 空合取恒真
     assert v["vacuous_pass"] == 1 and v["informative_pass"] == 0
     assert "vacuous" in v["reason"]
 

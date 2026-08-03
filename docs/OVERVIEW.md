@@ -325,15 +325,15 @@ result["vacuous_pass_total"] = Σ vacuous_pass    # :90-91
 | **空洞性（vacuity）** | 阶段结束为真 **且** 入口已为真 → 计入 `vacuous_pass`；为真且入口为假 → `informative_pass` | `:72-73` |
 | **效果（effect）** | 阶段名命中 `EFFECTFUL_STAGES`（`:19-22`，含 pick/grasp/lift/place/stack/insert/transport/push 等）时，被操作物体位移必须 ≥ `MIN_DISPLACEMENT_M = 0.005`（`:23`） | `:82-94` |
 
-最终 `passed = constraints_hold and (effect_ok or not strict)`（`:110`），`STRICT_DEFAULT=True`（`:24`）。
+最终 `passed = acceptance_hold and constraints_hold and (effect_ok or not strict)`（P0-04/C-6 起），`STRICT_DEFAULT=True`。旧字段 `constraints_hold`（其实算的是 acceptance 合取）已改名 `acceptance_hold`；新 `constraints_hold` 真的读 `stage["constraints"]`（`holds=="throughout"` 在 entry/exit 各查一次，中途违反记 `violated_midway`；`holds=="at_end"` 及缺省只在出口查）。
 
 **动机是实测教训**，写在模块 docstring（`gates.py:3-6`）：stack_bowls 的 0/1/2 阶段判 passed，而三个碗位移全是 0.0000——满足的是 reset 时就已成立的谓词。
 
 **三个必须知道的语义细节**：
 
-1. **空洞性只统计、不否决**。`vacuous_pass` 只是诊断字段，`passed` 的计算里不出现它（`:110`）。一个阶段的验收条目全部空洞通过，`constraints_hold` 依然为 `True`。真正能拦下来的是效果检查。
-2. **观测不到就不判效果**。`observable = bool(post)`（`:93`），fake 干跑时 `object_positions` 返回 `{}` → `effect_ok` 恒 `True`（`:94`）。**所以「dry-run 全绿」对物理效果零信息量。**
-3. **`stage['constraints']` 一次都没被读**。`snapshot:51` 和 `evaluate:63` 都只取 `stage.get("acceptance")`。
+1. **空洞性只统计、不否决**。`vacuous_pass` 只是诊断字段，`passed` 的计算里不出现它。一个阶段的验收条目全部空洞通过，`acceptance_hold` 依然为 `True`。真正能拦下来的是效果检查与（P0-04 起）约束检查。
+2. **观测不到就不判效果**。`observable = bool(post)`，fake 干跑时 `object_positions` 返回 `{}` → `effect_ok` 恒 `True`。**所以「dry-run 全绿」对物理效果零信息量。** （此处 fail-open 已由 P0-05 归零：不可观测 → UNKNOWN 记账，不再静默放行。）
+3. **`stage['constraints']` 现已被 gate 消费**（P0-04/C-6）：`snapshot` 记 throughout 约束的入口态，`evaluate` 在出口逐条判定并入 `passed`。此前一行不读。
 
 ---
 
