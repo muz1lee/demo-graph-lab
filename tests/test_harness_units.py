@@ -150,6 +150,41 @@ def test_compile_dry_run_mini():
     assert r["retry_injection"]["stages"][0]["status"] == "passed_retry1"
 
 
+def test_fakerun_push_raises_not_noop():
+    """P0-06/G4:fake 运行时 push 必须 raise(与 kwadapter 硬 stub 同语义,D-14 挂起),
+    不许被 __getattr__ 吞成 no-op;其余白名单原语仍 no-op 记日志。"""
+    import pytest
+
+    from harness.fakerun import FakeRuntime
+    graph = {"stages": [{"index": 0, "name": "s", "acceptance": [], "holes": []}]}
+    rt = FakeRuntime(graph)
+    # push:干跑就红
+    with pytest.raises(NotImplementedError):
+        rt.push("objA", "contact", "toward")
+    # 白名单原语:仍 no-op 且进日志
+    rt.grasp_at("p")
+    rt.approach("p")
+    assert [c["op"] for c in rt.calls] == ["grasp_at", "approach"]
+    # 契约外 API 仍 AttributeError
+    with pytest.raises(AttributeError):
+        rt.teleport
+
+
+def test_compile_dry_run_push_is_red():
+    """P0-06:调 push 的 policy 干跑必炸(NotImplementedError 冒泡),
+    绝不再吞成绿。run() 层把它记为 dryrun_error(仍是红,非 normal.ok)。"""
+    import pytest
+
+    from harness.compilepolicy import dry_run
+    graph = {"stages": [{"index": 0, "name": "shove",
+                         "acceptance": [{"name": "carry", "args": {}}],
+                         "holes": [{"name": "push_dir", "type": "axis_3d"}]}]}
+    code = ("def stage_0(rt):\n    rt.push(rt.solve('push_dir'), None, None)\n"
+            "STAGES = {0: stage_0}\n")
+    with pytest.raises(NotImplementedError):
+        dry_run(code, graph)
+
+
 def test_norm_item_salvages_toplevel_args():
     from harness.extract import _norm_item
     it = {"name": "region_grasp", "object": "tube0", "region": "upper_body",

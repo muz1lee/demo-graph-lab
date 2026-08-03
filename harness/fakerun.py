@@ -47,9 +47,14 @@ class FakeRuntime:
         return True
 
     def __getattr__(self, name):
-        # 控制原语统一记日志(approach/grasp_at/lift/transport/align/lower_until/push/release)
+        # push 与 kwadapter 硬 stub 同语义:D-14 挂起,干跑必须炸,不许被吞成 no-op(P0-06/G4)
+        if name == "push":
+            def _push_stub(*a, **kw):
+                raise NotImplementedError("push 任务挂起(老板指示),M1 不实现")
+            return _push_stub
+        # 控制原语统一记日志(approach/grasp_at/lift/transport/align/lower_until/release)
         if name in ("approach", "grasp_at", "lift", "transport", "align",
-                    "lower_until", "push", "release"):
+                    "lower_until", "release"):
             def prim(*a, **kw):
                 self._log(name, args=[repr(x) for x in a],
                           kwargs={k: repr(v) for k, v in kw.items()})
