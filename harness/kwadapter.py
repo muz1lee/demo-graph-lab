@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 import urllib.request
 
@@ -72,9 +73,21 @@ LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0   # 派生:残余负载远轻于触底
 TDX0 = [0.0, 1.0, 0.0, 0.0]   # Ry(180):工具 +z → 世界 -z,爪子垂直朝下
 APPROACH_AXIS_IDX = 2         # _tool_axes 返回 (x,y,z);接近轴取 +z
 FINGER_AXIS_IDX = 1           # 开合轴 = 工具 +y
-# 3) 爪尖在 EEF 帧下方 CLAW_TIP_DZ 处(竖直朝下时)。标定:空桌面上方竖直下探,
-#    ee_extforce 从 ~1.1 N 跳到 56.8 N 时 EEF z=0.817,桌面 z=0.765 → 0.052 m。
-CLAW_TIP_DZ = 0.052
+# 3) 爪尖相对 EEF 帧的 z 偏置(竖直朝下时):tip_z = eef_z + CLAW_TIP_DZ。
+#    **EP-2 2026-08-03 重标定,旧值 +0.052 被推翻(差了 6.2 cm,方向也反)。**
+#    旧标定说"下探到 ee_extforce 跳变时 EEF z=0.817,桌面 0.765 → 0.052"。但那次读数
+#    出自坏掉的力解析(get_ee_extforce 回的是 numpy 空格分隔字符串,float() 抛异常被
+#    吞成 None,见 _as_numbers)——力信号当时根本不可信,0.817 是伪跳变。
+#    修好解析后在空桌面重标(insert_tubes_000,右臂,爪张开,远离管子与插槽):
+#      基线 0.68 N,逐步 1 cm 下探,EEF z=0.7553 时力跳到 26.8 N(前一步 0.7644 仅 1.25 N)。
+#      桌面顶面 = 场景 box 中心 0.74 + 半高 0.025 = 0.765(scene yaml 实读,非估计)。
+#      → CLAW_TIP_DZ = 0.7553 - 0.765 = -0.0097 ≈ -0.010
+#    即爪尖实际**略低于**桌面接触点所对应的 EEF 高度,而不是在 EEF 下方 5.2 cm。
+#    旧值的后果:每次抓取都把爪尖瞄到目标点上方 6.2 cm,指垫悬在管子上方够不着——
+#    这正是 EP-1「爪子到位却夹不住」和 EP-2 逐档闭合电流恒为 0 的几何主因。
+#    交叉校验:管心 0.7818 - 桌面 0.765 = 16.8 mm 半径,与 50 ml 离心管(直径约 30 mm)相符,
+#    说明桌面高度与管子位姿这两个基准自洽,标定不是被单一错误基准带偏。
+CLAW_TIP_DZ = -0.010
 # 4) MotorNode 大跳不收敛:qpos_check_tolerance=0.05 rad / convergence_timeout=15 s,
 #    单条大幅 xquat_move 会停在目标的 70~80% 处就放弃(实测 max_error 0.21~0.43 rad,
 #    连"回到几秒前刚待过的姿态"也失败)。而每一小步都能干净收敛。
@@ -183,6 +196,32 @@ def _flatten(v):
     out = []
     for x in (v if isinstance(v, (list, tuple)) else [v]):
         out.extend(_flatten(x) if isinstance(x, (list, tuple)) else [x])
+    return out
+
+
+# numpy 的 str() 形态:"[[-25.47078369 -11.25156104  38.69975227]]" —— 空格分隔、**没有逗号**,
+# json.loads 和 ast.literal_eval 都解析不了,于是 wire_value 原样返回字符串。
+# get_ee_extforce 正是这种回法(pipeline 侧对 ndarray 直接 str()),导致
+# `float(那个字符串)` 抛异常、_ee_extforce_max 吞掉异常返回 None ——
+# **接触检测因此全程失明**:lower_until 收不到触底信号,lift 的承重证据恒为
+# "force_unreadable"。EP-2 touch test 里连续 12 步 force_n=null、指尖已压到管心
+# 下方 5.7 cm 仍无触底判定,就是这个 bug 的现场。
+_NUM_RE = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _as_numbers(v):
+    """把原语返回值规约成 float 列表,兼容 numpy 的空格分隔字符串形态。
+    解析不出任何数字 → 返回 [](调用方据此判"读不到",不 fail-open)。"""
+    flat = _flatten(v)
+    out = []
+    for x in flat:
+        if isinstance(x, str):
+            out.extend(float(m) for m in _NUM_RE.findall(x))
+        else:
+            try:
+                out.append(float(x))
+            except (TypeError, ValueError):
+                pass
     return out
 
 
@@ -364,7 +403,8 @@ class KWRuntime:
         get_ee_extforce 实测可调。空载 ~1.1 N,触底跳到 ~57 N,抬物残余负载居中。"""
         try:
             f = self.pipe.call("info", "get_ee_extforce", {"arm_id": self.arm_id})
-            return max(abs(float(v)) for v in _flatten(f))
+            nums = _as_numbers(f)          # 兼容 numpy 空格分隔字符串,见 _as_numbers
+            return max(abs(v) for v in nums) if nums else None
         except Exception:
             return None
 
@@ -536,7 +576,18 @@ class KWRuntime:
         self._log("move_mp", n_waypoints=plan.n_waypoints, n_converged=ex.n_converged,
                   reached=ex.reached, ok=ok, pos_gap=round(pos_gap, 4),
                   rot_gap=round(rot_gap, 2))
-        return ok
+        if ok:
+            return True
+        # **关节收敛 ≠ 笛卡尔到位。** execute_path 的终点判据是各关节残差 < 0.05 rad
+        # (MotorNode 的 qpos_check_tolerance),7 个关节各差一点,累到末端就是厘米级:
+        # EP-2 实测 endpoint_maxdev=0.0495 rad「已收敛」时笛卡尔仍差 2 cm,而 touch test
+        # 起点更是横向偏了 9.5 cm —— 爪子整个下探在管子**旁边**,力读数自然全程平坦,
+        # 逐档闭合当然一次都夹不住。这是"悬空没碰到管子"的真正机制。
+        # 修法:规划把手臂送到邻域后,用限幅伺服闭环补掉残差(伺服是笛卡尔判据,
+        # 实测能把 2 cm 收到 3 mm)。不是退化路径,故记 mp_refine 而非 mp_fallback。
+        self._log("mp_refine", pos_gap=round(pos_gap, 4), rot_gap=round(rot_gap, 2),
+                  reason="joint_converged_but_cartesian_off")
+        return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
 
     def _move_servo(self, xyz, quat=None, interpolation="linear", gpos=None):
         """位姿闭环伺服——**退化路径**(EP-1 起只在运动规划失败时用,见 _move)。
@@ -656,6 +707,19 @@ class KWRuntime:
         psi = math.degrees(math.atan2(v[0], v[1]))
         return _tdx(psi), "yaw_from_axis"
 
+    def _grasp_quat(self, axis):
+        """抓取腕姿:开合方向**正交**于 axis 的水平投影(_align_quat 是平行)。
+        差一个 90° 的 yaw——夹一根横躺的棍状物,指垫要卡在它两侧,而不是顺着它。
+        复用 _tdx,不引入新常数;返回 (quat 或 None, 说明)。"""
+        v = self._axis_vec(axis)
+        if v is None:
+            return None, "no_axis_vec"
+        if math.sqrt(v[0] * v[0] + v[1] * v[1]) < 1e-6:
+            # 轴近竖直:物体立着,竖直下探本就正交于长轴,旧行为已正确。
+            return None, "axis_vertical_topdown_already_orthogonal"
+        psi = math.degrees(math.atan2(v[0], v[1]))
+        return _tdx(psi + 90.0), "yaw_orthogonal_to_axis"
+
     # 任务无关的候选 approach 方向调色板(单位向量,世界系)。**与 cone 无关地生成**:
     # cone 只在下面的排序步进入,绝不参与候选生成(否则 E-CAUSAL 变同义反复,见 TODO C-5)。
     # 覆盖竖直下探 / 四个水平朝向 / 四个斜向,足以让任一 cone 排序都有可分的 top-1。
@@ -719,15 +783,32 @@ class KWRuntime:
         self._step_to(xyz)
         return self._move(xyz)
 
-    def grasp_at(self, grasp_pose):
-        """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ。"""
+    def grasp_at(self, grasp_pose, axis=None):
+        """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ。
+
+        `axis`(可选)= 被抓物的长轴。**开合方向必须垂直于它**:
+        EP-2 实测,insert_tubes 的管子是**横躺**在桌面上的(long axis 的世界分量
+        ≈[0,0.83,-0.55],近水平;官方 axis_aligned 探针也报 -57.8°)。此时若沿用
+        「锁住当前腕姿竖直下探」,两片指垫是**顺着管子长度方向**合拢的——逐档
+        100/60/40/20/10/0 全试过,闭合电流恒为 0.0、is_gripping 恒 False,
+        即指垫从管子两侧擦过去,压根没碰到(见 harness/EP2_REPORT.md 夹爪实测表)。
+        故这里把腕部 yaw 转到与长轴**正交**:_align_quat(axis) 给的是"开合方向
+        平行于 axis"的腕姿,绕接近轴再转 90° 即得正交姿态。
+        axis 缺失/近竖直(定不出 yaw)→ 退回旧的锁当前腕姿行为,并 UNSUPPORTED 记账。
+        """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         self._wait_grip(GRIP_OPEN)
         self._move([eef[0], eef[1], eef[2] + PREGRASP_DZ])
-        _, q = self._cur_xquat()
-        self._move(eef, quat=q, gpos=GRIP_OPEN)   # 下探时锁住已到位的腕姿,只走 z
+        gq, why = self._grasp_quat(axis)
+        if gq is None:
+            if axis is not None:
+                self._unsupported("grasp_at.axis", axis, why)
+            _, gq = self._cur_xquat()             # 退回:锁住已到位的腕姿
+        else:
+            self._log("grasp_axis", why=why, quat=[round(v, 4) for v in gq])
+        self._move(eef, quat=gq, gpos=GRIP_OPEN)  # 下探时锁住抓取腕姿,只走 z
         # !! 参数名只能是 angle(gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True,
         # 2026-07-30 为此误判过一次"夹爪通道不通")。开合方向见模块顶部 GRIP_* 注释:
         # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
