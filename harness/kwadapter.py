@@ -594,6 +594,25 @@ class KWRuntime:
         {"id": "obl_s",  "approach_dir": [0.0, -1.0, -1.0]},
     )
 
+    def _cone_name(self, cone):
+        """把 `cone` 参数规约成 regions 认的**锥名字符串**(vocab.APPROACH_CONES 封闭词表)。
+
+        为什么需要:编译出的 policy 直接把 `approach_direction` 约束的整个 args 传进来
+        (`{"cone": "top_down", "target": "tube_left"}`),而 regions.cone_axis 以锥名作
+        dict 键——传 dict 会 `TypeError: unhashable type: 'dict'`(EP-1 首跑 stage_0 即挂)。
+        这里只做**形状归一**(dict → 取 `cone` 字段;字符串原样),不做任何任务分支;
+        取不出锥名 → 返回 None,调用方退回无 cone 的旧行为并 UNSUPPORTED 记账。
+        """
+        if cone is None:
+            return None
+        if isinstance(cone, str):
+            return cone
+        if isinstance(cone, dict):
+            inner = cone.get("cone")
+            if isinstance(inner, str):
+                return inner
+        return None
+
     def approach(self, target, cone=None):
         """先把闲置臂归位,再纯位置靠到物体的**预抓取位**(此时不锁腕姿),最后才把腕姿压成
         竖直——顺序很关键:腕部 yaw 在够物区转不动,只有先到位、再取"当前腕姿的竖直版"
@@ -605,18 +624,21 @@ class KWRuntime:
         self._park_idle_arm()
         xyz = self._target_xyz(target)
         off = PREGRASP_DZ + CLAW_TIP_DZ
-        if cone is None:
+        cone_name = self._cone_name(cone)       # 形状归一:policy 传的是约束 args 整块
+        if cone_name is None:
+            if cone is not None:                # 给了 cone 却取不出锥名 → 记账,不静默当无 cone
+                self._unsupported("approach.cone", cone, "no_cone_name")
             xyz[2] += off                       # 无 cone:沿用竖直下探(向下 → 偏置在正上方)
         else:
             # 候选与 cone 无关地生成;cone 仅在此排序步进入。
-            best = regions.rank_by_cone(self._APPROACH_DIR_CANDIDATES, cone)[0]
+            best = regions.rank_by_cone(self._APPROACH_DIR_CANDIDATES, cone_name)[0]
             d = best["approach_dir"]
             n = math.sqrt(sum(v * v for v in d)) or 1.0
             u = [v / n for v in d]
             # 预抓取位在物体沿「−approach 方向」偏置 off:approach 向下→偏置在上方(旧行为),
             # approach 侧向→偏置在侧方。方向由 cone 排序 top-1 决定,幅度是既有标定常量。
             xyz = [xyz[i] - u[i] * off for i in range(3)]
-            self._log("approach_cone", cone=cone, dir=best["id"])
+            self._log("approach_cone", cone=cone_name, dir=best["id"])
         self._step_to(xyz)
         return self._move(xyz)
 

@@ -157,3 +157,28 @@ def test_servo_path_still_available_directly():
 
     assert "xquat_move" in pipe.names("ctrl")
     assert "motion_planning_stereo" not in pipe.names("reasoning")
+
+
+# ---------------------------------------------------------------------------
+# approach 的 cone 形状归一(EP-1 首跑归因:stage_0 即挂在这里)
+# ---------------------------------------------------------------------------
+def test_cone_name_normalizes_constraint_args_dict():
+    """编译出的 policy 传的是 `approach_direction` 约束的**整个 args**
+    ({"cone": "top_down", "target": ...}),而 regions.cone_axis 以锥名作 dict 键。
+    _cone_name 负责形状归一;不归一则 TypeError: unhashable type: 'dict'。"""
+    rt = _rt(MovePipe(_mp_result(), START_XQUAT))
+    assert rt._cone_name({"cone": "top_down", "target": "tube_left"}) == "top_down"
+    assert rt._cone_name("side") == "side"                 # 已是锥名则原样
+    assert rt._cone_name(None) is None
+    assert rt._cone_name({"target": "rack"}) is None        # 取不出锥名 → None(调用方记账)
+    assert rt._cone_name(["top_down"]) is None
+
+
+def test_cone_dict_is_accepted_by_regions_ranking():
+    """归一后的锥名必须能被 regions.rank_by_cone 直接消费(闭环校验封闭词表)。"""
+    from harness import regions, vocab
+    rt = _rt(MovePipe(_mp_result(), START_XQUAT))
+    name = rt._cone_name({"cone": "top_down", "target": "tube_left"})
+    assert name in vocab.APPROACH_CONES
+    ranked = regions.rank_by_cone(rt._APPROACH_DIR_CANDIDATES, name)
+    assert ranked[0]["id"] == "down"        # top_down 锥的 top-1 是竖直下探
