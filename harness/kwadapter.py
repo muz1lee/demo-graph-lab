@@ -16,6 +16,8 @@ import urllib.request
 
 from adapters.knowin_world.pipeline import PipelineClient
 
+from . import binding
+
 ORACLE_BANNER = "ORACLE-M1A"      # 本模式产出一律带此标签,不得报为方法结果
 PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
 LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
@@ -293,30 +295,18 @@ class KWRuntime:
 
     # ---------- contract: 感知求解 ----------
     def solve(self, hole_name: str):
-        st, hole = self._hole_index.get(hole_name, (self._current_stage, {"name": hole_name}))
-        so = (st or {}).get("stage_objects") or {}
-        manip, target = so.get("manipulated"), so.get("target")
-        n = hole_name.lower()
-        val: dict = {"kind": "oracle", "hole": hole_name}
-        if "grasp" in n and "pose" in n:
-            e = self._ent(manip or n.split("_grasp")[0])
-            top = e["aabb"]["max"][2] if isinstance(e.get("aabb"), dict) else e["aabb"][1][2]
-            val.update(kind="pose", xyz=[e["pos"][0], e["pos"][1],
-                                         top - 0.03], quat=None)  # 上部区域:顶下 3cm
-        elif "axis" in n:
-            obj = manip if manip else n.split("_")[0]
-            try:
-                val.update(kind="axis", vec=_quat_to_z_axis(self._ent(obj)["quat"]))
-            except KeyError:
-                val.update(kind="axis", vec=[0, 0, 1])
-        elif any(k in n for k in ("hole", "slot", "place", "target", "insert_point", "center")):
-            e = self._ent(target or "slot")
-            top = e["aabb"]["max"][2] if isinstance(e.get("aabb"), dict) else e["aabb"][1][2]
-            val.update(kind="point", xyz=[e["pos"][0], e["pos"][1], top])
-        elif any(k in n for k in ("depth", "height", "clearance", "distance")):
-            val.update(kind="scalar", value=0.05)
-        else:  # runtime_condition 等 → 描述子,交给 lower_until/verify 消费
-            val.update(kind="condition", target=target, manip=manip)
+        """签名不动(contract.py:19 单参)。内部自取 stage 里的 hole 与本阶段 constraints,
+        委派 binding 按 hole["type"] 派发(C-1/C-2/C-3,见 docs/TODO.md §1.2、EXECUTION §2.5)。
+        `_hole_index` 查不到 → raise UnsolvedHole(L2_bind),**不回退到当前阶段猜**(C-2)。"""
+        try:
+            st, hole = self._hole_index[hole_name]
+        except KeyError as e:
+            raise binding.UnsolvedHole(
+                f"solve: 图中无声明的 hole {hole_name!r}"
+                f"(已声明:{sorted(self._hole_index)})",
+                reason="hole_not_declared") from e
+        val = binding.solve_hole(hole, stage=st, constraints=st.get("constraints") or [],
+                                 rt=self)
         self._log("solve", hole=hole_name, kind=val["kind"])
         return val
 
