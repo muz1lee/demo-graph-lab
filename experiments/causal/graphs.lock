@@ -1,0 +1,37 @@
+{
+ "note": "P0 因果链语料钉定(EXECUTION §2.5):v0.2 五任务 graph.json,86 洞口径的权威源。改动本文件 = 换语料,须 PI 知情。",
+ "pinned_at": "2026-08-03",
+ "total_holes": 86,
+ "graphs": [
+  {
+   "path": "experiments/causal/graphs/insert_tubes.graph.json",
+   "sha256": "6054f9f0d4df1d57e46b1caf8904535d1a75f4013b05028d71169f3e47eaaeb7",
+   "source_run": "harness/runs/harness_insert_tubes_20260730_003434",
+   "holes": 27
+  },
+  {
+   "path": "experiments/causal/graphs/stack_bowls.graph.json",
+   "sha256": "9fc635e6a437e61407966ee322544c6699e8212c417f16d650522868b273069e",
+   "source_run": "harness/runs/harness_stack_bowls_20260730_004159",
+   "holes": 19
+  },
+  {
+   "path": "experiments/causal/graphs/deposit_coin.graph.json",
+   "sha256": "037cf2e51a74890733b062c470f1b8b06450478771189627f5745df7b3aeaf00",
+   "source_run": "harness/runs/harness_deposit_coin_20260730_005022",
+   "holes": 13
+  },
+  {
+   "path": "experiments/causal/graphs/push_T.graph.json",
+   "sha256": "e300245ced95d9f0ffe45bbcd1f139398d78481c25cce129807e28e1a4bbb8f6",
+   "source_run": "harness/runs/harness_push_T_20260730_005609",
+   "holes": 11
+  },
+  {
+   "path": "experiments/causal/graphs/push_T_random.graph.json",
+   "sha256": "c60b1b80000bb232165ef645f5c3c06a75ea9ca134950832677be5e0e7a664f3",
+   "source_run": "harness/runs/harness_push_T_random_20260730_005924",
+   "holes": 16
+  }
+ ]
+}
