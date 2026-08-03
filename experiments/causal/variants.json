@@ -1,15 +1,27 @@
 {
-  "status": "DRAFT-待PI签字",
-  "note": "「排序偏好」裁决(2026-07-30)后的判据重预注册草案。这是草案,不是生效判据。生效须 PI 签字后 commit,开跑前不许改(EXECUTION §0 预注册纪律:事后调整必须留 git 记录并声明该批数据作废)。判据原文出处 docs/TODO.md §1.3 表与 §3 D0 表。",
+  "status": "SIGNED",
+  "signed_by": "PI(对话确认「同意」,2026-08-03)",
+  "signed_at": "2026-08-03",
+  "note": "「排序偏好」裁决(2026-07-30)后的判据重预注册。本文件自本 commit 起生效:开跑前不许改(EXECUTION §0 预注册纪律:事后调整必须留 git 记录并声明该批数据作废)。判据原文出处 docs/TODO.md §1.3 表与 §3 D0 表。",
   "drafted_at": "2026-08-03",
+  "amendments_before_signature": [
+    "CC-2′ 由 24 格制改为 20 格制:rim/handle 按设计 UNCHECKABLE(v1 不做几何特征检测)、top↔upper_body 两偏好函数(s² 与 s)在离散候选上排序恒等价——这两类格子是结构性死格,计入分母会使原 ≥22/24 数学上不可达(理论上限 16/24)。修订后分母只含『非等价可查对』,严格度(90%)与原意保持一致。",
+    "CC-0 钉死配对口径:只统计非等价 region 对,排除 top↔upper_body(排序等价)与 rim/handle 相关对(不可查)——原文『改 region 标签』未定义配对集,达标与否会取决于抽样而非机制。",
+    "P-3′ 的 L2 复核口径随 CC-0 同步。"
+  ],
+  "pair_vocabulary": {
+    "checkable_regions": ["top", "upper_body", "middle", "bottom"],
+    "non_equivalent_pairs": [["upper_body", "bottom"], ["top", "bottom"], ["middle", "bottom"], ["middle", "top"], ["middle", "upper_body"]],
+    "excluded_pairs": {"top↔upper_body": "偏好函数 s² 与 s 单调同向,离散候选上排序恒等价(按设计)", "rim/handle 相关对": "UNCHECKABLE(v1 无几何特征检测,按设计)"}
+  },
   "supersedes_context": "硬阈值语义(CC-1 的『≥0.5×物体高』、CC-2 的『24 格淘汰』、P-3 的『L2 否决率 ∈(0,0.8)』)在无死线的排序语义下均无对象,故整体重写为 CC-0/CC-1′/CC-2′/P-3′。",
   "criteria": [
     {
       "id": "CC-0",
       "kind": "新增(新裁决新引入的风险,原方案无对应条目)",
-      "criterion": "筛选力下限:K≥3 的样本中,改 region 标签导致 top-1 改变的比例 ≥60%。",
-      "measurement": "K≥3 候选集;逐样本比较不同 region 标签下 rank_by_region 的 top-1 是否改变;统计改变比例。",
-      "threshold": "改变率 ≥ 0.60",
+      "criterion": "筛选力下限:K≥3 的样本中,在非等价 region 对(见 pair_vocabulary)上改 region 标签导致 top-1 改变的比例 ≥60%。",
+      "measurement": "K≥3 候选集;对 pair_vocabulary.non_equivalent_pairs 的每一对,比较两标签下 rank_by_region 的 top-1 是否改变;统计改变比例。等价对与不可查对不计入分母。",
+      "threshold": "非等价对上 top-1 改变率 ≥ 0.60",
       "fail_transition": "低于此 ⇒ L2 层退化为恒等映射,「排序偏好」取舍失败。二选一并当面报 PI(不许悄悄回退):(a) 回到带死线的区间筛(承认人为常数);(b) 承认 L2 层无筛选力、三层漏斗表述改两层。",
       "supersedes": null,
       "gate": "D0 独立闸门"
@@ -25,19 +37,19 @@
     },
     {
       "id": "CC-2′",
-      "kind": "改写",
-      "criterion": "6 region × 4 任务 = 24 格:≥22 格产生不同的 top-1 或 τ<1;regions.py 任务名扫描 0 命中。",
-      "measurement": "对 graphs.lock 钉定语料的 4 任务(insert/stack/deposit/push_T_random;push_T 挂起不计)× 6 region,用固定 mock 候选集(K=5,种子固定)算 top-1 是否随 region 改变与 Kendall τ。参考冒烟脚本 scripts/cc2_region_matrix.py(工程冒烟,非正式数字)。",
-      "threshold": "≥22/24 格 top-1 或排序改变;regions.py 任务名命中 = 0",
+      "kind": "改写(签字前修订为 20 格制,见 amendments_before_signature)",
+      "criterion": "5 个非等价可查 region 对 × 4 任务 = 20 格:≥18 格产生不同的 top-1 或 τ<1;regions.py 任务名扫描 0 命中。rim/handle 与 top↔upper_body 单列『按设计不可查/等价』,不计分母。",
+      "measurement": "对 graphs.lock 钉定语料的 4 任务(insert_tubes/stack_bowls/deposit_coin/push_T_random;push_T 挂起不计)× pair_vocabulary.non_equivalent_pairs,用固定 mock 候选集(K=5,种子固定)算 top-1 是否改变与 Kendall τ。参考冒烟脚本 scripts/cc2_region_matrix.py(需按 20 格口径更新)。",
+      "threshold": "≥18/20 格 top-1 改变或 τ<1;regions.py 任务名命中 = 0",
       "fail_transition": "同 CC-1′。",
-      "supersedes": "CC-2(『≥22/24 产生不同 pose』在无淘汰的排序语义下不可测,已作废)"
+      "supersedes": "CC-2(『≥22/24 产生不同 pose』:淘汰语义不可测且 24 格制含结构性死格,已作废)"
     },
     {
       "id": "P-3′",
       "kind": "改写(D1 收口判据)",
-      "criterion": "funnel 非平凡:L1 通过率 ∈[0.1,0.9];L2 top-1 改变率 ≥60%(= CC-0 在真候选上的复核);L3 在 counterfactual 上 ≥1 次改 top-1。",
-      "measurement": "真候选(非 mock)上复核 L1/L2/L3 三层;L2 复核口径与 CC-0 相同。",
-      "threshold": "L1∈[0.1,0.9] 且 L2 改变率≥0.60 且 L3 counterfactual 改 top-1 ≥1 次",
+      "criterion": "funnel 非平凡:L1 通过率 ∈[0.1,0.9];L2 top-1 改变率 ≥60%(非等价对口径,= CC-0 在真候选上的复核);L3 在 counterfactual 上 ≥1 次改 top-1。",
+      "measurement": "真候选(非 mock)上复核 L1/L2/L3 三层;L2 复核口径与 CC-0 相同(pair_vocabulary)。L3 条目依赖 T-BP 复活(D-21 后置),复活前挂账不判。",
+      "threshold": "L1∈[0.1,0.9] 且 L2 非等价对改变率≥0.60 且 L3 counterfactual 改 top-1 ≥1 次(L3 挂账期不计)",
       "fail_transition": "L1≈0 或≈1 → 谓词阈值取法有问题,回 P0-05 改谓词不许改任务;L2 改变率不达标 → 见 CC-0 转向;L3 从不改 top-1 → PROPOSAL §2.1「下游约束反推」被证伪,机制 3 降为实现细节,三层漏斗表述改两层。",
       "supersedes": "P-3(『L2 否决率 ∈(0,0.8)』在无淘汰语义下作废)"
     }
