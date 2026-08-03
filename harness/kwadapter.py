@@ -465,6 +465,69 @@ class KWRuntime:
         e = self._ent(target if isinstance(target, str) else str(target))
         return list(e["pos"])
 
+    # ---------- 契约参数消费 / 显式记账(P0-15,破口③) ----------
+    def _unsupported(self, param, value, reason):
+        """参数被读到但当前 runtime 无法映射为行为时的**显式记账**。
+        静默丢弃归零:凡是读到却用不上的契约参数,都在这里进调用账本
+        (param/value/reason 三字段,测试可断言),绝不再无声吞掉。"""
+        self._log("unsupported_param", param=param, value=repr(value), reason=reason)
+
+    def _consume_obj(self, obj, *, op):
+        """消费 align/transport 的 `obj`(被操作物):按参数解析成 oracle 实体,
+        走与 binding._resolve_ref 同款路径(rt._ent → _resolve)。解析成功记
+        obj_resolved(供 gate/评测审计「这条动作作用在哪个实体」);
+        解析不到则 UNSUPPORTED 记账——不再当作不存在而静默忽略。
+        返回解析出的实体 dict 或 None。"""
+        if obj is None:
+            return None
+        try:
+            ent = self._ent(obj if isinstance(obj, str) else str(obj))
+        except Exception as e:
+            self._unsupported(f"{op}.obj", obj, f"unresolved:{type(e).__name__}")
+            return None
+        self._log("obj_resolved", prim=op, obj=str(obj),
+                  pos=[round(v, 4) for v in ent["pos"]])
+        return ent
+
+    def _axis_vec(self, axis):
+        """把 align 的 `axis` 参数规约成世界系方向向量。
+        接受三种形态:①binding.solve_axis_3d 的句柄 {"kind":"axis","vec":[...]};
+        ②裸 3 向量 [x,y,z] 或 dict{"vec":...};③None/字符串标签。
+        取不到向量(None、字符串、零向量)→ 返回 None(调用方据此 UNSUPPORTED 记账)。"""
+        if axis is None:
+            return None
+        vec = None
+        if isinstance(axis, dict):
+            vec = axis.get("vec")
+        elif isinstance(axis, (list, tuple)) and len(axis) == 3:
+            vec = list(axis)
+        if not vec:
+            return None
+        try:
+            v = [float(vec[0]), float(vec[1]), float(vec[2])]
+        except (TypeError, ValueError, IndexError):
+            return None
+        if math.sqrt(sum(c * c for c in v)) < 1e-9:
+            return None
+        return v
+
+    def _align_quat(self, axis):
+        """由对齐轴 `axis` 推出末端目标腕姿(几何通用,零任务分支)。
+        语义:竖直朝下抓取(TDX0),把开合方向(工具 +y)的世界投影绕接近轴转到
+        与 axis 的**水平投影**一致——即 axis 决定腕部 yaw 这个自由度。
+        用既有 _tdx(psi) 生成,不引入任何新度量常数。
+        返回 (quat 或 None, 说明)。axis 缺失或近竖直(无水平分量定不出 yaw)→
+        quat=None(退回旧的「离当前腕姿最近的竖直姿态」),说明供 UNSUPPORTED 记账。"""
+        v = self._axis_vec(axis)
+        if v is None:
+            return None, "no_axis_vec"
+        horiz = math.sqrt(v[0] * v[0] + v[1] * v[1])
+        if horiz < 1e-6:
+            # 轴近竖直:与接近轴共线,无法据此约束 yaw 自由度。
+            return None, "axis_vertical_yaw_unconstrained"
+        psi = math.degrees(math.atan2(v[0], v[1]))
+        return _tdx(psi), "yaw_from_axis"
+
     # 任务无关的候选 approach 方向调色板(单位向量,世界系)。**与 cone 无关地生成**:
     # cone 只在下面的排序步进入,绝不参与候选生成(否则 E-CAUSAL 变同义反复,见 TODO C-5)。
     # 覆盖竖直下探 / 四个水平朝向 / 四个斜向,足以让任一 cone 排序都有可分的 top-1。
@@ -546,42 +609,92 @@ class KWRuntime:
             self._log("lift_done", obj=obj, obj_dz=round(dz, 4), attached=bool(dz > 0.05))
 
     def transport(self, obj, target):
+        # P0-15:`obj`(被搬运物)按参数解析并记账,不再静默忽略。M1a 携物移动的
+        # 落点由 target 决定,obj 用于审计「这条 transport 作用在哪个实体」;解析失败记 UNSUPPORTED。
+        self._consume_obj(obj, op="transport")
         xyz = self._target_xyz(target)
         xyz[2] += PREGRASP_DZ + CLAW_TIP_DZ
         self._move(xyz)
 
     def align(self, obj, target, axis=None):
+        """P0-15:让 align 真正按 `axis` 约束末端姿态,而不再是「只差 DZ 常数」的 transport。
+        - `obj`:被对齐物按参数解析并记账(_consume_obj,同 binding._resolve_ref 路径)。
+        - `axis`:决定腕部 yaw 自由度——由 _align_quat 从轴的水平投影推出目标腕姿,
+          交给 _move(quat=...) 约束姿态。**不同 axis → 不同目标腕姿 → 不同末端行为**。
+          axis 缺失/近竖直(定不出 yaw)→ quat=None 退回旧竖直姿态,并 UNSUPPORTED 记账。
+        位置分量仍走既有对准高度(ALIGN_DZ,旧常数,P0-16 再清)。"""
+        self._consume_obj(obj, op="align")
         xyz = self._target_xyz(target)
         xyz[2] += ALIGN_DZ + CLAW_TIP_DZ
-        self._move(xyz)
+        quat, why = self._align_quat(axis)
+        if quat is None:
+            if axis is not None:
+                self._unsupported("align.axis", axis, why)
+            self._move(xyz)
+        else:
+            self._log("align_axis", why=why, quat=[round(v, 4) for v in quat])
+            self._move(xyz, quat=quat)
+
+    # lower_until 支持的停止判据类别(任务无关词表)。stop_condition 只能把下探
+    # **路由**到其中一类;判据实现本身(oracle 态)不在本任务动——去特权是 P0-14。
+    _STOP_KINDS = ("contact", "predicate", "plateau")
+
+    def _stop_kind(self, stop_condition):
+        """P0-15:从 `stop_condition` 参数读出停止判据类别(不再静默丢弃)。
+        只认参数上**显式**、任务无关的 `stop_kind` 字段(binding/policy 可置为
+        contact/predicate/plateau 之一);句柄/字典无该字段 → 返回 None。
+        **不**解析 solver_hint 自由文本或洞名子串(那会重演旧的名字派发反面教材、
+        并把任务语义走私进来)。返回 (kind 或 None, 原始值)。"""
+        if stop_condition is None:
+            return None, None
+        raw = stop_condition.get("stop_kind") if isinstance(stop_condition, dict) else None
+        if raw in self._STOP_KINDS:
+            return raw, raw
+        return None, raw
 
     def lower_until(self, stop_condition):
         """逐步下探。停止条件:目标谓词转真(root_in_bbox/axis_aligned,非恒真项)、
-        或高度不再下降(接触/受阻)、或步数预算耗尽。不用恒真的 depth_in 作判据。"""
+        接触力跳变、或高度不再下降(接触/受阻)、或步数预算耗尽。不用恒真的 depth_in 作判据。
+
+        P0-15:消费 `stop_condition` 选择停止**判据类别**(contact/predicate/plateau)。
+        - 参数带显式 stop_kind → 只启用该类判据(路由,不新增判据、不改现有 oracle 判据实现)。
+        - 参数缺 stop_kind(现有语料均如此)→ 记 UNSUPPORTED 并保持「三判据全开」旧行为。
+        去特权(把 oracle 判据换成非特权)是 P0-14 的事,本任务只做「参数被读并路由」。"""
+        kind, raw = self._stop_kind(stop_condition)
+        if kind is None:
+            if stop_condition is not None:
+                self._unsupported("lower_until.stop_condition", raw,
+                                  "no_explicit_stop_kind:keep_all_criteria")
+            enabled = set(self._STOP_KINDS)     # 旧行为:三类判据全开
+        else:
+            self._log("lower_stop_route", stop_kind=kind)
+            enabled = {kind}
         prev_z = None
         for i in range(LOWER_MAX_STEPS):
             before = self._cur_xquat()
             self._ctrl("delta_move", delta_xyz=[0, 0, -LOWER_STEP])
             self._wait_settle(timeout_s=8.0)
             self._verify_moved(before, op="lower")
-            try:    # 接触力是本栈最灵敏的触底信号:空载 ~1 N,碰到桌面瞬间跳到 ~57 N
-                f = self.pipe.call("info", "get_ee_extforce", {"arm_id": self.arm_id})
-                fmax = max(abs(float(v)) for v in _flatten(f))
-                if fmax > 20.0:
-                    self._log("lower_until_done", reason="contact_force", steps=i + 1,
-                              f=round(fmax, 1))
+            if "contact" in enabled:
+                try:  # 接触力是本栈最灵敏的触底信号:空载 ~1 N,碰到桌面瞬间跳到 ~57 N
+                    f = self.pipe.call("info", "get_ee_extforce", {"arm_id": self.arm_id})
+                    fmax = max(abs(float(v)) for v in _flatten(f))
+                    if fmax > 20.0:
+                        self._log("lower_until_done", reason="contact_force", steps=i + 1,
+                                  f=round(fmax, 1))
+                        return
+                except Exception:
+                    pass
+            if "predicate" in enabled:
+                probes = {str(p.get("label")): p.get("passed") for p in self.probes()}
+                if probes.get("root_in_bbox") and probes.get("axis_aligned"):
+                    self._log("lower_until_done", reason="predicates", steps=i + 1)
                     return
-            except Exception:
-                pass
-            probes = {str(p.get("label")): p.get("passed") for p in self.probes()}
-            if probes.get("root_in_bbox") and probes.get("axis_aligned"):
-                self._log("lower_until_done", reason="predicates", steps=i + 1)
-                return
             try:
                 z = self._cur_xquat()[0][2]
             except Exception:
                 continue
-            if prev_z is not None and prev_z - z < 0.004:
+            if "plateau" in enabled and prev_z is not None and prev_z - z < 0.004:
                 self._log("lower_until_done", reason="contact", steps=i + 1)
                 return
             prev_z = z
