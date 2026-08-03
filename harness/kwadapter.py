@@ -25,6 +25,14 @@ PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
 LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
 GRIP_OPEN, GRIP_CLOSE = 0.0, 160.0   # close 值沿用审计记录的 hand_tuned 常数
 IDLE_ARM = {0: 1, 1: 0}              # 右臂作业时先把左臂归位,反之亦然
+# 接触力阈值(N):空载 ~1.1 N,碰桌面瞬间跳到 ~57 N。原为 lower_until 内联字面量 20.0,
+# P0-14 提到模块级命名(数值不变,位置沿用)。lift 的 attach 判据从此常数派生,不新拍脑袋:
+#   CONTACT_FORCE_N   —— 触底/受阻的接触事件阈值(lower_until 沿用,值不变)。
+#   LIFT_LOAD_FORCE_N —— 抬起后夹爪仍承载物体的残余负载阈值(< 触底阈值,从 CONTACT_FORCE_N 派生)。
+CONTACT_FORCE_N = 20.0
+LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0   # 派生:残余负载远轻于触底冲击,取触底阈值的 1/4
+# lift 的非特权位移判据:抬升指令确有执行的最小 EEF 上移量(m)。从既有伺服进展容差派生,
+# 不新增魔数(SERVO_PROGRESS_EPS_M 见下,是"算作有进展"的最小位移)。
 
 # ---- v3 实机标定(2026-07-30,phase1/orient_probe.py 扫描 + robot.urdf 核对)----
 # 1) 四元数一律 xyzw:arm_node.local_rotation_move 用 scipy R.from_quat(xquat[3:]),
@@ -318,6 +326,16 @@ class KWRuntime:
         x = self.pipe.call("info", "get_xquat", {"arm_id": self.arm_id})
         return list(x[:3]), list(x[3:7])
 
+    def _ee_extforce_max(self):
+        """末端外力标量(非特权信号):取各分量绝对值的最大值。读不到 → None。
+        PRIMITIVE_API §7 口径纠正:BLOCKED 分级对直连 pipeline 的我们不成立,
+        get_ee_extforce 实测可调。空载 ~1.1 N,触底跳到 ~57 N,抬物残余负载居中。"""
+        try:
+            f = self.pipe.call("info", "get_ee_extforce", {"arm_id": self.arm_id})
+            return max(abs(float(v)) for v in _flatten(f))
+        except Exception:
+            return None
+
     def _verify_moved(self, before, xyz=None, quat=None, tol=SERVO_POS_TOL,
                       rot_tol=SERVO_ROT_TOL, op=""):
         """唯一可信的成功判据:笛卡尔回读。before 是动作前的 (xyz, quat)。
@@ -594,19 +612,39 @@ class KWRuntime:
         time.sleep(3.5)   # 闭合无可靠回读(is_gripping_sth 在本仿真恒假),固定等待
 
     def lift(self, obj):
-        """分小步抬升并逐步核对:一次 0.12 m 的 delta_move 会让 MotorNode 收不敛,
-        而且抓稳与否只能看物体自己有没有跟着上来。"""
-        e0 = self._ent(obj) if isinstance(obj, str) else None
-        z0 = e0["pos"][2] if e0 else None
+        """分小步抬升并逐步核对:一次 0.12 m 的 delta_move 会让 MotorNode 收不敛。
+
+        P0-14 去特权:attached 判据**不再读实体位姿**(旧代码用 `_ent(obj)["pos"][2]` 前后差,
+        那是特权实体态进了方法路径的控制回路,违反 D-04 GT 防火墙)。改用非特权代理证据:
+          ① EEF 位移:抬升前后 get_xquat 的 z 上移量(指令是否真执行);
+          ② 接触力残留:抬起后 get_ee_extforce 仍有负载 = 夹爪确在承重(抓住了东西)。
+        三值(与 predicates 同语义,不 fail-open):
+          PASS_evidence(attached="likely") = EEF 确有上移 且 残余负载 ≥ LIFT_LOAD_FORCE_N;
+          FAIL_evidence (attached="empty")  = EEF 确有上移 但 无残余负载(抬了个空);
+          UNKNOWN(attached=None)            = EEF 没上移(指令没执行) 或 力信号读不到 → 判不出。
+        obj 仅作审计标签记账,不用于任何判定;绝不因判不出而默认成功。"""
+        p0, _ = self._cur_xquat()
+        f0 = self._ee_extforce_max()
         n = max(1, int(round(LIFT_DZ / 0.02)))
         for _ in range(n):
             before = self._cur_xquat()
             self._ctrl("delta_move", delta_xyz=[0, 0, 0.02])
             self._wait_settle(timeout_s=10.0)
             self._verify_moved(before, op="lift")
-        if z0 is not None:
-            dz = self._ent(obj)["pos"][2] - z0
-            self._log("lift_done", obj=obj, obj_dz=round(dz, 4), attached=bool(dz > 0.05))
+        p1, _ = self._cur_xquat()
+        f1 = self._ee_extforce_max()
+        ee_dz = p1[2] - p0[2]                       # 非特权:末端自身上移量(不看物体)
+        ee_rose = ee_dz >= SERVO_PROGRESS_EPS_M     # 指令是否真执行(派生自伺服进展容差)
+        load = f1 if f1 is not None else None        # 抬起后残余负载(承重证据)
+        if not ee_rose or load is None:
+            attached, reason = None, ("ee_did_not_rise" if not ee_rose else "force_unreadable")
+        elif load >= LIFT_LOAD_FORCE_N:
+            attached, reason = "likely", "ee_rose_and_loaded"
+        else:
+            attached, reason = "empty", "ee_rose_no_load"
+        self._log("lift_done", obj=str(obj), ee_dz=round(ee_dz, 4),
+                  load_n=None if load is None else round(load, 1),
+                  attached=attached, reason=reason)
 
     def transport(self, obj, target):
         # P0-15:`obj`(被搬运物)按参数解析并记账,不再静默忽略。M1a 携物移动的
@@ -653,42 +691,44 @@ class KWRuntime:
         return None, raw
 
     def lower_until(self, stop_condition):
-        """逐步下探。停止条件:目标谓词转真(root_in_bbox/axis_aligned,非恒真项)、
-        接触力跳变、或高度不再下降(接触/受阻)、或步数预算耗尽。不用恒真的 depth_in 作判据。
+        """逐步下探。停止条件全部走**非特权信号**(P0-14 去特权):
+          contact  —— get_ee_extforce 接触力跳变(空载 ~1 N,触底 ~57 N);非特权 ✓
+          plateau  —— get_xquat 的 z 不再下降(受阻/触底);非特权 ✓
+          predicate—— 旧实现读 rt.probes()(特权实体态谓词 root_in_bbox/axis_aligned),
+                      违反 D-04 GT 防火墙。**P0-14 起不再调 probes():该类判据无非特权实现,
+                      改为 UNSUPPORTED 记账 + 保守停止**(退回 contact+plateau 两类非特权判据,
+                      绝不静默继续用 probes)。
+        或步数预算耗尽兜底。
 
-        P0-15:消费 `stop_condition` 选择停止**判据类别**(contact/predicate/plateau)。
-        - 参数带显式 stop_kind → 只启用该类判据(路由,不新增判据、不改现有 oracle 判据实现)。
-        - 参数缺 stop_kind(现有语料均如此)→ 记 UNSUPPORTED 并保持「三判据全开」旧行为。
-        去特权(把 oracle 判据换成非特权)是 P0-14 的事,本任务只做「参数被读并路由」。"""
+        P0-15 的 stop_kind 路由保留:
+        - 参数带显式 stop_kind → 只启用该类判据;其中 predicate 会走去特权分支(见上)。
+        - 参数缺 stop_kind(现有语料均如此)→ 记 UNSUPPORTED 并保持非特权判据全开旧行为。"""
         kind, raw = self._stop_kind(stop_condition)
         if kind is None:
             if stop_condition is not None:
                 self._unsupported("lower_until.stop_condition", raw,
                                   "no_explicit_stop_kind:keep_all_criteria")
-            enabled = set(self._STOP_KINDS)     # 旧行为:三类判据全开
+            enabled = set(self._STOP_KINDS)     # 旧行为:非特权判据全开
         else:
             self._log("lower_stop_route", stop_kind=kind)
             enabled = {kind}
+        # predicate 类需特权实体态,去特权后无非特权实现 → UNSUPPORTED 记账 + 保守停止:
+        # 把 predicate 从启用集移除,退回 contact/plateau 两类非特权判据(不静默继续用 probes)。
+        if "predicate" in enabled:
+            self._unsupported("lower_until.stop_kind", "predicate",
+                              "privileged_predicate_no_nonpriv_impl:fallback_contact_plateau")
+            enabled = (enabled - {"predicate"}) or {"contact", "plateau"}
         prev_z = None
         for i in range(LOWER_MAX_STEPS):
             before = self._cur_xquat()
             self._ctrl("delta_move", delta_xyz=[0, 0, -LOWER_STEP])
             self._wait_settle(timeout_s=8.0)
             self._verify_moved(before, op="lower")
-            if "contact" in enabled:
-                try:  # 接触力是本栈最灵敏的触底信号:空载 ~1 N,碰到桌面瞬间跳到 ~57 N
-                    f = self.pipe.call("info", "get_ee_extforce", {"arm_id": self.arm_id})
-                    fmax = max(abs(float(v)) for v in _flatten(f))
-                    if fmax > 20.0:
-                        self._log("lower_until_done", reason="contact_force", steps=i + 1,
-                                  f=round(fmax, 1))
-                        return
-                except Exception:
-                    pass
-            if "predicate" in enabled:
-                probes = {str(p.get("label")): p.get("passed") for p in self.probes()}
-                if probes.get("root_in_bbox") and probes.get("axis_aligned"):
-                    self._log("lower_until_done", reason="predicates", steps=i + 1)
+            if "contact" in enabled:  # 接触力:本栈最灵敏的触底信号(非特权)
+                fmax = self._ee_extforce_max()
+                if fmax is not None and fmax > CONTACT_FORCE_N:
+                    self._log("lower_until_done", reason="contact_force", steps=i + 1,
+                              f=round(fmax, 1))
                     return
             try:
                 z = self._cur_xquat()[0][2]

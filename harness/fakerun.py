@@ -46,6 +46,18 @@ class FakeRuntime:
             return False
         return True
 
+    # 非特权信号最小 stub(P0-14):去特权后 lift/lower_until 的判据改读 get_xquat/
+    # get_ee_extforce。FakeRuntime 干跑路径本身经 __getattr__ 只记日志、不跑真原语体,
+    # 通常不会触及这两个;但若有代码路径直接调用,给出行为记日志的最小 stub(而非
+    # __getattr__ 的 AttributeError),保持干跑可用。返回中性零信号(无接触/未上移)。
+    def get_xquat(self, arm_id=None):
+        self._log("get_xquat", arm_id=arm_id)
+        return [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]   # xyz + xyzw(单位姿态)
+
+    def get_ee_extforce(self, arm_id=None):
+        self._log("get_ee_extforce", arm_id=arm_id)
+        return [0.0, 0.0, 0.0]                        # 空载:无接触/无负载
+
     def __getattr__(self, name):
         # push 与 kwadapter 硬 stub 同语义:D-14 挂起,干跑必须炸,不许被吞成 no-op(P0-06/G4)
         if name == "push":

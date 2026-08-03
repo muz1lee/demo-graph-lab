@@ -159,7 +159,9 @@ def test_align_obj_unresolvable_is_unsupported():
 
 # ==========================================================================
 # 3. lower_until.stop_condition:消费参数选择停止判据类别。
-#    (P0-14 才去特权;此处只验「参数被读并路由」。)
+#    (P0-14 已去特权:contact/plateau 为非特权判据;predicate 类无非特权实现,
+#     路由到它会记 UNSUPPORTED 并退回 contact/plateau。predicate-stop 的深入断言
+#     见 tests/test_gates_no_privilege.py。)
 # ==========================================================================
 def _passing_probes():
     return [{"label": "root_in_bbox", "passed": True},
@@ -185,12 +187,30 @@ def test_lower_until_contact_kind_ignores_predicates():
     assert done["reason"] != "predicates", "路由到 contact 不应因谓词停"
 
 
-def test_lower_until_routes_to_predicate_kind():
-    """stop_kind=predicate → 谓词满足即停,即便力值也高(证明只看谓词那一类)。"""
+def test_lower_until_predicate_kind_is_unsupported_and_falls_back():
+    """P0-14 去特权:stop_kind=predicate 需特权实体态谓词(旧读 rt.probes()),
+    去特权后无非特权实现 → 记 UNSUPPORTED + 退回 contact/plateau,**绝不再调 probes()**。
+    给高力值 → 应以 contact_force 停(退回的非特权判据生效),reason 绝非 'predicates'。"""
+    called = {"probes": False}
+
     rt = _offline_rt(probes=_passing_probes(), force=[57.0])
+    # 显式探针:一旦方法路径还调 probes() 立即置真,断言其未被触碰。
+    _orig = rt.probes
+    def _spy():
+        called["probes"] = True
+        return _orig()
+    rt.probes = _spy
+
     rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    assert _find(rt, "lower_stop_route")[0]["stop_kind"] == "predicate"
+    us = [c for c in _find(rt, "unsupported_param")
+          if c["param"] == "lower_until.stop_kind"]
+    assert us, "predicate 类去特权后应记 UNSUPPORTED"
+    assert us[0]["reason"].startswith("privileged_predicate_no_nonpriv_impl")
     done = _find(rt, "lower_until_done")[0]
-    assert done["reason"] == "predicates"
+    assert done["reason"] != "predicates", "去特权后不得以特权谓词停"
+    assert done["reason"] == "contact_force", "应退回非特权 contact 判据停"
+    assert not called["probes"], "方法路径控制回路不得再调 probes()(D-04)"
 
 
 def test_lower_until_no_stop_kind_is_unsupported_and_keeps_old_behavior():
