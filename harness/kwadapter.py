@@ -19,6 +19,7 @@ from adapters.knowin_world.pipeline import PipelineClient
 from . import binding
 from . import predicates
 from . import regions
+from . import robotapi
 
 ORACLE_BANNER = "ORACLE-M1A"      # 本模式产出一律带此标签,不得报为方法结果
 PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
@@ -429,7 +430,39 @@ class KWRuntime:
         return False
 
     def _move(self, xyz, quat=None, interpolation="linear", gpos=None):
-        """位姿闭环伺服——本栈唯一可靠的运动方式。
+        """位姿移动的**唯一入口**:优先走运动规划(D-09),失败退回限幅伺服。
+
+        EP-1 接线(P1-02 已验证的 robotapi 契约):
+          主路径 = robotapi.plan_joint_path(cartesian_goal) → execute_path(逐航点 qpos_move)。
+                   规划器一次性给出全程无碰关节轨迹,取代「限幅子目标 + 每步重解 IK」的手写伺服
+                   ——后者的姿态路径会发散(rot_error 16°→52°,PHASE1_M1A_STATUS §墙)。
+          退化路径 = 原 _move_servo(手写伺服),**仅在规划失败时**使用,并记 `mp_fallback`
+                   (op=mp_fallback,带 reason);robotapi 三条硬规则要求退化路径显式记账。
+
+        quat=None(政策未指定姿态)时取「离当前腕姿最近的竖直姿态」,与旧行为一致——
+        cartesian_goal 必须给完整 7 元目标位姿,不能留空。
+        """
+        p0, q0 = self._cur_xquat()
+        tq = _topdown_like(q0) if quat is None else list(quat)
+        target_pose = [float(v) for v in list(xyz)[:3]] + [float(v) for v in tq]
+        try:
+            plan = robotapi.plan_joint_path(self, self.arm_id, target_pose,
+                                            planning_mode="cartesian_goal")
+        except robotapi.PlanFailed as e:
+            self._log("mp_fallback", reason=getattr(e, "reason", None) or "plan_failed",
+                      err=str(e)[:160], degraded=True)
+            return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
+        ex = robotapi.execute_path(self, plan.waypoints, arm=self.arm_id, gpos=gpos)
+        p, q = self._cur_xquat()
+        pos_gap, rot_gap = math.dist(p, list(xyz)), _qang(q, tq)
+        ok = pos_gap <= SERVO_POS_TOL and rot_gap <= SERVO_ROT_TOL
+        self._log("move_mp", n_waypoints=plan.n_waypoints, n_converged=ex.n_converged,
+                  reached=ex.reached, ok=ok, pos_gap=round(pos_gap, 4),
+                  rot_gap=round(rot_gap, 2))
+        return ok
+
+    def _move_servo(self, xyz, quat=None, interpolation="linear", gpos=None):
+        """位姿闭环伺服——**退化路径**(EP-1 起只在运动规划失败时用,见 _move)。
         为什么不能一次性下发目标:MotorNode 对大幅 qpos 跳变收不敛(停在 70~80% 处
         就超时放弃),同时 IK 对"相对当前超过 ~90°"的姿态请求直接拒绝、机械臂纹丝不动。
         所以每轮只下发一个**限幅子目标**(平移 <=SERVO_STEP_M、旋转 <=SERVO_STEP_DEG),
