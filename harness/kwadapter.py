@@ -24,7 +24,33 @@ from . import robotapi
 ORACLE_BANNER = "ORACLE-M1A"      # 本模式产出一律带此标签,不得报为方法结果
 PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
 LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
-GRIP_OPEN, GRIP_CLOSE = 0.0, 160.0   # close 值沿用审计记录的 hand_tuned 常数
+# ---- 夹爪开合语义(EP-2 2026-08-03 在 insert_tubes_000 上实测派生,推翻旧常数)----
+# 旧值 `GRIP_OPEN, GRIP_CLOSE = 0.0, 160.0` 两端都错,且错得互相掩盖:
+#   ① **方向反了**。motor_node.Gripper.is_gripping 里
+#      `direction = sign(angle - target); closing = direction > 0`
+#      —— 也就是"往更小的 angle 走"才叫闭合;sim_cfg.runtime.yaml 的
+#      `gripper.angle_baseline: [0, 0]` 注释同样写明 0 是 "closed reference angle"。
+#      故 **angle=0 是全闭,angle=100 是全开**,与旧常数的命名恰好相反。
+#   ② 160 超过 `gripper.max_angle: 100`,被 Gripper.clip 截断成 100 —— 即"闭合"指令
+#      实际下发的是**全开**。而每个"张开"点位用的 GRIP_OPEN=0 实际是**全闭**。
+#      两处反向叠加,画面上爪子确实在动,所以一直没被识破:EP-1 里爪子到位后
+#      "闭合"反而张开,自然夹不住管子。
+# 实证(2026-08-03,腕部相机 right_hand + get_sensor_info 回读):
+#   angle=0   → 回读 angle=0.000,指垫合拢至视野外;
+#   angle=100 → 回读 angle=100.000,两片指垫在画面两侧完全张开。
+# 回读通道:`get_sensor_info(key="angle")[7]`(第 7 位 = ARM_JOINT_NUM,爪子自由度),
+# **不是** /state 的 robot_qpos —— 后者的 12 个爪子分量实测对 set_gripper 毫无响应
+# (恒为 ±1.188),EP-1 若拿它判开合会得到"夹爪不动"的假结论。
+GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0
+# 细管闭合目标角:0 = 全闭。爪子闭到被管子挡住即停(位置环 + 电流限幅),
+# 不需要留"管径余量":留余量反而夹不紧。GRIP_CLOSE_TUBE 与 GRIP_CLOSE 同值,
+# 保留独立名字是因为它由 EP-2 的逐档抓取实验判定(见 harness/EP2_REPORT.md 夹爪实测表),
+# 而 GRIP_CLOSE 是语义端点;两者若将来因物体而分化,改这里不影响端点定义。
+GRIP_CLOSE_TUBE = GRIP_CLOSE
+# 抓握成功的**非特权**回读:is_gripping_sth == True 表示"正在朝闭合方向走且被电流限幅
+# 挡住且未到目标角" = 指垫被物体卡住。旧注释断言它"在本仿真恒假"——那是
+# sensor push 通道断掉时的假象(彼时 get_qpos 同样报错),通道正常时它可用。
+GRIP_SETTLE_S = 4.0                  # 闭合后等待物理稳定(实测 3.5 s 偶有未到位)
 IDLE_ARM = {0: 1, 1: 0}              # 右臂作业时先把左臂归位,反之亦然
 # 接触力阈值(N):空载 ~1.1 N,碰桌面瞬间跳到 ~57 N。原为 lower_until 内联字面量 20.0,
 # P0-14 提到模块级命名(数值不变,位置沿用)。lift 的 attach 判据从此常数派生,不新拍脑袋:
@@ -57,6 +83,11 @@ CLAW_TIP_DZ = 0.052
 #    → 绝不整段下发目标,只下发"限幅子目标",闭环重解。
 SERVO_STEP_M, SERVO_STEP_DEG = 0.05, 14.0
 SERVO_POS_TOL, SERVO_ROT_TOL = 0.015, 8.0
+# EP-2 提速:走运动规划的最小距离。低于此值的移动交给限幅伺服的本地增量循环,
+# 从而把「每 stage ≥1 次规划」压到「只有长程 approach 才规划」。取 2×SERVO_STEP_M
+# ——伺服单步上限是 SERVO_STEP_M,两步以内够到的目标本就无需全局规划;
+# 派生自既有常数,不新拍脑袋。PREGRASP_DZ(0.10)恰在此阈值上,预抓取下探仍可本地走。
+MP_MIN_DIST_M = 2 * SERVO_STEP_M
 # 5) **欠行程**:MotorNode 的平滑让实际位移只有指令的 ~20%(实测发 0.02 m 只走
 #    0.002~0.005 m)。所以 ①卡死不能按"单步位移小"判——真实步进本来就小,旧阈值
 #    3 mm 比步进还大,会把正在前进的下探误判成卡死;改为按**与目标的剩余距离是否
@@ -337,6 +368,38 @@ class KWRuntime:
         except Exception:
             return None
 
+    def _grip_angle(self):
+        """夹爪当前开合角(0=闭 100=开)。**唯一可信的开合回读**:
+        get_sensor_info(key="angle") 的第 ARM_JOINT_NUM(=7) 位。
+        /state 的 robot_qpos 爪子分量对 set_gripper 无响应,不能用。读不到 → None。"""
+        try:
+            return round(float(self.pipe.call(
+                "info", "get_sensor_info", {"arm_id": self.arm_id, "key": "angle"})[7]), 3)
+        except Exception:
+            return None
+
+    def _is_gripping(self):
+        """是否夹住了东西(非特权)。语义见 motor_node.Gripper.is_gripping:
+        朝闭合方向走 且 电流达限幅 且 未到目标角 → 指垫被物体卡住。读不到 → None。"""
+        try:
+            return bool(self.pipe.call("info", "is_gripping_sth", {"arm_id": self.arm_id}))
+        except Exception:
+            return None
+
+    def _wait_grip(self, target, timeout_s=GRIP_SETTLE_S, tol=2.0):
+        """等夹爪到位:回读角接近 target,或被物体挡住(gripping)即返回,超时兜底。
+        EP-2 提速:替掉 1.5 s / 1.2 s / 4 s 的裸 sleep——张开到位实测 <1 s,
+        闭合夹住时更早就停了,固定睡是白等。回读不可用时退回睡满 timeout(不假装到位)。"""
+        t0 = time.time()
+        while time.time() - t0 < timeout_s:
+            time.sleep(0.2)
+            a = self._grip_angle()
+            if a is None:                     # 回读不可用 → 只能按老办法等满
+                continue
+            if abs(a - target) <= tol or self._is_gripping():
+                return round(time.time() - t0, 2)
+        return round(time.time() - t0, 2)
+
     def _verify_moved(self, before, xyz=None, quat=None, tol=SERVO_POS_TOL,
                       rot_tol=SERVO_ROT_TOL, op=""):
         """唯一可信的成功判据:笛卡尔回读。before 是动作前的 (xyz, quat)。
@@ -363,22 +426,27 @@ class KWRuntime:
         if idle is None:
             return
         self._ctrl("go_home", arm_id=idle)
-        time.sleep(6.0)
+        # EP-2 提速:原为裸 time.sleep(6.0)。归位实测 1~2 s 就静止,固定睡 6 s 是白等;
+        # 改成等**空闲臂**真的不动了(超时 6 s 兜底,与旧上限一致,不会等更久)。
+        self._wait_settle(arm_id=idle, timeout_s=6.0)
 
-    def _arm_qpos(self):
-        """本臂 7 个关节角。/state 的 robot_qpos 是两臂交错排布:
+    def _arm_qpos(self, arm_id=None):
+        """某条臂的 7 个关节角(默认本臂)。/state 的 robot_qpos 是两臂交错排布:
         左臂在偶数下标、右臂在奇数下标,之后才是 lifting + 12 个爪子自由度。"""
-        return self.eval.state()["robot_qpos"][self.arm_id::2][:7]
+        a = self.arm_id if arm_id is None else arm_id
+        return self.eval.state()["robot_qpos"][a::2][:7]
 
-    def _wait_settle(self, target_xyz=None, tol=0.012, timeout_s=25.0, still_n=3):
+    def _wait_settle(self, target_xyz=None, tol=0.012, timeout_s=25.0, still_n=3,
+                     arm_id=None):
         """pipeline 的 ctrl 是 fire-and-forget(源码里等 future 那行被注释),必须自己等。
         用 /state 的 robot_qpos 判静止,而不是轮询 get_xquat——后者每次都会往 pipeline
-        日志里灌两行 GET,几秒就能把 IK 判决行冲出 tmux 回滚区,调试时什么都看不到。"""
+        日志里灌两行 GET,几秒就能把 IK 判决行冲出 tmux 回滚区,调试时什么都看不到。
+        arm_id:等哪条臂静止(默认本臂;_park_idle_arm 用它等空闲臂)。"""
         t0, last, still = time.time(), None, 0
         while time.time() - t0 < timeout_s:
             time.sleep(0.4)
             try:
-                q = self._arm_qpos()
+                q = self._arm_qpos(arm_id)
             except Exception:
                 continue
             if last is not None and max(abs(a - b) for a, b in zip(q, last)) < 0.004:
@@ -445,6 +513,15 @@ class KWRuntime:
         p0, q0 = self._cur_xquat()
         tq = _topdown_like(q0) if quat is None else list(quat)
         target_pose = [float(v) for v in list(xyz)[:3]] + [float(v) for v in tq]
+        # EP-2 提速:短程微调不值得规划。规划一次的固定开销(建场景 + 求解 + 几十个航点)
+        # 对一次 5 cm 的下探/对准是纯浪费,而这类移动本来就是"当前构型邻域内的小增量",
+        # 正是限幅伺服最稳的工况。故只有长程移动(approach 到预抓取/预放置)走规划,
+        # 其余走 _move_servo 的本地增量补偿循环。**不是退化**,所以不记 mp_fallback,
+        # 单独记 move_local 以便审计区分"短程直接走本地" vs "规划失败被迫退化"。
+        dist0 = math.dist(p0, [float(v) for v in list(xyz)[:3]])
+        if dist0 < MP_MIN_DIST_M and _qang(q0, tq) <= SERVO_ROT_TOL:
+            self._log("move_local", dist=round(dist0, 4), reason="short_range")
+            return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
         try:
             plan = robotapi.plan_joint_path(self, self.arm_id, target_pose,
                                             planning_mode="cartesian_goal")
@@ -647,24 +724,21 @@ class KWRuntime:
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
         self._ctrl("set_gripper", angle=GRIP_OPEN)
-        time.sleep(1.5)
+        self._wait_grip(GRIP_OPEN)
         self._move([eef[0], eef[1], eef[2] + PREGRASP_DZ])
         _, q = self._cur_xquat()
         self._move(eef, quat=q, gpos=GRIP_OPEN)   # 下探时锁住已到位的腕姿,只走 z
-        # !! 参数名只能是 angle。2026-07-30 晚更正:此前本注释断言"夹爪根本不动",
-        # 那是**测试用错参数名**得出的错误结论——用 gpos=... 调 set_gripper 会静默无效
-        # (pipeline 照样回 ok=True),导致画面零变化而被误读成通道不通。
-        # 用 angle=0..100 在 v4 栈(k1u_v4_w_claw_26w27_1d)上实测:腕部相机可见指垫开合,
-        # 图像 md5 与体积均变化。**夹爪可动,捏取不是不可能。**
-        # 仍然成立的三条:
-        #   ① angle 被 gripper.max_angle=100 截断,所以 160 实际等于 100(全闭);
-        #   ② MotorNode 会秒回 result=SUCCESS——_wait_gripper 拿"上一条指令值"跟目标比,
-        #      所以 SUCCESS 不能单独当"已到位"的证据,要看物理量或画面;
-        #   ③ is_gripping_sth 在本仿真恒假(见下),闭合无可靠回读。
-        # 教训:判断"通道通不通"前先确认参数名与调用形态,否则会把自己的调用错误
-        # 归因成栈的能力缺失。
-        self._ctrl("set_gripper", angle=GRIP_CLOSE)
-        time.sleep(3.5)   # 闭合无可靠回读(is_gripping_sth 在本仿真恒假),固定等待
+        # !! 参数名只能是 angle(gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True,
+        # 2026-07-30 为此误判过一次"夹爪通道不通")。开合方向见模块顶部 GRIP_* 注释:
+        # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
+        self._ctrl("set_gripper", angle=GRIP_CLOSE_TUBE)
+        self._wait_grip(GRIP_CLOSE_TUBE)
+        # 闭合后立刻记一次非特权回读,作为"这次闭合到底发生了什么"的证据:
+        #   angle  —— 指令是否真被执行(回读角 ≈ 目标角);
+        #   gripping —— 是否被物体挡住(True = 指垫卡在物体上,没能闭到底)。
+        # 只记账不判成败:抓没抓住由 lift() 的承重证据和 gate 决定,这里不抢判。
+        self._log("grasp_close", target=GRIP_CLOSE_TUBE,
+                  angle=self._grip_angle(), gripping=self._is_gripping())
 
     def lift(self, obj):
         """分小步抬升并逐步核对:一次 0.12 m 的 delta_move 会让 MotorNode 收不敛。
@@ -691,14 +765,27 @@ class KWRuntime:
         ee_dz = p1[2] - p0[2]                       # 非特权:末端自身上移量(不看物体)
         ee_rose = ee_dz >= SERVO_PROGRESS_EPS_M     # 指令是否真执行(派生自伺服进展容差)
         load = f1 if f1 is not None else None        # 抬起后残余负载(承重证据)
-        if not ee_rose or load is None:
-            attached, reason = None, ("ee_did_not_rise" if not ee_rose else "force_unreadable")
+        # EP-2 新增第三个非特权信号:抬升后指垫是否仍被物体卡住(is_gripping_sth)。
+        # 它比残余负载更直接——负载会被机械臂自重与摩擦污染,而 gripping 只在
+        # "朝闭合走且被挡住"时为真。两者取**或**会 fail-open,故只用它把
+        # "力读不到"这一档从 UNKNOWN 救回,不用它覆盖"有位移但无负载"的 empty 判定。
+        grip = self._is_gripping()
+        if not ee_rose:
+            attached, reason = None, "ee_did_not_rise"
+        elif load is None:
+            # 力信号不可用时退到夹持信号;两个都读不到才判 UNKNOWN。
+            if grip is None:
+                attached, reason = None, "force_and_grip_unreadable"
+            else:
+                attached, reason = ("likely", "grip_held_force_unreadable") if grip \
+                    else ("empty", "no_grip_force_unreadable")
         elif load >= LIFT_LOAD_FORCE_N:
             attached, reason = "likely", "ee_rose_and_loaded"
         else:
             attached, reason = "empty", "ee_rose_no_load"
         self._log("lift_done", obj=str(obj), ee_dz=round(ee_dz, 4),
                   load_n=None if load is None else round(load, 1),
+                  gripping=grip, grip_angle=self._grip_angle(),
                   attached=attached, reason=reason)
 
     def transport(self, obj, target):
@@ -800,7 +887,7 @@ class KWRuntime:
 
     def release(self):
         self._ctrl("set_gripper", angle=GRIP_OPEN)
-        time.sleep(1.2)
+        self._wait_grip(GRIP_OPEN)
 
     # ---------- contract: 验证(词表几何三值检验,oracle 态) ----------
     def _ent_snapshot(self, constraint: dict) -> dict:

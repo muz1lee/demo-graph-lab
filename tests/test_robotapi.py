@@ -200,7 +200,13 @@ def test_plan_cartesian_goal_mode():
 # ---------------------------------------------------------------------------
 # execute_path
 # ---------------------------------------------------------------------------
-def test_execute_sends_each_waypoint_and_converges():
+def test_execute_streams_waypoints_and_converges_endpoint():
+    """EP-2 起改为流式:中间点连发不回读,只确认终点收敛。
+
+    旧断言是「下发点数 == 规划点数 且 每点都收敛」;那正是被提速掉的开销。
+    现在的契约:①点数被抽稀到 ≤ EXEC_MAX_WAYPOINTS;②**终点必须原样下发**
+    (抽稀不许丢终点,否则精度就退化了);③reached 由终点收敛决定。
+    """
     kw = _load_fixture()["request"]["kwargs"]
     pipe = _fake_from_fixture(converge_on_send=True)
     rt = FakeRT(pipe, arm_id=1)
@@ -208,11 +214,22 @@ def test_execute_sends_each_waypoint_and_converges():
                                     q_other_arm=kw["q_other_arm"], data=kw["data"])
     res = robotapi.execute_path(rt, plan)
     qmoves = [c for c in pipe.calls if c[1] == "qpos_move"]
-    assert len(qmoves) == plan.n_waypoints           # 逐航点下发,不整段
     assert all(len(c[2]["qpos"]) == 7 for c in qmoves)
+    assert 0 < len(qmoves) <= robotapi.EXEC_MAX_WAYPOINTS
+    assert len(qmoves) < plan.n_waypoints            # 该 fixture 有 92 点,必被抽稀
+    # 终点原样送到:精度不因抽稀而退化
+    assert qmoves[-1][2]["qpos"] == pytest.approx(plan.waypoints[-1])
     assert res.reached is True
-    assert res.n_converged == res.n_sent == plan.n_waypoints
-    assert len(res.per_waypoint_maxdev) == plan.n_waypoints
+    assert res.n_sent == len(qmoves)
+    assert res.n_converged == 1                      # 只终点被确认
+
+
+def test_execute_keeps_endpoint_when_downsampling():
+    """抽稀必须保留终点,即使航点数不是抽稀步长的整数倍。"""
+    pts = [[float(i)] * 7 for i in range(45)]
+    kept = robotapi._downsample(pts, 20)
+    assert len(kept) <= 20
+    assert kept[0] == pts[0] and kept[-1] == pts[-1]
 
 
 def test_execute_ctrl_ok_not_treated_as_reached():
