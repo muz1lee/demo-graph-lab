@@ -1,22 +1,25 @@
 # docs/TODO.md —— 执行 TODO（按依赖排序 · 三批 · 决策点）
 
+> **版本**：v2（2026-08-03，按 D-18/D-19 重排；上位依据 `PROPOSAL.md` v4）。v1（2026-07-31）的任务编号、判据与人日**未被砍单波及者原样保留**；被砍任务就地划线标注不删行（D-16 同款纪律）。
 > **本文只回答三个问题：做什么、什么顺序、什么算完成。**
-> 实验设计、判据推导、预算模型在 `docs/EXECUTION.md`（§1 实验与验收、§2 代码框架、§4 预算），本文不复述。
+> 实验设计、判据推导、预算模型在 `docs/EXECUTION.md`（§1 实验与验收、§2 代码框架、§4 预算），本文不复述。**E-AMB / E-DO / E-CHAIN / E-ROB 四个新实验尚未注册进 EXECUTION §1**——注册是任务 T-REG，开跑前必须完成。
 > 与 `EXECUTION.md §3` 的关系：本文**取代** §3 的任务清单（§3.4 阻塞项、§3.5 sim 排班表继续有效并在本文 §7 重列）。冲突处以本文为准。
+> **执行模式（2026-08-03 起）**：执行由 Opus 会话按本文任务条目认领，每条的「完成判据」即验收面；验收由主线会话把关——测试类任务交付**红/绿两份输出**，实验类任务交付 run 目录 + 判据对照表。
 
 ---
 
-## TL;DR（先看这九条）
+## TL;DR（先看这十条）
 
-1. **第一项且唯一的第一项是接通约束因果链。** 当前 `solve()` 一次都不读约束、`gates.evaluate()` 一行不读 `stage["constraints"]`（它那个叫 `constraints_hold` 的字段算的其实是 acceptance）。在这条链通之前，funnel、消融、验收率**全部数字无意义**——不是精度不够，是量根本没连上因。改动集见 §1，共 6 个文件、约 3.0 人日。
-2. **PI 今天的「排序偏好」裁决直接作废了三条已预注册的判据**：`CC-1`（`|z(upper_body)−z(bottom)| ≥ 0.5×物体高`）、`CC-2`（24 格淘汰矩阵）、`P-3`（L2 否决率 ∈(0,0.8)）。硬阈值消失后这三条都无对象。**新判据必须在开跑前重新预注册并 commit**（EXECUTION §0 预注册纪律），本文 §1.3 给出改写版，需 PI 签字。
-3. **「排序偏好」的代价有一个可测形态，必须当成 D0 的独立闸门**：候选集只有 1 个时排序恒等、L2 层退化为死层。新增 `CC-0`：`K≥3` 才允许计入分母；改 region 标签必须改变 top-1 的比例 ≥60%。低于此则 L2 层是摆设，PI 接受的取舍变成了 PI 没同意的取舍。
-4. **PI 的「API 分颗粒度」与「`contract.py` 明令不动」正面冲突，且没有第三条路之外的解。** 让编译期模型自己选层 ⇒ 细颗粒 API 必须出现在 `contract.Runtime` ⇒ 必须改 `contract.py`。建议走**契约变体**（`contract.py` 原文一行不改，新增 `contract_g2.py`/`contract_g1.py`，`compilepolicy` 按层选一份 `inspect.getsource` 注入）。这是 §8 未决事项第 2 条，**不裁决就不要开工 P0-07/08/09**。
-5. **EXECUTION §2.5 #1b 字面执行会破契约。** 它写「`solve()` 增加本阶段 `constraints` 入参」，但 `contract.py:19` 是 `def solve(self, hole_name: str)` 单参、policy 侧调用形态是 `rt.solve("tube_left_grasp_pose")`。正解是签名不动、`KWRuntime.solve()` 内部从 `self._hole_index[hole_name]` 拿到的 stage 里自取 constraints 委派给 `binding`。本文按此执行。
-6. **三个先修破口全部排进 P0，不进 P1。** 破口①（GT 防火墙破在 `lift`/`lower_until` 内部）→ P0-02/P0-14；破口②（`verify` fail-open 五处）→ P0-04/P0-03；破口③（5 个契约参数静默丢弃）→ P0-15。理由：P0 阶段还没产任何真 episode，此时去特权成本最低；一旦开始产 ep 再改验收通道，硬边界 1 直接判该批数据作废。
-7. **GraspNet 保留，但排在 P1 后段作对照臂（P1-11），不在关键路径。** 依据：`qwen_dof_xquat` 已实测出 `topk_pick_records_by_arm`，第一条端到端链不需要 GraspNet；且 GraspNet 依赖 `get_depth`（P1-05，A 组唯一的真开发）。它的正确定位是**同一漏斗、两个候选源**的候选质量消融对照，这样它的价值可测；作为必需品排前面则纯属拖进度。
-8. **薄封装 9 个（≤1 人日/个），真开发 5 个。** 薄封装 = 包一层已实测可用的 reasoning/ctrl/info；真开发 = `get_depth` bulk 出口、`predicates.py`、`graspfunnel.py`、corrector 工位、verifier 工位。清单见 §5。
-9. **总量诚实交底：P0 ≈ 18.5 人日、P1 ≈ 21.5、P2 ≈ 16.2，合计 ≈ 56 人日 ≈ 11 周单人。** 比 EXECUTION §3 的口径多约一倍，差额来自分层接口骨架（4.0）、`get_depth`+`segment`（4.0）、破口修复细化（3.0）。**按 PI「先搭起来跑通优先于完备性」，给出 MVS 裁剪线：P0 必做 10.0 人日（2 周）即可闭合因果链并跑通 E-CAUSAL-OFF**，其余顺延。
+1. **第一项且唯一的第一项仍是接通约束因果链。** 当前 `solve()` 一次都不读约束、`gates.evaluate()` 一行不读 `stage["constraints"]`（它那个叫 `constraints_hold` 的字段算的其实是 acceptance）。在这条链通之前，funnel、消融、验收率**全部数字无意义**——不是精度不够，是量根本没连上因。改动集见 §1，共 6 个文件、约 3.0 人日。D-18/D-19 没有改变这一条的地位：**E-DO / E-CHAIN / E-ROB 全部依赖它**。
+2. **D-18/D-19 已落账（2026-08-03），砍单落地**：~~P2-03 corrector~~、~~P2-07 E-ABSTR~~、~~P0-07 契约变体~~ 作废；§9 未决 #1/#2/#8/#11 关闭（处置更新块见 §9 头部）；漏斗 L3 从「不进 MVS」**升格为方法主体**，由 T-BP 承载并推广为 k 步链式反传。
+3. **新增五条工作流（§2A）**：T-THM（分离定理，PI 亲自，W1 起纸面开工）／ T-GEN（链长任务族生成器，**与 §2 的 A 串行线文件集不相交、全程并行**）／ T-BP（k 步反传算子，D0 后）／ T-ROB（版本空间鲁棒反传，D0 后）／ T-REG（四个新实验的判据注册，PI 签字）。
+4. **招牌实验 E-CHAIN 有且只有两个前置**：因果链闭合（D0）+ 生成器 v0（T-GEN-2）。两线并行推进，W4 可跑 oracle 态试点（只作上界，D-05 口径）；主数字感知态待 §9-14 裁决。
+5. **「排序偏好」裁决的判据重预注册义务不变**：`CC-0`/`CC-1′`/`CC-2′`/`P-3′` 需 PI 签字后 commit（EXECUTION §0 预注册纪律），开跑前不许改。CC-0（K≥3、top-1 改变率 ≥60%）仍是 D0 独立闸门。
+6. **EXECUTION §2.5 #1b 字面执行会破契约。** 它写「`solve()` 增加本阶段 `constraints` 入参」，但 `contract.py:19` 是 `def solve(self, hole_name: str)` 单参、policy 侧调用形态是 `rt.solve("tube_left_grasp_pose")`。正解是签名不动、`KWRuntime.solve()` 内部从 `self._hole_index[hole_name]` 拿到的 stage 里自取 constraints 委派给 `binding`。本文按此执行。**D-18 之后 `contract.py` 不再有任何计划内破例点**（原 P2-03 破例窗口随 corrector 一起消失）。
+7. **三个先修破口全部排进 P0，不进 P1**（原 TL;DR-6 原文有效）：破口①→ P0-02/P0-14；破口②→ P0-04/P0-03；破口③→ P0-15。P0 还没产真 episode，此刻去特权成本最低。
+8. **GraspNet 定位不变**：P1 后段对照臂（P1-11），不在关键路径。
+9. **总量口径更新**：P0 17.5（原 18.5，砍 P0-07）+ P1 21.5 + P2 11.2（原 16.2，砍 P2-03/07）+ 新增 §2A 12.0 = **合计 ≈ 62 人日**；但关键路径变短了——**MVS 双线 = 因果链 9.0 人日 ∥ T-GEN-1/2 3.5 人日，两周内 E-CAUSAL-OFF 与生成器 v0 同时到位**，E-CHAIN 试点 W4 可跑。真开发清单更新：corrector 工位删除，新增 `taskgen`/`backprop`/`compat`/`robustrank`。
+10. **验收纪律（执行交给 Opus 后生效）**：任何任务不得改动本文之外的判据；测试先红后绿、两份输出入 PR；涉及 `kwadapter.py`/`gates.py` 的 A 串行线任务禁止并行认领；B 组并行任务必须 worktree 隔离（全局纪律见 CLAUDE 侧「并行调研、串行执行」）。
 
 **证据分级图例**（全文强制，混用即失效）：
 `✅实测` = 已跑过、有输出/md5/日志 · `⚙代码在` = 仓里有代码但零调用或未测 · `📋计划` = 只在文档里，一行代码没有
@@ -77,9 +80,9 @@
 | **P0-04** | `gates.py` 消费 `stage['constraints']`（改动 C-6） | P0-02 | 改 `harness/gates.py` | `test_gates_constraints` 绿；`acceptance_hold`/`constraints_hold` 字段级可分 | 1.0 | A | 真开发 |
 | **P0-05** | `predicates.py`：约束 → 三值检验函数，**五处 fail-open 全部归零**（破口②） | 可并行起草，落地依赖 P0-04 | `harness/predicates.py` | ≥8/10 词表约束有可执行谓词；`PASS/FAIL/UNKNOWN` + margin；`unchecked` 归零；`tests/test_predicates.py` ≥20 例 | 2.0 | A | **真开发** |
 | **P0-06** | `fakerun` 不许把 `push` 吞成绿（改动 #4） | 无 | 改 `harness/fakerun.py:49-57` | 从 `__getattr__` 白名单删 `push` + 显式 `raise NotImplementedError`；4 份 `push_T*` policy 的 8 处 `rt.push(` 编译期干跑就红（**这是期望行为**，D-14 仍生效） | 0.5 | B | 薄 |
-| **P0-07** | **分层 API 注册表 + 契约变体**（PI 决定 3 的载体） | **§8-2 裁决** | `harness/apilevels.py`；`harness/contract_g2.py`/`contract_g1.py`（`contract.py` 原文**一行不改**） | 三份契约各能被 `compilepolicy` 按层参数 `inspect.getsource` 注入；`static_check` 对三层同样生效；三套 digest 分别落 manifest | 1.0 | B | 真开发 |
-| **P0-08** | `robotapi.py` 骨架：8 helper 签名 + docstring 三条硬规则 + lint | P0-07 | `harness/robotapi.py` | 8 个 helper 有签名有单测桩；lint 断言 `is_gripping_sth` 在本文件外出现即 fail；helper 签名不含任务名/物体名 | 1.0 | B | 薄 |
-| **P0-09** | `perception.py` 门面：口径统一层（**四元数 WXYZ / box 像素 / OBB 全边长**） | P0-07 | `harness/perception.py` | 三条口径各有转换单测（XYZW→WXYZ、0..1000↔1280×720、半长→全边长）；门面对外零 XYZW 泄漏 | 1.0 | B | 薄 |
+| ~~**P0-07**~~ | ~~**分层 API 注册表 + 契约变体**（PI 决定 3 的载体）~~ **【作废 D-18：G1/G2/G3 消融砍除，契约变体再无用途；未决 §9-2 随之关闭】** | — | — | — | ~~1.0~~ | — | — |
+| **P0-08** | `robotapi.py` 骨架：8 helper 签名 + docstring 三条硬规则 + lint | 无（原依赖 P0-07 已作废；本条改为直接服务 P1 感知/执行链） | `harness/robotapi.py` | 8 个 helper 有签名有单测桩；lint 断言 `is_gripping_sth` 在本文件外出现即 fail；helper 签名不含任务名/物体名 | 1.0 | B | 薄 |
+| **P0-09** | `perception.py` 门面：口径统一层（**四元数 WXYZ / box 像素 / OBB 全边长**） | 无（原依赖 P0-07 已作废） | `harness/perception.py` | 三条口径各有转换单测（XYZW→WXYZ、0..1000↔1280×720、半长→全边长）；门面对外零 XYZW 泄漏 | 1.0 | B | 薄 |
 | **P0-10** | `graspfunnel.py`：候选 → 偏好排序 → 选择（离线，mock 候选） | P0-03, P0-09 | `harness/graspfunnel.py` | 复用 `method/demo_graph/candidates.py::CandidateSelector`（⚙代码在，`SELECT`/`REJECT_ALL`/`REQUEST_EVIDENCE` 三态已实现）；每层 in/out 计数落盘；空集 → `REJECT_ALL` + `UnsolvedHole`，**不静默退化、不放宽重试** | 1.5 | B | **真开发** |
 | **P0-11** | `bounds.py` 纯函数限幅 + 两级仲裁（无机器人） | 无 | `harness/bounds.py` | 单步 20mm/5°、节点累计 60mm/15°、次数 3/10；≤上限直发 / ~3× clamp / >3× reject；`bounds.apply()` 首行 `isinstance` 断言 | 0.5 | B | 薄 |
 | **P0-12** | `targets.py` + `compilepolicy` 尾部增写 `targets.json` | P0-05 | `harness/targets.py`、改 `compilepolicy.py` | 5 份 graph 各出一份；谓词数 = acceptance 数；确定性 pass（**无 LLM**） | 1.0 | B | 薄 |
@@ -92,11 +95,36 @@
 | **P0-19** ⬇低优 | `is_gripping_sth` / `current_limit` 恒 0 报上游 | 无 | `tools/gripper_repro.py` + issue 编号 | 根因：`_apply_gripper_control` 在 `fixed` 模式仍把 **v4 已移除的 `snap.torques[arm][7]`** 当 `current_limit` → 恒 0 → `is_gripping_sth` 恒假且返回字符串 `'False'`。**本方案不依赖该信号**（PI 已裁定 gate 约束更大、另用专门模型判抓取），报出去只为帮上游；我方只加 `_truthy()` 防御并标「不作为方案依赖」 | 0.5 | B | 薄 |
 | **P0-20** | L0 实验批 | P0-05, P0-13, P0-16 | `runs/` + 报告 | `E-CAUSAL-OFF` / `E-A1b` / `E-A1c` / `E-A6-scan` / `E-A6-swap-static` / `E-GATE-off`（判据见 EXECUTION §1.3） | 1.0 | — | 实验 |
 
-**小计 18.5 人日。**
+**小计 17.5 人日（原 18.5，P0-07 作废）。**
 
-**MVS 裁剪线**（PI「先搭起来跑通优先于完备性」）：
-- **必做 10.0 人日（≈2 周）** = P0-01 + 02 + 03 + 04 + 05 + 06 + 07 + 10 + 15 + 20 → 因果链闭合、分层骨架立起、E-CAUSAL-OFF 出数
+**MVS 裁剪线**（PI「先搭起来跑通优先于完备性」，D-19 后升级为**双线**）：
+- **A 线必做 9.0 人日（≈2 周）** = P0-01 + 02 + 03 + 04 + 05 + 06 + 10 + 15 + 20（~~07~~ 已作废）→ 因果链闭合、E-CAUSAL-OFF 出数
+- **B 线并行 3.5 人日** = T-GEN-1 + T-GEN-2（§2A；与 A 线文件集不相交，worktree 隔离）→ 生成器 v0 到位，E-CHAIN 试点的两个前置在同两周内齐活
 - **顺延 8.5** = P0-08/09/11/12/13/14/16/17/18/19（其中 **P0-14 去特权不许顺延过 W3**，越晚越贵，见 §8-6）
+
+---
+
+## 2A. 新增工作流（D-19，2026-08-03）——定理 / 生成器 / 反传算子 / 鲁棒反传 / 注册
+
+> 上位依据 `PROPOSAL.md`(v4) §2–§6。T-GEN 与 §2 的 A 串行线**文件集不相交，全程可并行**（B 组纪律，worktree 隔离）；T-BP / T-ROB 依赖 **D0**（因果链闭合）——在 `solve()` 真正消费约束之前，反传算子没有可反传的东西。
+
+| 编号 | 一句话 | 依赖 | 产出物 | 完成判据 | 人日 | 并行 | 类型 |
+|---|---|---|---|---|---|---|---|
+| **T-THM-1** | 分离定理 statement 草案：任务族 𝒯(L,κ) 形式化 + 贪心几何衰减下界 + 反传覆盖假设上界 + 回溯代价推论 | 无（纸面，**PI 亲自**） | `docs/theory/SEPARATION.md` | 1 页 statement + proof sketch；PI 判定「可证 / 降级为命题 / 纯实证」三选一并记入 DECISIONS（PROPOSAL v4 §4 的降级路径） | — | 全程并行 | 理论 |
+| **T-THM-2** | 定理构造与生成器旋钮对齐 | T-THM-1, T-GEN-1 | 同上文档 §2 | 定理的对抗构造可由 T-GEN 的 κ 旋钮取极值复现（纸面对照表）；对不齐则二者必须改到对齐为止——**图和定理互为证据是 D-19 的硬要求** | — | 并行 | 理论 |
+| **T-GEN-1** | 生成器 spec：链长 L / 耦合强度 κ / 歧义度 α 三旋钮可操作定义 + 阶段原子词表（抓取-转移-放置-插入，**不含 push**，D-14）+ oracle 金标图 schema + 三旋钮独立性检验设计（PROPOSAL v4 §10-13） | 无 | `docs/GENERATOR_SPEC.md` | PI 签字；三旋钮各有可操作定义与至少一个反例（「什么不算耦合」）；≥1 个现有真实任务能被表达为族内一点（外部效度锚，PROPOSAL v4 §9） | 0.5 | B | 设计 |
+| **T-GEN-2** | 生成器 v0：L∈{2..5} × κ 两档 × seed 化，输出场景（复用 v4 现成 37 任务 suite 资产做底料，**不手写任务 yaml**，与 P1-10 同规）+ oracle 约束图 | T-GEN-1 | `harness/taskgen/` | 每档 L × 3 seed 场景 sim 加载成功；oracle 图 100% 过 `validate`（零度量字面量，T3 扫描）；确定性（同 seed 同输出，md5 断言）；**不改 §2 的 A 线任何文件** | 3.0 | B | **真开发** |
+| **T-GEN-3** | 歧义旋钮 α：同指令双合法目标场景对（E-AMB / E-ROB 素材；**D-13 悬置的素材构造任务在此落地**） | T-GEN-2 | 场景对清单 + 双 scripted demo 脚本 | ≥4 对；双合法性两名独立标注一致；每对两段 demo 的意图差异可用一句话陈述并入预注册 | 1.5 | B | 真开发 |
+| **T-GEN-4** | demo 采集通道：scripted oracle policy 执行生成任务并录 demo 视频，喂 Phase 0 提取 | T-GEN-2 | `harness/taskgen/record.py` | 生成任务的 demo 过 Phase 0 harness 同一道门（P≥0.7 / R≥0.8）；不达标 = 生成任务对提取器过难，回 T-GEN-1 调词表——**这是生成器的真实性检验，不许降门** | 1.5 | C（短占 sim） | 真开发 |
+| **T-BP-1** | k 步反传算子：把漏斗 L3 从「下游一步」推广为链到底递归（PROPOSAL v4 §2.1 的 F_i），纯排序、不生成数值、L1 外不淘汰 | **D0**, P0-10 | `harness/backprop.py` | 单测：3 阶段耦合 mock 上贪心 top-1 ≠ 反传 top-1；**k=0 退化为纯 L2 序**（E-CHAIN 的消融开关就是这一个参数）；文件内任务名扫描 0 命中 | 2.0 | A（D0 后） | **真开发** |
+| **T-BP-2** | 兼容性谓词 compat(c,c′)：抓取→放置/插入的跨阶段可行性检查（可达 + 无碰，与 L1 同底座） | T-BP-1, P1-03 | `harness/compat.py` | ≥2 类阶段对有可执行 compat；单对耗时 <1 s（超此反传在 ep 内不可用，如实记录并报 PI——这是 PROPOSAL v4 §10-11 的实测面） | 1.5 | A | 真开发 |
+| **T-ROB-1** | extract 保留版本空间：k=5 自一致性样本不再只投票，全量落盘为 V | D0 | 改 `harness/extract.py` | 每任务 `graph.json` 伴生 `versions.json`（k 条链 + 一致性元数据）；**现有 MAP 输出字节不变**（零回归，md5 对照） | 0.5 | A | 薄 |
+| **T-ROB-2** | 鲁棒排序算子：min / 期望聚合二选一（在 T-REG 预注册后钉死，不许事后换） | T-ROB-1, T-BP-1 | `harness/robustrank.py` | 单测：V 中两链分歧的 mock 上鲁棒 top-1 ≠ MAP top-1；干净 V（k 链一致）下与 MAP **逐比特相同** | 1.0 | A | 真开发 |
+| **T-REG** | E-AMB / E-DO / E-CHAIN / E-ROB 的判据 + ep 预算写进 `EXECUTION.md` §1，PI 签字 commit | T-GEN-1, T-THM-1 | `EXECUTION.md` §1 增补 | 预注册纪律（EXECUTION §0）：开跑前 commit，事后改动 = 该批数据作废；E-CHAIN 五臂（B0/B1/B2/OURS/B3）定义与 PROPOSAL v4 §6.3 逐字一致；ep 预算按实测单集成本核算入 $3500 顶 | 0.5 | — | 治理 |
+
+**小计：T-GEN 6.5 + T-BP 3.5 + T-ROB 1.5 + T-REG 0.5 = 12.0 人日**（T-THM 为 PI 纸面工作，不计执行人日）。
+
+**排期锚点**：W1–W2 = 因果链 MVS（A 线）∥ T-GEN-1/2（B 线）∥ T-THM-1（PI）；W3 = **D0** + T-GEN-3/4；W4 = T-BP-1/2 + **E-CHAIN oracle 态试点**（只作上界与管线验证，D-05 标签纪律）；W5+ = 按 §9-14 裁决决定 E-CHAIN 主数字感知态，T-ROB 与 E-ROB 跟进。
 
 ---
 
@@ -145,24 +173,26 @@
 | **P-2** | motion planning 到位率 ≥8/10，末点 `rot_error <10°` 单调收敛 | 回 P1-02 |
 | **P-3′**（改写） | funnel 非平凡：L1 通过率 ∈[0.1,0.9]；**L2 top-1 改变率 ≥60%（= CC-0 在真候选上的复核）**；L3 在 counterfactual 上 ≥1 次改 top-1 | L1 ≈0 或 ≈1 → 谓词阈值取法有问题，回 P0-05 改**谓词**不许改任务；L2 改变率不达标 → 见 CC-0 转向；L3 从不改 top-1 → PROPOSAL §2.1「下游约束反推」被证伪，机制 3 降为实现细节，三层漏斗表述改两层。**原 P-3「L2 否决率 ∈(0,0.8)」在无淘汰语义下作废** |
 | **P-4** | verifier 与几何谓词一致率 ≥0.85 且**不系统性偏松**（FAIL 判 PASS 的数 ≤ 反向的 2 倍） | **立刻停用**退回几何谓词 + 官方 probe。这是硬边界 1 的守卫，没有商量余地 |
-| **P-5** | E-GATE 档 0 通过（bal acc ≥0.80，FP ≤0.10） | EXECUTION §1.6 降级表；地板（方向标签 <0.70）→ **L5 整层删除**，L2 预算砍半 |
+| **P-5** | E-GATE 档 0 通过（bal acc ≥0.80，FP ≤0.10） | EXECUTION §1.6 降级表；~~地板（方向标签 <0.70）→ **L5 整层删除**，L2 预算砍半~~ ← **D-18 后 L5 已不存在**，降级表涉 L5 各档作废；E-GATE 保留的用途 = verifier shadow 一致率（evaluator 侧，P1-12）与 gate 谓词质量 |
 | **P-6**（新） | GraspNet 对照臂出数：两候选源在同一漏斗上的 L3 通过率有可报差异 | 不出数 → GraspNet 降为「可复现性论证」用途（不依赖闭源远端服务），**不进消融矩阵**，成本不再追加 |
 
 ---
 
-## 6. P2 —— 完整抓取链
+## 6. P2 —— 完整抓取链（定位更新，D-18/D-19）
+
+> **P2 的角色变了**：抓取链是**执行基底与 E-CHAIN 的落地载体**，不再是论文主结果本身。P2-04 的 2 任务 20-seed 双阈值降级为基底健全性检查；论文主数字来自 E-CHAIN 任务族与 E-AMB/E-ROB（判据走 T-REG 注册）。此降级 PI 可复议。
 
 | 编号 | 一句话 | 依赖 | 产出物 | 完成判据 | 人日 | 并行 |
 |---|---|---|---|---|---|---|
 | **P2-01** | claw 自由度口径结清（G0-a 残留） | 无 | 一页记录 | `set_gripper(angle=0/100)` 前后逐个 diff `/state` 的 claw revolute，同时结清「15 vs 12 自由度」与「把可动性证据从图像升级为状态量」。**这是 `region_grasp` ground truth 规则的前提** | 0.2 | 占 sim ≤0.5h |
 | **P2-02** | pose-in-hand：抓后估一次 + FK 传播 | P2-01, P1-04 | `harness/posinhand.py` | 闭合后估 `T_gripper→object` 一次；gate 失败或接触事件才重估，**不做在线密集追踪**。（`residual()` 按残差修正已被实测证伪两次，保留契约签名返 `UNSUPPORTED`） | 2.0 | 占 sim |
-| **P2-03** | `corrector.py` 落地（L5） | **§8-1 D-01 裁决**, P0-13, P1-08 | `harness/corrector.py` + `prompts/runtime_corrector.md` | 三条冻结判据同时成立：prompt 逐字不变 / 交换测试 / 字面量扫描零命中；输出仅限幅体固定增量（mm/deg），越界由 runner 拒绝并记录；`referenced_predicates` 非输入谓词子集 → 整条提案作废。**这是 `contract.py` 的第一个破例点**——集中一次改完并立刻重跑 5 任务 compile 记新 digest，**不许零敲碎打** | 3.0 | 否 |
+| ~~**P2-03**~~ | ~~`corrector.py` 落地（L5）~~ **【作废 D-18：L5 整层砍除，D-01 维持生效；`contract.py` 的「第一个破例点」随之消失，§9-8 关闭】** | — | — | — | ~~3.0~~ | — |
 | **P2-04** | 首批数字 | P2-02, P2-03 | `runs/ep_*` | insert_tubes + stack_bowls 各 20 seeds；双阈值 **≥16/20**（抓取+转正+对准）、**≥12/20**（inserted+upright） | 3.0 | 占 sim |
 | **P2-05** | Phase 2 冻结协议 | P2-04 | `RunManifest` | code digest；D/E seed 不相交；冻结后 policy/模型/配置/runtime 四项全禁改 | 2.0 | 否 |
 | **P2-06** | 消融矩阵 | P2-04, P1-10 | 全部 L2 实验 | EXECUTION §1.5 全部；每条消融有成对数字与「节点 × 层」归因 | 4.0 | 占 sim |
-| **P2-07** | **E-ABSTR：抽象层级消融**（PI 决定 3 的实验兑现） | P0-07, P2-04 | 新实验 | 同一任务在 G3-only / G3+G2 / 全开 三档下重新编译并执行；报成功率 + 各层 `static_check` 字面量拒绝率。**未在 EXECUTION §1 注册，ep 数与预算未计**（§8-10）。对照 CaP-X §3.1 S1–S4（Takeaway 2：成功率随抽象层级单调上升）—— 但我方样本量远小于该文的 7 任务 × 100 trials，**只能当 conditioning 变量，不能当 finding** | 2.0 | 占 sim |
+| ~~**P2-07**~~ | ~~**E-ABSTR：抽象层级消融**（PI 决定 3 的实验兑现）~~ **【作废 D-18：G 消融砍除——CaP-X 已覆盖且我方样本量只够 conditioning 不够 finding；§9-11 关闭】** | — | — | — | ~~2.0~~ | — |
 
-**小计 16.2 人日。**
+**小计 11.2 人日（原 16.2，P2-03/P2-07 作废）。**
 
 ### 决策点 D2（P2 收口，P2-02 起 +3 周）
 
@@ -210,6 +240,17 @@
 ---
 
 ## 9. 当前未决事项（按阻塞强度排序）
+
+> **处置更新（2026-08-03，D-18/D-19 落账；下表原文保留作历史，以本块为准）**：
+> - **#1 已关闭**（D-18）：BLK-5 以「维持 D-01、砍 L5 删模型工位」了结——即原选项 (c)。摊销与可审计卖点全额保留。
+> - **#2 已关闭**（D-18）：G1/G2/G3 消融砍除，「API 分颗粒度 vs `contract.py` 不动」的冲突对象消失；契约变体方案 (c) 不再需要。
+> - **#5 按 D-18 推论关闭为选项 (a)**：gate 的 `passed` 由 `gates.py` 几何谓词计算，验收模型只在 evaluator 侧出 shadow 报告（D-01 之下唯一自洽选项）。**PI 可复议**，复议前按此执行。
+> - **#7 范围收窄**：verifier 只剩 shadow 用途，「两工位异厂」降级为 evaluator 侧建议，不再阻塞方法路径；单 key 现状可接受，但 shadow 报告中须如实标注同源风险。
+> - **#8 已关闭**（D-18）：P2-03 作废后 `contract.py` 无任何计划内破例点。
+> - **#11 已关闭**（D-18）：E-ABSTR 砍除，预算问题消失。
+> - **#3（判据重预注册）/#4（cone）/#6（gate 去特权时点）/#9（L2 ep 数）/#10（P2′ 触发条件）/#12（GraspNet 定位）/#13（claw 口径）继续有效。**
+> - **新增 #14（PI 拍板项，阻塞 E-CHAIN 主数字）**：E-CHAIN 的感知态口径。选择层主张原则上允许全臂统一 oracle 感知先出数（控制变量成立），但 D-05 现行口径禁止 oracle 产物报为方法结果。选项：(a) 维持 D-05 最严口径——主数字必须走非特权感知链（P1-04/05/06/07 保持关键路径，排期最长）；(b) 增补 D-05 的 scoped 修正——「全臂同 oracle 感知态 + 显式标注」允许作为**选择层**主张的主数字，非特权链降级为 showcase（排期最短，审稿风险自担）。**裁决前按 (a) 执行**。
+> - **新增 #15**：E-CHAIN 任务族与真实 4 任务的关系口径——生成任务算不算「任务数量」（v3 §9 说通用性证据来自约束类型覆盖不是任务数量）。建议口径：任务族按「约束类型 × 链长」报，不按个数报；需 PI 确认后写进 T-REG。
 
 | # | 事项 | 阻塞谁 | 选项与代价 |
 |---|---|---|---|
