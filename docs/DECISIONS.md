@@ -31,6 +31,7 @@
 | D-17 | v3/v4 代次错配用仓外 override 绕过；`knowin_sim_v4verify` 不迁 | 2026-07-30 | 生效 | 文档 |
 | D-18 | 贡献结构收敛为「一主张两证据」；砍 L5 / G1G2G3 消融 / 最小性措辞 / 真机前提；**D-01 维持生效，BLK-5 解除** | 2026-08-03 | 生效 | 对话裁决（本文件为首个文档出处） |
 | D-19 | 论文框架换轨 preimage/funnel 复活叙事；新增分离定理、链长任务族生成器、版本空间鲁棒反传三个贡献载体；「抽象层自动发现」存档为第二篇 | 2026-08-03 | 生效 | 对话裁决（本文件为首个文档出处） |
+| D-20 | RoboDojo 官方榜单升格为**第二 headline**：激活门 = D0∧官方通道开放，失效门 = 9/15 未开放降回层 B；预算 ≤15 人日；#14 按官方口径关闭（非特权感知链必做）；论文内 baseline = CaP-Agent0 | 2026-08-03 | 生效 | 对话裁决（本文件为首个文档出处） |
 
 ---
 
@@ -119,6 +120,18 @@
 | **影响** | ① `PROPOSAL.md` 升 v4 并按本条重写（v3.1 归档至 `archive/PROPOSAL_v3.md`，D-16 纪律：正文不删，顶部加 SUPERSEDED 块）；② `TODO.md` 新增三条工作流：T-GEN（任务族生成器，与因果链修复并行、文件集不相交）、T-ROB（版本空间鲁棒反传，D0 后）、T-THM（分离定理，PI 亲自、即刻）；③ E1/E2/E3/E-ROB 的判据**须按预注册纪律在开跑前写进 `EXECUTION.md` §1 并经 PI 签字 commit**——本条只立项不注册，注册草案任务见 `TODO.md` T-REG；④ E1 歧义对素材构造升为长杆任务（现有视频无目标歧义，D-13 改判后一直悬置）；⑤ 生成器的任务族与 D-14（push 挂起）不冲突：任务族以抓取-放置-插入类阶段为原子，不引入 push 原语。 |
 | **状态** | **生效** |
 | **证据** | 对话裁决（2026-08-03），本文件为首个文档出处；方案面落点 = `PROPOSAL.md`(v4) §2–§6；理论模板参照 WAP（arXiv 2607.27599）Theorem 1–3；经典出处 = Lozano-Pérez, Mason & Taylor (1984) preimage backchaining；Burridge, Rizzi & Koditschek (1999) sequential composition of funnels |
+
+### D-20 RoboDojo 榜单轨升格为第二 headline
+
+| | |
+|---|---|
+| **裁决** | ① RoboDojo 官方榜单从「层 B 可选」升格为**第二 headline**——层 A 机制结果（E-AMB/E-DO/E-CHAIN/E-ROB）仍是第一 headline，**论文成立不依赖榜单**。② 激活条件 = **D0 通过 ∧ 官方提交通道开放**；失效条件 = **2026-09-15 前官方仍 Coming Soon 则自动降回层 B**，不得以等待为由挂起其他线。③ 预算硬顶 **15 人日**（Isaac Sim / XPolicyLab 适配、官方观测下感知链联调、CaP-Agent0 基线跑分），超支须 PI 重批。④ `TODO.md` §9-14 就地关闭：官方 evaluator 为非特权观测，E-CHAIN 主数字按官方口径 = 非特权感知链，**P1-04/05/06/07 升格必做、不可裁剪**（v1「不砍 P1-04/05」升格为硬约束）。⑤ 论文内受控 baseline = **CaP-Agent0**（同 API、同预算、无 demo），兼任 A1 消融的 agent 臂；榜单上的对手不可选，以榜上为准。⑥ 两层不混报纪律（`archive/ARCHIVE.md` §5.4）原样保留：内部 robodojo_v4 数字**永远不得**称 leaderboard result。⑦ 目标口径：**上榜 + Long-Horizon 维度领先**，不追总分第一。 |
+| **日期** | 2026-08-03 |
+| **背景** | PI 裁决「想把分数刷高、冲击 benchmark 榜单，baseline 用 CaP-X 系」。事实面：2026-07-26 榜单快照 #1 = 20.07 score / 13.93% SR（任务极难、绝对分低），公开提交页当时 Coming Soon；官方 = Isaac Sim + XPolicyLab evaluator，非特权观测；内部 KW 链是 robodojo_v4 适配，非官方。 |
+| **理由** | ① 榜单是外部效度最强背书，直接回应「生成器玩具感」与「私有 sim 可复现性」两条审稿质疑；② 「分数高」本身不构成 RSS 贡献，机制轨必须先行——官方接入的全部工程（adapter、非特权感知、embodiment 差异）都以 D0 产物为地基，D0 前投入 = 在断链上盖房；③ 官方无 oracle 使 #14 的「最严口径」成为唯一口径，反而消掉一个 PI 拍板项；④ CaP-X 系在几何变异任务上已知弱（GaP Table 1：0.01–0.22），论文措辞限定为「相对 code-as-policy 系的增量来自 demo 约束链」，**不得宣称打败 SOTA**；Long-Horizon 维度与链式反传主场重合，是性价比最高的上榜面。 |
+| **影响** | ① `TODO.md` 新增 §2B 榜单轨（RD-01 侦察 / RD-02 scoping / RD-03 主体）；② `TODO.md` §9-14 关闭；③ `PROPOSAL.md`(v4) §6.3 感知态段按本条改写；④ T-REG 注册 E-CHAIN 时任务选择须考虑与官方 42 任务的可迁移性；⑤ RD-01 须把官方 URL、榜单快照、提交规则记入 `docs/reference/ROBODOJO.md`——本仓至今未记官方 URL，这是侦察欠账。 |
+| **状态** | **生效** |
+| **证据** | 对话裁决（2026-08-03），本文件为首个文档出处；`archive/ARCHIVE.md` §5.4（RoboDojo 事实与诚实边界、层 A/层 B 结构）；GaP（arXiv 2607.05369）Table 1（CaP-X 0.01–0.22）；官方提交状态待 RD-01 核实 |
 
 ---
 
