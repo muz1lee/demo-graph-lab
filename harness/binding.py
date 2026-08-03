@@ -113,11 +113,27 @@ def _resolve_ref(rt, name):
 
 
 def solve_pose_se3(hole, stage, constraints, rt):
-    """pose_se3:抓取/放置位姿。参照物与偏好区带从 region_grasp 约束取;无则回退 stage_objects。"""
+    """pose_se3:抓取/放置位姿。参照物与偏好区带从 region_grasp 约束取;无则回退 stage_objects。
+
+    机器人系位姿洞(home/retract 类):按结构字段派发,不看名字——
+    `frame` 为机器人锚定(robot_base/base/ee)或全阶段无任何锚定
+    (零约束参照 + stage_objects 双 None)时,该洞不描述世界系几何,
+    返回机器人系描述子交下游 ctrl(go_home 等)消费。旧 kwadapter 把
+    这类洞吞进 condition 兜底;抛 UnsolvedHole 则会在 retreat 阶段崩,
+    两者都不对。语料实例:deposit_coin v0.2 的 left/right_arm_home_pose
+    (frame=robot_base, stage_objects 全 None)。"""
     so = (stage or {}).get("stage_objects") or {}
     rg = _constraint(constraints, "region_grasp")
     ca = _constraint(constraints, "center_align")
     inside = _constraint(constraints, "inside")
+
+    _ROBOT_FRAMES = {"robot_base", "base", "robot", "ee", "end_effector"}
+    anchor_free = (rg is None and ca is None and inside is None
+                   and so.get("manipulated") is None and so.get("target") is None)
+    if str(hole.get("frame", "")).lower() in _ROBOT_FRAMES or anchor_free:
+        return {"kind": "pose", "hole": hole.get("name"), "xyz": None, "quat": None,
+                "frame": hole.get("frame") or "robot_base",
+                "ref": None, "ref_source": "robot_frame"}
 
     if rg is not None:
         obj = _args(rg).get("obj") or so.get("manipulated")
