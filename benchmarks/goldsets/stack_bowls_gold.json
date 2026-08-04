@@ -1,0 +1,297 @@
+{
+  "task": "stack_bowls",
+  "annotator": "claude",
+  "annotated_at": "2026-07-30",
+  "stages": {
+    "0": {
+      "constraints": [
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"bowl_left\"}",
+          "verdict": "incidental",
+          "note": "t0001_50->t0002_38 show the left gripper descending onto the rim from above, so the demo does approach top_down. But this is the grasp side of a rotationally symmetric bowl: a rim pinch is reachable from an angled side approach too; the grasp approach is a free choice within the equivalence class. Rim grasp is the core relation, not the approach cone."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_left\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "t0002_38 and t0002_81 show fingers closing astride the rim edge; a body/bottom grasp would block later nesting of the next bowl and give no stable hold on a concave object. Core."
+        },
+        {
+          "key": "above|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0003_25 (evidence frame 81) shows the bowl clearly airborne, held above the table with shadow separated. Lift-off is the point of the pick stage; without it transport fails."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "Derived from sibling picks (s2,s5), but judged on this stage's frames it holds: t0003_25 shows visible daylight between bowl bottom and table. Partially redundant with above, yet failure-relevant (dragging on the table breaks the transfer)."
+        },
+        {
+          "key": "order|{\"stage_sequence\": \"s0:pick<s1:place<s2:pick<s3:stack<s5:pick<s6:stack\"}",
+          "verdict": "correct",
+          "note": "Auto-added derived order matches the demo and is necessary: bowl_left must be placed (s1) before anything can be stacked onto it (s3), and bowl_mid_right must be seated in the stack (s3) before bowl_top_right nests onto it (s6). Bottom-up stacking order is core; cleanup s4 correctly omitted."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_left\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "At stage end (t0003_25 / frame 81) the gripper still holds the rim; grasp retention is the pick success condition."
+        },
+        {
+          "key": "above|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0003_25 shows the bowl lifted above the table at stage end. at_end scope matches the evidence."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "Visible gap under the bowl at t0003_25. Redundant with above at_end but true and failure-relevant."
+        }
+      ],
+      "missing": []
+    },
+    "1": {
+      "constraints": [
+        {
+          "key": "above|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "holds=throughout is plausible and frame-supported: t0003_69 and t0004_56 show the bowl carried above the table for the whole stage until set-down at t0005_00. Violation (contact mid-carry) would drag/topple the bowl."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"table\"}",
+          "verdict": "correct",
+          "note": "Place-side top_down is core: t0004_12->t0005_00 show a vertical lowering onto the table surface; a bowl can only be set stably by descending along gravity onto its resting plane. This is the place-side/grasp-side asymmetry, so unlike the pick stages this cone is not incidental."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_left.up_axis\"}",
+          "verdict": "correct",
+          "note": "at_end scope: t0005_00 shows the bowl seated level, opening up. Core because bowl_left becomes the stack base in s3; a tilted base defeats nesting."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "above|{\"obj_a\": \"bowl_left\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "t0005_00 (frame 125): bowl resting on top of the table surface at stage end - the support relation the place stage must produce."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_left.up_axis\"}",
+          "verdict": "correct",
+          "note": "t0005_00 shows a level, upright rest pose; required for the bowl to serve as stack base."
+        }
+      ],
+      "missing": [
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"gripper_holds bowl_left\"}",
+          "note": "This stage transports the bowl from the lift point to the place point (t0003_69 through t0004_56); maintaining the grasp until release is necessary, exactly as extracted for the stack stages s3/s6. Its absence here is asymmetric."
+        }
+      ]
+    },
+    "2": {
+      "constraints": [
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_mid_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "t0006_75 and t0007_00 (frames 162-175) show the right gripper closing on the rim of the middle-right bowl. Core for the same reasons as s0."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"bowl_mid_right\"}",
+          "verdict": "incidental",
+          "note": "t0006_50->t0006_75 show a shallow angled descent from the upper-right onto the rim - broadly consistent with the claimed cone (only 3/5 votes). Grasp-side approach direction on a symmetric bowl is a symmetry-free sample; rim grasp is the core relation."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"table\"}",
+          "verdict": "unsure",
+          "note": "At the cited end frame (175 = t0007_00) the bowl still appears seated on the table with the gripper just engaged; no visible daylight. The subsequent transfer (t0007_45/t0007_90) is a low carry near table height, so lift-off by end of this stage cannot be confirmed from keyframes."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_mid_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "Rim held at stage end (t0007_00); the grasp-secured condition is what s3 depends on."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"table\"}",
+          "verdict": "unsure",
+          "note": "Same evidence problem as the constraint: at t0007_00 the bowl looks still in contact with the table; a few-mm lift is indistinguishable at this resolution. at_end scope not confirmable - flagging rather than calling wrong."
+        }
+      ],
+      "missing": []
+    },
+    "3": {
+      "constraints": [
+        {
+          "key": "above|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "Core stacking relation during the final lowering: t0008_35 (frame 209) shows the carried bowl over bowl_left, then seated. Note evidence frame 198 (t0007_90) actually shows the bowls side-by-side at similar height, so 'above' only becomes true late in the stage; the constraint is core for the insertion phase, not the whole approach."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_mid_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "t0007_45/t0007_90 show the rim grasp maintained through the transfer; losing it mid-carry fails the stage."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "t0008_35 and t0008_80 show concentric nesting; center alignment along the stack axis is the defining core constraint of bowl stacking - offset drop leaves the bowl perched on the rim."
+        },
+        {
+          "key": "carry|{\"relation\": \"gripper_holds bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "Gripper visibly holds the bowl throughout the transport (t0007_45 -> t0008_35); necessary for the whole stage."
+        },
+        {
+          "key": "inside|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "Nesting visible at t0008_35 and t0008_80 (frames 209,220): the upper bowl sits inside the lower bowl's cavity - the goal relation of the stack stage."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "Derived, judged on merits: place-side top_down along the stack axis is core - nesting requires descending into bowl_left's cavity from above. Frames support it indirectly: at t0007_90 the bowl is beside bowl_left, at t0008_35 it is nested with the gripper directly above, implying a lift-over-and-lower between 198 and 209."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_mid_right.stack_axis\"}",
+          "verdict": "correct",
+          "note": "Derived; on merits keeping the carried bowl level during the lowering is core (a tilted bowl jams on the base rim). t0007_90 shows the bowl roughly level in carry and t0008_35/t0008_80 show level nesting. Naming inconsistency vs s1's 'up_axis' noted but semantics fine."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "t0008_80 (frame 220): two-bowl nest completed at stage end."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "Concentric seating visible at t0008_80; the acceptance form of the core stacking relation."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_mid_right.stack_axis\"}",
+          "verdict": "correct",
+          "note": "t0008_80 shows the nested bowl level at stage end; required for it to serve as the seat for s6."
+        }
+      ],
+      "missing": []
+    },
+    "4": {
+      "constraints": [
+        {
+          "key": "inside|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "holds=throughout is evidence-supported: t0008_98 and t0009_50 (frames 220-238) show the nest intact while the gripper releases and retracts. Core release semantics - dragging the bowl out during release would undo s3."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "True and visible: the nested bowl rests inside bowl_left, bottom off the table (t0009_50). Largely entailed by inside, but its violation (bowl knocked out onto the table during retract) is exactly the cleanup failure mode, so kept as correct rather than incidental."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"bowl_left\"}",
+          "verdict": "correct",
+          "note": "Nest intact after release/retract at t0009_50 (frame 238)."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_mid_right\", \"obj_b\": \"table\"}",
+          "verdict": "correct",
+          "note": "Bowl still seated in the stack, clear of the table, at t0009_50."
+        }
+      ],
+      "missing": []
+    },
+    "5": {
+      "constraints": [
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"bowl_top_right\"}",
+          "verdict": "incidental",
+          "note": "Clearly true in frames: t0010_50 -> t0011_75 -> t0013_00 show a clean vertical descent onto the rim (5/5 votes deserved). Still incidental: grasp-side approach on a symmetric bowl is a symmetry-free equivalence-class sample; the rim relation is what matters."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_top_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "t0013_00 (frames 294-325) shows the gripper engaged on the rim. Core."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"table\"}",
+          "verdict": "unsure",
+          "note": "Same low-lift ambiguity as s2: at the cited end frame (325 = t0013_00) the bowl still appears seated on the table with the gripper just closed; no visible gap. Lift plausibly happens early in s6 instead."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_top_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "Rim secured at stage end (t0013_00); precondition for the s6 transfer."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"table\"}",
+          "verdict": "unsure",
+          "note": "at_end lift-off not confirmable at t0013_00 - bowl looks in contact; keyframe resolution cannot distinguish a minimal hover."
+        }
+      ],
+      "missing": []
+    },
+    "6": {
+      "constraints": [
+        {
+          "key": "above|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "t0014_25 (frame 356/372 region) shows the carried bowl brought over the two-bowl stack before lowering; above-during-lowering is core to nesting."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "Place-side top_down along the stack axis - core. t0014_25 -> t0014_88 show the final descent into the stack cavity from above."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "t0014_88 shows concentric three-bowl nesting; core stacking relation, offset would leave the bowl perched."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"bowl_top_right\", \"region\": \"rim\"}",
+          "verdict": "correct",
+          "note": "Rim grasp maintained through the carry (t0013_62, t0014_25; frames 341,356)."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_top_right.stack_axis\"}",
+          "verdict": "correct",
+          "note": "Supported at the cited frame 388 (t0015_50): seated level. Scope note: no holds field, and a throughout reading would be contradicted - t0013_62/t0014_25 show visible tilt during the low carry. Only the at_end/lowering-phase claim is evidenced, which is the phase where level matters for jam-free nesting."
+        },
+        {
+          "key": "carry|{\"relation\": \"gripper_holds bowl_top_right\"}",
+          "verdict": "correct",
+          "note": "Derived; on merits the gripper visibly holds the bowl through the whole transfer (t0013_62 -> t0014_88). Necessary."
+        },
+        {
+          "key": "inside|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "Derived; goal relation, visibly achieved at t0014_88/t0015_50 - top bowl nested in the stack."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "t0015_50 (frame 388): three-bowl nest completed, top bowl inside bowl_mid_right."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"bowl_top_right\", \"obj_b\": \"bowl_mid_right\"}",
+          "verdict": "correct",
+          "note": "Concentric final seating visible at t0015_50."
+        },
+        {
+          "key": "axis_vertical|{\"axis\": \"bowl_top_right.stack_axis\"}",
+          "verdict": "correct",
+          "note": "Derived; at_end level seating visible at t0015_50 - the plausible scope for a stacked bowl's rest pose."
+        }
+      ],
+      "missing": []
+    }
+  }
+}

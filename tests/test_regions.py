@@ -1,22 +1,21 @@
-"""harness.regions 单测(P0-03,改动 C-4/C-5)。
+"""任务无关 region 偏好的纯逻辑测试。
 
 覆盖:六 region 偏好函数形状、稳定排序(等分保序)、rim/handle UNCHECKABLE 行为、
-cone 角度偏好。纯逻辑、离线、pytest 或直接 python3 皆可跑(风格对齐 test_harness_units)。
-判据出处 docs/TODO.md §1.2 C-4/C-5、§1.3 CC-1′。
+cone 角度偏好。纯逻辑、离线，由 pytest 运行。
+These tests pin the task-independent preference semantics.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness import regions, vocab
+from demo_graph_lab.graph import vocab
+from demo_graph_lab.selection import regions
+from demo_graph_lab.selection.candidates import CandidateBundle, deterministic_select
 
 
 # --------------------------------------------------------------------------
-# 六 region 偏好函数形状(逐字对 TODO §1.2 C-4 表)。
+# 六 region 偏好函数形状。
 # --------------------------------------------------------------------------
 def test_pref_upper_body_monotone_increasing():
     f = regions.region_preference("upper_body")
@@ -121,6 +120,32 @@ def test_rank_unrankable_candidates_sink_and_preserve_order():
     assert [x["id"] for x in ranked[1:]] == ["no1", "no2"]   # 保输入序,未丢
 
 
+def test_region_meta_distinguishes_missing_and_partial_features():
+    missing, missing_meta = regions.rank_by_region(
+        [{"id": "a"}, {"id": "b"}], "upper_body", with_meta=True,
+    )
+    partial, partial_meta = regions.rank_by_region(
+        [{"id": "a"}, {"id": "b", "height_fraction": 0.8}],
+        "upper_body",
+        with_meta=True,
+    )
+
+    assert [item["id"] for item in missing] == ["a", "b"]
+    assert missing_meta["status"] == regions.UNCHECKABLE
+    assert missing_meta["available_count"] == 0
+    assert [item["id"] for item in partial] == ["b", "a"]
+    assert partial_meta["status"] == regions.PARTIAL
+    assert partial_meta["available_count"] == 1
+
+
+@pytest.mark.parametrize("value", [True, "high", -0.1, 1.1, float("nan")])
+def test_explicit_height_fraction_must_be_finite_and_normalized(value):
+    with pytest.raises(ValueError):
+        regions.rank_by_region(
+            [{"id": "bad", "height_fraction": value}], "upper_body"
+        )
+
+
 # --------------------------------------------------------------------------
 # _height_fraction:几何路径(s = (p·u−min)/(max−min),全边长)。
 # --------------------------------------------------------------------------
@@ -129,6 +154,51 @@ def test_height_fraction_from_geometry_full_extent():
     c = {"xyz": [0.42, 0.11, 0.80],
          "extent": {"min": [0.40, 0.09, 0.72], "max": [0.44, 0.13, 0.88]}}
     assert regions._height_fraction(c) == pytest.approx(0.5)
+
+
+def test_height_fraction_projects_aabb_along_mixed_sign_axis():
+    diagonal = 2 ** -0.5
+    candidate = {
+        "xyz": [0.75, 0.25, 0.0],
+        "axis_up": [diagonal, -diagonal, 0.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+
+    assert regions._height_fraction(candidate) == pytest.approx(0.75)
+
+
+def test_height_fraction_zero_axis_is_uncheckable():
+    candidate = {
+        "xyz": [0.5, 0.5, 0.5],
+        "axis_up": [0.0, 0.0, 0.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+
+    assert regions._height_fraction(candidate) is None
+
+
+@pytest.mark.parametrize("field", ["axis_up", "xyz"])
+def test_height_fraction_rejects_explicit_empty_geometry(field):
+    candidate = {
+        "xyz": [0.5, 0.5, 0.5],
+        "axis_up": [0.0, 0.0, 1.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+    candidate[field] = []
+
+    with pytest.raises(ValueError):
+        regions._height_fraction(candidate)
+
+
+def test_height_fraction_rejects_inverted_extent():
+    candidate = {
+        "xyz": [0.5, 0.5, 0.8],
+        "axis_up": [0.0, 0.0, 1.0],
+        "extent": {"min": [0.0, 0.0, 1.0], "max": [1.0, 1.0, 0.0]},
+    }
+
+    with pytest.raises(ValueError, match="min values"):
+        regions._height_fraction(candidate)
 
 
 def test_height_fraction_prefers_explicit_field():
@@ -141,15 +211,37 @@ def test_height_fraction_none_when_ungeometrable():
     assert regions._height_fraction({"id": "x"}) is None
 
 
+def test_candidate_bundle_nested_geometry_remains_rankable():
+    candidates = [
+        CandidateBundle(
+            candidate_id=name,
+            observation_id="obs-1",
+            hole_values={},
+            features={
+                "xyz": [0.0, 0.0, height],
+                "extent": {
+                    "min": [0.0, 0.0, 0.0],
+                    "max": [0.0, 0.0, 1.0],
+                },
+            },
+            evidence_refs=(f"candidates/{name}.json",),
+        )
+        for name, height in (("low", 0.2), ("high", 0.8))
+    ]
+
+    result = deterministic_select(candidates, region="upper_body")
+
+    assert [item.candidate_id for item in result.ranked] == ["high", "low"]
+    assert result.region_meta["status"] == "ranked"
+
+
 # --------------------------------------------------------------------------
-# cone 角度偏好(C-5):approach 方向与锥轴夹角越小越优。
+# cone 角度偏好:approach 方向与目标倾角的误差越小越优。
 # --------------------------------------------------------------------------
-def test_cone_axis_known_and_unknown():
-    for cone in vocab.APPROACH_CONES:
-        ax = regions.cone_axis(cone)
-        assert ax is not None and len(ax) == 3
+def test_cone_tilt_known_and_unknown():
+    assert set(regions._CONE_TILT_DEG) == set(vocab.APPROACH_CONES)
     with pytest.raises(ValueError):
-        regions.cone_axis("nonexistent_cone")
+        regions.cone_angle_deg([0, 0, -1], "nonexistent_cone")
 
 
 def test_cone_angle_topdown_perfect_and_opposite():
@@ -172,11 +264,26 @@ def test_rank_by_cone_topdown_prefers_down():
     assert [c["id"] for c in ranked] == ["down", "side", "up"]
 
 
-def test_rank_by_cone_side_prefers_horizontal():
-    cands = [{"id": "down", "approach_dir": [0, 0, -1]},
-             {"id": "side", "approach_dir": [1, 0, 0]}]
+def test_rank_by_cone_side_is_azimuth_symmetric_and_prefers_horizontal():
+    cands = [{"id": "west", "approach_dir": [-1, 0, 0]},
+             {"id": "down", "approach_dir": [0, 0, -1]},
+             {"id": "east", "approach_dir": [1, 0, 0]}]
     ranked = regions.rank_by_cone(cands, "side")
-    assert ranked[0]["id"] == "side"
+    assert [item["id"] for item in ranked] == ["west", "east", "down"]
+    assert regions.cone_angle_deg([-1, 0, 0], "side") == pytest.approx(0.0)
+    assert regions.cone_angle_deg([1, 0, 0], "side") == pytest.approx(0.0)
+
+
+def test_rank_by_cone_oblique_is_azimuth_symmetric():
+    cands = [{"id": "down", "approach_dir": [0, 0, -1]},
+             {"id": "oblique_east", "approach_dir": [1, 0, -1]},
+             {"id": "oblique_west", "approach_dir": [-1, 0, -1]}]
+    ranked = regions.rank_by_cone(cands, "oblique")
+    assert [item["id"] for item in ranked] == [
+        "oblique_east", "oblique_west", "down",
+    ]
+    assert regions.cone_angle_deg([1, 0, -1], "oblique") == pytest.approx(0.0)
+    assert regions.cone_angle_deg([-1, 0, -1], "oblique") == pytest.approx(0.0)
 
 
 def test_rank_by_cone_no_elimination():
@@ -187,24 +294,72 @@ def test_rank_by_cone_no_elimination():
     assert len(ranked) == 3 and ranked[-1]["id"] == "c"
 
 
+def test_cone_meta_distinguishes_missing_and_partial_features():
+    _, missing_meta = regions.rank_by_cone(
+        [{"id": "a"}, {"id": "b"}], "top_down", with_meta=True,
+    )
+    _, partial_meta = regions.rank_by_cone(
+        [{"id": "a"}, {"id": "b", "approach_dir": [0, 0, -1]}],
+        "top_down",
+        with_meta=True,
+    )
+
+    assert missing_meta["status"] == regions.UNCHECKABLE
+    assert partial_meta["status"] == regions.PARTIAL
+    assert partial_meta["available_count"] == 1
+
+
+@pytest.mark.parametrize("value", ["down", [0, 0], [0, 0, 0], [0, 0, float("inf")]])
+def test_candidate_approach_direction_must_be_finite_nonzero_vector(value):
+    with pytest.raises(ValueError):
+        regions.rank_by_cone(
+            [{"id": "bad", "approach_dir": value}], "top_down"
+        )
+
+
+def test_gravity_tilt_ranking_is_frame_independent_and_strict():
+    candidates = [
+        {"id": "side", "approach_tilt_deg": 90.0},
+        {"id": "down", "approach_tilt_deg": 0.0},
+        {"id": "missing"},
+    ]
+
+    ranked, meta = regions.rank_by_gravity_tilt(
+        candidates, "top_down", with_meta=True
+    )
+
+    assert [item["id"] for item in ranked] == ["down", "side", "missing"]
+    assert meta["status"] == regions.PARTIAL
+    with pytest.raises(ValueError, match=r"\[0, 180\]"):
+        regions.rank_by_gravity_tilt(
+            [{"id": "bad", "approach_tilt_deg": 181.0}], "top_down"
+        )
+
+
+def test_planning_selector_rejects_frame_less_approach_direction():
+    candidate = CandidateBundle(
+        candidate_id="bad-direction",
+        observation_id="obs-1",
+        hole_values={},
+        features={"approach_dir": [0.0, 0.0, -1.0]},
+        evidence_refs=("candidates/bad-direction.json",),
+    )
+
+    with pytest.raises(ValueError, match="frame-less approach_dir"):
+        deterministic_select((candidate,), cone="top_down")
+
+
 # --------------------------------------------------------------------------
-# 纪律护栏:regions.py 源码零任务名/物体名(与门禁 grep 同规,自测一份)。
+# 护栏:regions.py 源码不得包含任务名或物体名。
 # --------------------------------------------------------------------------
 def test_no_task_or_object_names_in_source():
-    src = (Path(__file__).resolve().parents[1] / "harness" / "regions.py").read_text("utf-8").lower()
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "demo_graph_lab"
+        / "selection"
+        / "regions.py"
+    ).read_text("utf-8").lower()
     for bad in ("insert_tube", "stack_bowl", "deposit", "push_t",
                 "tube", "bowl", "coin", "rack", "slot"):
         assert bad not in src, f"regions.py 出现禁用词 {bad!r}(任务名/物体名硬失败)"
-
-
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"PASS {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"FAIL {fn.__name__}: {str(e).splitlines()[0]}")
-    print(f"{len(fns) - failed} passed, {failed} failed")

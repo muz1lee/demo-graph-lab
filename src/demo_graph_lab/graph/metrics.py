@@ -1,0 +1,43 @@
+"""Compute extraction metrics against a reviewed gold annotation.
+
+金标格式(report.exportGold 产物): stages{<idx>: {constraints:[{key,verdict,note}],
+acceptance:[...], missing:[{name,args,note}]}}。
+precision = correct/(correct+wrong);recall = correct/(correct+missing)。
+incidental(真但非核心,见 goldset/RUBRIC.md)与 unsure 单列,不进 P/R 分母。
+"""
+
+from __future__ import annotations
+
+from ..common import artifacts
+
+
+def score(gold: dict) -> dict:
+    per_stage = {}
+    tot = {"correct": 0, "incidental": 0, "wrong": 0, "unsure": 0, "missing": 0}
+    for si, g in gold.get("stages", {}).items():
+        c = {"correct": 0, "incidental": 0, "wrong": 0, "unsure": 0,
+             "missing": len(g.get("missing", []))}
+        for field in ("constraints", "acceptance"):
+            for it in g.get(field, []):
+                v = it.get("verdict")
+                if v in c:
+                    c[v] += 1
+        per_stage[si] = c
+        for k in tot:
+            tot[k] += c[k]
+    p_den = tot["correct"] + tot["wrong"]
+    r_den = tot["correct"] + tot["missing"]
+    return {
+        "per_stage": per_stage, "totals": tot,
+        "precision": round(tot["correct"] / p_den, 3) if p_den else None,
+        "recall": round(tot["correct"] / r_den, 3) if r_den else None,
+    }
+
+
+def run(task: str, gold_path: str) -> dict:
+    result = score(artifacts.read_json(gold_path))
+    run_dir = artifacts.latest_run_dir(task)
+    artifacts.write_json(run_dir / "metrics.json", result)
+    print(f"[metrics] {task}: P={result['precision']} R={result['recall']} "
+          f"{result['totals']}")
+    return result

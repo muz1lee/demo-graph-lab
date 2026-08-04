@@ -1,16 +1,11 @@
-"""P0-05:harness.predicates 三值谓词单测(≥20 例)。
+"""三值谓词的纯逻辑测试。
 
 每个可检验谓词至少 PASS/FAIL 各一例 + margin 符号检查;覆盖 UNKNOWN 路径
 (缺参照 / 缺输入 / uncheckable_in_runtime / 词表外 / rim-handle / 谓词内部异常)。
 纯逻辑,无 cv2/网络/LLM。
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness import predicates as P
+from demo_graph_lab.evaluation import predicates as P
 
 
 # ---- 实体快照工具:pos + 可选 quat(wxyz) + 可选 aabb ----
@@ -70,6 +65,10 @@ def test_axis_parallel_fail():
 def test_axis_parallel_unknown():
     p = P.check(C("axis_parallel", axis_a="ghost.z", axis_b="b.z"), {})
     assert p.status == P.UNKNOWN
+
+    only_a = {"a": ent([0, 0, 0], quat=IDENT_Q)}
+    p = P.check(C("axis_parallel", axis_a="a.z", axis_b="ghost.z"), only_a)
+    assert p.status == P.UNKNOWN and p.reason == "ref_unresolved"
 
 
 # ==========================================================================
@@ -266,10 +265,3 @@ def test_ok_property_three_valued():
     assert P.Predicate("x", P.PASS, 0.1).ok is True
     assert P.Predicate("x", P.FAIL, -0.1).ok is False
     assert P.Predicate("x", P.UNKNOWN).ok is None
-
-
-if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print("ok", name)

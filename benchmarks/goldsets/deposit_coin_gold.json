@@ -1,0 +1,206 @@
+{
+  "task": "deposit_coin",
+  "annotator": "claude",
+  "annotated_at": "2026-07-30",
+  "stages": {
+    "0": {
+      "constraints": [
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"coin\"}",
+          "verdict": "correct",
+          "note": "top_down elevation class is core here: coin is propped tilted on a small transparent stand (t0000_00 zoom); gripper descends from above (t0000_50-t0002_00) to pinch the exposed top rim; a side approach at table level would collide with table/stand. Azimuth remains free but cone class is load-bearing."
+        },
+        {
+          "key": "above|{\"obj_a\": \"right_arm\", \"obj_b\": \"coin\"}",
+          "verdict": "correct",
+          "note": "Gripper visibly above coin through approach and at grasp (t0001_00, t0001_50, t0002_00). Being above is required for the top pinch of the propped coin; side positioning would collide with the stand."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"coin\", \"region\": \"top\"}",
+          "verdict": "correct",
+          "note": "Only the upper portion of the coin is exposed above the transparent stand (t0000_00 tight zoom); t0002_00 tight zoom shows pinch on the top rim, stand left behind on table. Grasping middle/bottom would collide with the stand -> region is core, not a free choice."
+        },
+        {
+          "key": "order|{\"stage_sequence\": \"s0:pick<s1:handover<s2:fine_alignment<s3:insertion\"}",
+          "verdict": "correct",
+          "note": "Derived order judged on merits: pick<handover<fine_alignment<insertion is necessary (each stage consumes the previous state; frames confirm this sequence). Issue: sequence string omits s4:cleanup, which does follow insertion in the demo."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "region_grasp|{\"obj\": \"coin\", \"region\": \"top\"}",
+          "verdict": "correct",
+          "note": "t0002_00 tight zoom: coin held at its top rim at gripper tip, lifted clear of the transparent stand which remains on the table."
+        }
+      ],
+      "missing": [
+        {
+          "name": "axis_parallel",
+          "args": "{\"axis_a\": \"right_arm.gripper.close_axis\", \"axis_b\": \"coin.face_normal\"}",
+          "note": "The coin is thin and propped on the stand; the pinch must close across its two faces (t0002_00 tight zoom shows a face-on pinch). If the closing axis lay in the coin plane the knife-edge grasp fails. Not captured by region_grasp/approach_direction."
+        }
+      ]
+    },
+    "1": {
+      "constraints": [
+        {
+          "key": "carry|{\"relation\": \"right_arm holds coin\"}",
+          "verdict": "wrong",
+          "note": "holds=throughout is contradicted by the stage's own final frame: at t0005_00 (frame 125) the right gripper is open and withdrawn while the coin sits in the left fingertip. Relation is valid only until the transfer (~t0004_25, frame 106 = last evidence frame the extractor cites). Correct scope would be 'until handover', not stage-wide throughout."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"side\", \"target\": \"coin\"}",
+          "verdict": "correct",
+          "note": "Left gripper approaches horizontally from the left (t0003_50, t0004_25); side class is core, not incidental azimuth: the coin is held edge-exposed at the right gripper fingertip with faces vertical, so the receiver must come in laterally to pinch the free rim; a top_down approach would collide with the holding gripper and present the wrong closing geometry."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"coin\", \"obj_b\": \"table_surface\"}",
+          "verdict": "correct",
+          "note": "Coin carried well above the table in every frame (t0002_75-t0005_00, handover happens at mid-air meeting point). Contact/scrape with the table during transfer risks dislodging the fingertip pinch."
+        },
+        {
+          "key": "region_grasp|{\"obj\": \"coin\", \"region\": \"middle\"}",
+          "verdict": "incidental",
+          "note": "t0005_00 tight zoom: left gripper pinches the coin's rim at roughly mid-height - 'middle' band is true but is one sample of an equivalence class (any pinch that leaves the future insertion edge free works, e.g. a top-band pinch). Also note vocab ambiguity: radial reading (face center) would be false - the visible grasp is on the rim."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"left_arm\", \"obj_b\": \"coin\"}",
+          "verdict": "correct",
+          "note": "t0004_25/t0005_00 tight zooms: left fingertip closes exactly on the coin disc. For a ~2cm coin held mid-air, centering the receiving gripper on it is necessary for the re-grasp to succeed."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "carry|{\"relation\": \"left_arm holds coin\"}",
+          "verdict": "correct",
+          "note": "t0005_00: coin at left gripper fingertip, right gripper open and retracting - transfer complete at stage end."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"coin\", \"obj_b\": \"table_surface\"}",
+          "verdict": "correct",
+          "note": "t0005_00: coin held high above the table at stage end."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"left_arm\", \"obj_b\": \"coin\"}",
+          "verdict": "correct",
+          "note": "Same evidence as the constraint copy: left fingertip centered on coin at closure (t0005_00 tight zoom)."
+        }
+      ],
+      "missing": [
+        {
+          "name": "axis_parallel",
+          "args": "{\"axis_a\": \"left_arm.gripper.close_axis\", \"axis_b\": \"coin.face_normal\"}",
+          "note": "Same face-pinch necessity for the receiving gripper: t0005_00 tight zoom shows the left fingertip closing across the coin faces at the rim. A closing axis in the coin plane cannot re-grasp the mid-air coin."
+        }
+      ]
+    },
+    "2": {
+      "constraints": [
+        {
+          "key": "center_align|{\"obj_a\": \"coin.center\", \"obj_b\": \"coin_bank.slot\"}",
+          "verdict": "correct",
+          "note": "At t0005_75 the coin projects up-right of the slit, which is consistent with being vertically above it given the camera perspective (scene-left verticals lean right in image); the subsequent near-vertical descent in s3 lands the coin in the slit (t0006_12-t0006_31) without search. XY alignment of coin center over the thin slit is the load-bearing precondition of insertion."
+        },
+        {
+          "key": "above|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0005_56-t0005_75: left gripper carries the coin over the pig's back. Being above the bank at alignment end is required for the top_down entry into the top-surface slit."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "above|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0005_75: coin/gripper directly over the pig bank."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"coin.center\", \"obj_b\": \"coin_bank.slot\"}",
+          "verdict": "correct",
+          "note": "Same evidence as the constraint copy; validated by the clean slit entry in s3."
+        }
+      ],
+      "missing": [
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"left_arm holds coin\"}",
+          "note": "s2 is transport + alignment (coin moves from mid-air handover point to above the bank, t0005_00 to t0005_75) yet the graph has no carry constraint here; dropping the coin during transport fails the task."
+        },
+        {
+          "name": "axis_parallel",
+          "args": "{\"axis_a\": \"coin.plane\", \"axis_b\": \"coin_bank.slot.long_axis\"}",
+          "note": "Core plane alignment for the thin slit: the coin plane must be aligned with the slit's long axis before descent (t0006_31 shows the coin entering exactly in-plane with the slit). center_align alone fixes XY but not yaw about the vertical; a 90-degree-off coin jams on the slit. Prime missing constraint of this extraction."
+        }
+      ]
+    },
+    "3": {
+      "constraints": [
+        {
+          "key": "above|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0005_94-t0006_31: coin stays above the bank throughout the descent until slit entry."
+        },
+        {
+          "key": "inside|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0006_31 tight zoom: amber coin visibly half-inside the slit, edge-first; by t0006_50 it is fully in (slot dark, no coin at fingertip); s4 frames show empty slit and no coin anywhere. Goal predicate of the task."
+        },
+        {
+          "key": "approach_direction|{\"cone\": \"top_down\", \"target\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "Slit is on the bank's top surface; frames show pure top-down descent (t0005_94-t0006_31). Entry from any other cone class is geometrically impossible - core."
+        },
+        {
+          "key": "center_align|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "incidental",
+          "note": "Loosely true (the slit lies near the middle of the pig's back, so the coin is roughly over the bank's center, t0006_12-31), but the load-bearing target is the SLOT, already captured precisely at s2 (coin.center-coin_bank.slot). Aligning to the bank centroid is neither sufficient (could miss the thin slit) nor independently necessary - it is entailed by the slot alignment."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "inside|{\"obj_a\": \"coin\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0006_50: coin fully inside, gripper opening at the slit; s4 t0006_79/t0007_68 confirm empty slit, no coin on table, arms retract without it."
+        }
+      ],
+      "missing": [
+        {
+          "name": "carry",
+          "args": "{\"relation\": \"left_arm holds coin\"}",
+          "note": "Grasp must be maintained until the coin edge is inside the slit: release is visible only at ~t0006_50 after entry (t0006_31 still pinched, half-inserted). Premature release drops the coin onto the pig's back. Graph has no carry/release-timing constraint at insertion."
+        },
+        {
+          "name": "axis_vertical",
+          "args": "{\"axis\": \"coin.plane\"}",
+          "note": "Edge-first entry: the coin plane must be vertical (perpendicular to the bank's top surface) so the bottom edge leads into the slit - t0006_31 tight zoom shows exactly this pose. A flat/tilted coin cannot pass the thin slit even when centered and yaw-aligned."
+        }
+      ]
+    },
+    "4": {
+      "constraints": [
+        {
+          "key": "clearance|{\"obj_a\": \"left_arm\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "Left arm retracts from contact with the pig's back (t0006_50) past its head (t0006_79, visibly close pass) to home (t0007_68); pig is unmoved at the end vs t0000_00, so clearance was kept. Genuinely load-bearing: a sloppy retract path here would topple or drag the light plastic bank."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"right_arm\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "incidental",
+          "note": "True but vacuous: the right arm has been parked at the right table edge since the handover (t0006_50-t0007_68) and its retract path never comes near the bank. It does not shape behavior in this demo, unlike the left-arm clearance."
+        }
+      ],
+      "acceptance": [
+        {
+          "key": "clearance|{\"obj_a\": \"left_arm\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0007_68: left arm at home position at table edge, far from the bank; bank upright and in place."
+        },
+        {
+          "key": "clearance|{\"obj_a\": \"right_arm\", \"obj_b\": \"coin_bank\"}",
+          "verdict": "correct",
+          "note": "t0007_68: right arm at home position, far from the bank. As an end-state check for 'retracted home', this is a meaningful acceptance criterion even though the throughout-clearance above is vacuous."
+        }
+      ],
+      "missing": []
+    }
+  }
+}

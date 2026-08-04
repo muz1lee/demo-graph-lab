@@ -1,0 +1,955 @@
+{
+  "task": "stack_bowls",
+  "instruction": "Stack the three bowls together.",
+  "model": null,
+  "k": 5,
+  "stages": [
+    {
+      "index": 0,
+      "name": "pick",
+      "label": "grasp and lift the top-left green bowl",
+      "start_sec": 1.5,
+      "end_sec": 3.25,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_left",
+        "target": "table"
+      },
+      "constraints": [
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "bowl_left"
+          },
+          "confidence": 0.844,
+          "evidence_frames": [
+            48,
+            59,
+            70
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_left",
+            "region": "rim"
+          },
+          "confidence": 0.68,
+          "evidence_frames": [
+            59,
+            70,
+            81
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "confidence": 0.39,
+          "evidence_frames": [
+            81
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            2,
+            5
+          ],
+          "evidence_frames": []
+        },
+        {
+          "name": "order",
+          "args": {
+            "stage_sequence": "s0:pick<s1:place<s2:pick<s3:stack<s5:pick<s6:stack"
+          },
+          "provenance": "derived",
+          "confidence": 0.5,
+          "votes": "derived",
+          "evidence_frames": []
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_left",
+            "region": "rim"
+          },
+          "holds": "at_end",
+          "confidence": 0.4,
+          "evidence_frames": [
+            81
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "holds": "at_end",
+          "confidence": 0.4,
+          "evidence_frames": [
+            81
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "holds": "at_end",
+          "confidence": 0.34,
+          "evidence_frames": [
+            81
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "bowl_left_grasp_pose",
+          "type": "pose_se3",
+          "solver_hint": "detected rim pose of bowl_left from segmentation",
+          "frame": "world",
+          "votes": "5/5"
+        },
+        {
+          "name": "approach_axis",
+          "type": "axis_3d",
+          "solver_hint": "gravity-aligned descent direction at contact",
+          "frame": "world",
+          "votes": "3/5"
+        },
+        {
+          "name": "bowl_left_center",
+          "type": "point_3d",
+          "solver_hint": "centroid of bowl_left from perception",
+          "frame": "world",
+          "votes": "3/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 1,
+      "name": "place",
+      "label": "place the top-left green bowl on the table",
+      "start_sec": 3.25,
+      "end_sec": 5.0,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_left",
+        "target": "table"
+      },
+      "constraints": [
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "confidence": 0.88,
+          "evidence_frames": [
+            81,
+            92,
+            103,
+            114,
+            125
+          ],
+          "holds": "throughout",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "table"
+          },
+          "confidence": 0.74,
+          "evidence_frames": [
+            103,
+            114,
+            125
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_left.up_axis"
+          },
+          "confidence": 0.6,
+          "evidence_frames": [
+            114,
+            125
+          ],
+          "holds": "at_end",
+          "votes": "4/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_left",
+            "obj_b": "table"
+          },
+          "confidence": 0.87,
+          "evidence_frames": [
+            125
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_left.up_axis"
+          },
+          "confidence": 0.46,
+          "evidence_frames": [
+            125
+          ],
+          "holds": "at_end",
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "place_pose",
+          "type": "pose_se3",
+          "solver_hint": "target rest pose of bowl_left on table surface",
+          "frame": "table",
+          "votes": "3/5"
+        },
+        {
+          "name": "table_surface_height",
+          "type": "scalar",
+          "solver_hint": "table top plane height from depth",
+          "frame": "table",
+          "votes": "3/5"
+        },
+        {
+          "name": "release_condition",
+          "type": "runtime_condition",
+          "solver_hint": "gripper open + bowl resting/stable on table",
+          "frame": "gripper",
+          "votes": "4/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 2,
+      "name": "pick",
+      "label": "grasp and lift the middle-right green bowl",
+      "start_sec": 6.0,
+      "end_sec": 7.0,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_mid_right",
+        "target": null
+      },
+      "constraints": [
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_mid_right",
+            "region": "rim"
+          },
+          "confidence": 0.704,
+          "evidence_frames": [
+            162,
+            169,
+            175
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "bowl_mid_right"
+          },
+          "confidence": 0.484,
+          "evidence_frames": [
+            150,
+            156,
+            162,
+            169
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "table"
+          },
+          "confidence": 0.31,
+          "evidence_frames": [
+            175
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_mid_right",
+            "region": "rim"
+          },
+          "confidence": 0.704,
+          "evidence_frames": [
+            169,
+            175
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "table"
+          },
+          "confidence": 0.53,
+          "evidence_frames": [
+            175
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "bowl_mid_right.grasp_pose",
+          "type": "pose_se3",
+          "solver_hint": "perceived rim pose of bowl_mid_right at contact",
+          "frame": "world",
+          "votes": "3/5"
+        },
+        {
+          "name": "approach_vector",
+          "type": "axis_3d",
+          "solver_hint": "end-effector contact direction before grasp",
+          "frame": "world",
+          "votes": "3/5"
+        },
+        {
+          "name": "lift_height",
+          "type": "scalar",
+          "solver_hint": "vertical displacement of bowl centroid above table",
+          "frame": "world",
+          "votes": "4/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 3,
+      "name": "stack",
+      "label": "stack the middle-right green bowl onto the center-left green bowl",
+      "start_sec": 7.0,
+      "end_sec": 8.8,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_mid_right",
+        "target": "bowl_left"
+      },
+      "constraints": [
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.7,
+          "evidence_frames": [
+            198,
+            209,
+            220
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_mid_right",
+            "region": "rim"
+          },
+          "confidence": 0.684,
+          "evidence_frames": [
+            186,
+            198
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "center_align",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.51,
+          "evidence_frames": [
+            209,
+            220
+          ],
+          "holds": "at_end",
+          "votes": "4/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "carry",
+          "args": {
+            "relation": "gripper_holds bowl_mid_right"
+          },
+          "confidence": 0.5,
+          "evidence_frames": [
+            198,
+            209,
+            220
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.36,
+          "evidence_frames": [
+            209,
+            220
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "bowl_left"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            6
+          ],
+          "evidence_frames": []
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_mid_right.stack_axis"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            6
+          ],
+          "evidence_frames": []
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "holds": "at_end",
+          "confidence": 0.67,
+          "evidence_frames": [
+            209,
+            220
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "center_align",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.52,
+          "evidence_frames": [
+            220
+          ],
+          "holds": "at_end",
+          "votes": "4/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_mid_right.stack_axis"
+          },
+          "confidence": 0.35,
+          "evidence_frames": [
+            220
+          ],
+          "holds": "at_end",
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "bowl_mid_right_grasp_pose",
+          "type": "pose_se3",
+          "solver_hint": "rim grasp pose from perception on bowl_mid_right",
+          "frame": "table",
+          "votes": "4/5"
+        },
+        {
+          "name": "bowl_left_center",
+          "type": "point_3d",
+          "solver_hint": "centroid of target bowl bowl_left",
+          "frame": "table",
+          "votes": "5/5"
+        },
+        {
+          "name": "bowl_mid_right_center",
+          "type": "point_3d",
+          "solver_hint": "centroid of manipulated bowl",
+          "frame": "table",
+          "votes": "3/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 4,
+      "name": "cleanup",
+      "label": "release the bowl and retract the right arm",
+      "start_sec": 8.8,
+      "end_sec": 9.5,
+      "role": "cleanup",
+      "stage_objects": {
+        "manipulated": "bowl_mid_right",
+        "target": "bowl_left"
+      },
+      "constraints": [
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.6,
+          "evidence_frames": [
+            220,
+            224,
+            229,
+            233,
+            238
+          ],
+          "holds": "throughout",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "table"
+          },
+          "confidence": 0.51,
+          "evidence_frames": [
+            229,
+            233,
+            238
+          ],
+          "holds": "at_end",
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "bowl_left"
+          },
+          "confidence": 0.6,
+          "evidence_frames": [
+            220,
+            238
+          ],
+          "holds": "at_end",
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_mid_right",
+            "obj_b": "table"
+          },
+          "confidence": 0.51,
+          "evidence_frames": [
+            238
+          ],
+          "holds": "at_end",
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "retract_pose",
+          "type": "pose_se3",
+          "solver_hint": "right end-effector pose after retraction, clear of bowl stack",
+          "frame": "robot_base",
+          "votes": "3/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 5,
+      "name": "pick",
+      "label": "grasp and lift the top-right green bowl",
+      "start_sec": 10.5,
+      "end_sec": 13.0,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_top_right",
+        "target": null
+      },
+      "constraints": [
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "bowl_top_right"
+          },
+          "confidence": 0.808,
+          "evidence_frames": [
+            262,
+            278,
+            294,
+            309
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_top_right",
+            "region": "rim"
+          },
+          "confidence": 0.684,
+          "evidence_frames": [
+            294,
+            309,
+            325
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "table"
+          },
+          "confidence": 0.36,
+          "evidence_frames": [
+            325
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_top_right",
+            "region": "rim"
+          },
+          "holds": "at_end",
+          "confidence": 0.68,
+          "evidence_frames": [
+            309,
+            325
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "clearance",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "table"
+          },
+          "holds": "at_end",
+          "confidence": 0.35,
+          "evidence_frames": [
+            325
+          ],
+          "votes": "3/5",
+          "provenance": "demo_video"
+        }
+      ],
+      "holes": [
+        {
+          "name": "bowl_top_right.grasp_pose",
+          "type": "pose_se3",
+          "solver_hint": "grasp pose from bowl_top_right rim detection",
+          "frame": "table",
+          "votes": "4/5"
+        },
+        {
+          "name": "bowl_top_right.rim_point",
+          "type": "point_3d",
+          "solver_hint": "rim contact point from bowl segmentation",
+          "frame": "table",
+          "votes": "3/5"
+        },
+        {
+          "name": "approach_axis",
+          "type": "axis_3d",
+          "solver_hint": "top-down descent direction aligned with gravity",
+          "frame": "world",
+          "votes": "4/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    },
+    {
+      "index": 6,
+      "name": "stack",
+      "label": "stack the top-right green bowl onto the green bowl stack",
+      "start_sec": 13.0,
+      "end_sec": 15.5,
+      "role": "core",
+      "stage_objects": {
+        "manipulated": "bowl_top_right",
+        "target": "bowl_mid_right"
+      },
+      "constraints": [
+        {
+          "name": "above",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "bowl_mid_right"
+          },
+          "confidence": 0.86,
+          "evidence_frames": [
+            356,
+            372,
+            388
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "bowl_mid_right"
+          },
+          "confidence": 0.77,
+          "evidence_frames": [
+            356,
+            372,
+            388
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "center_align",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "bowl_mid_right"
+          },
+          "confidence": 0.66,
+          "evidence_frames": [
+            372,
+            388
+          ],
+          "votes": "4/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "bowl_top_right",
+            "region": "rim"
+          },
+          "confidence": 0.63,
+          "evidence_frames": [
+            341,
+            356
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_top_right.stack_axis"
+          },
+          "confidence": 0.53,
+          "evidence_frames": [
+            388
+          ],
+          "votes": "4/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "carry",
+          "args": {
+            "relation": "gripper_holds bowl_top_right"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            3
+          ],
+          "evidence_frames": []
+        },
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "bowl_mid_right"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            3
+          ],
+          "evidence_frames": []
+        }
+      ],
+      "acceptance": [
+        {
+          "name": "inside",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "bowl_mid_right"
+          },
+          "holds": "at_end",
+          "confidence": 0.83,
+          "evidence_frames": [
+            388
+          ],
+          "votes": "5/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "center_align",
+          "args": {
+            "obj_a": "bowl_top_right",
+            "obj_b": "bowl_mid_right"
+          },
+          "holds": "at_end",
+          "confidence": 0.66,
+          "evidence_frames": [
+            388
+          ],
+          "votes": "4/5",
+          "provenance": "demo_video"
+        },
+        {
+          "name": "axis_vertical",
+          "args": {
+            "axis": "bowl_top_right.stack_axis"
+          },
+          "provenance": "derived",
+          "confidence": 0.4,
+          "votes": "derived",
+          "derived_from": [
+            3
+          ],
+          "evidence_frames": []
+        }
+      ],
+      "holes": [
+        {
+          "name": "bowl_top_right_center",
+          "type": "point_3d",
+          "solver_hint": "centroid of bowl_top_right",
+          "frame": "world",
+          "votes": "3/5"
+        },
+        {
+          "name": "bowl_mid_right_center",
+          "type": "point_3d",
+          "solver_hint": "centroid of bowl_mid_right stack base",
+          "frame": "world",
+          "votes": "3/5"
+        },
+        {
+          "name": "seated_condition",
+          "type": "runtime_condition",
+          "solver_hint": "bowl_top_right nested and settled inside bowl_mid_right",
+          "frame": "world",
+          "votes": "3/5"
+        }
+      ],
+      "k_valid": 5,
+      "parse_fail": 0
+    }
+  ]
+}

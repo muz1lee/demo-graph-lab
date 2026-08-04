@@ -5,6 +5,7 @@
 - 读法：先看 §0 索引表，需要理由再往下翻对应条目。
 - 纪律：改动本文件已生效的裁决前，先确认该裁决的「理由」是否已被新证据推翻；推翻要留痕（加一条新裁决并把旧条改为「已撤销」），**不要就地删改**——`archive/ARCHIVE.md` §6.1 的 SUPERSEDED 处理方式即为范例。
 - 状态词只有三个：**生效** / **已撤销** / **待复核**。「裁决生效但代码未兑现」的情况一律写进「影响」栏并汇总在 §3。
+- **迁移注（2026-08-04，D-25）**：本台账随主线收敛迁入重构仓。文中指向旧结构的路径（`harness/*`、`PROGRESS.md`、`experiments/*` 等）经 git 历史可溯（`git show 483a434:<路径>`）；本台账继续作为唯一裁决台账追加维护。
 
 ---
 
@@ -36,6 +37,7 @@
 | D-22 | **D0 判定 = 通过**（CC-0/1′/2′/3 四硬性全过，证据 `experiments/causal/D0_REPORT.md`），执行链解锁。三条处置：① CC-4 拆半——「UNKNOWN<20%」挪 P1 首批真实 episode 观测（挂 D1），「验收模型离线 acc」降级为 evaluator 侧 shadow 任务（P1-12），不作硬前置；② E-A6-swap-static 从 L0 实验批**正式移除**（其测量对象 corrector 已被 D-18 砍除，永不可解锁）；③ E-A1b/E-A1c 的素材缺口随 T-GEN 后置（与 D-21 一致），不卡执行链。附：PI 确认 sim 已停、可自由占用（BLK-2 排期约束消除） | 2026-08-03 | 生效 | 对话裁决 + `experiments/causal/D0_REPORT.md`（✅实测,预注册判据 SIGNED 在先） |
 | D-23 | **采纳方案 v5「Demo-Conditioned Deliberative Execution」**：① 运行时 VLM **回归**（选择深思 + 有界修正 + 验证证据）——**D-01 撤销**，D-18 的「砍 L5」**部分撤销**（修正层以「修正阶梯第②级」形态复活）；② 新增核心模块 = **仿真状态克隆预演**（全场空位）；③ **成本约束撤销**（不得为省成本删掉显然能提升能力的模块）；④ 消融阶梯为论文论证结构，**「有链 vs 无链」成对消融是归因主线**；⑤ 加分轴「demo 流形上的有界玩耍」留二篇接口；⑥ 背景 = 八篇精读证据整合 | 2026-08-03 | **生效（②部分撤销：D-24）** | 对话裁决（本文件为首个文档出处）+ 八篇论文实测数字（`PROPOSAL.md` v5 §3/§4） |
 | D-24 | **技术栈冻结**（新建 `docs/STACK.md` 为唯一选型权威源）四项拍板：① 抓取候选**主源 = GraspNet**（qwen_dof 降备用/对照）；② **深度/点云链立即建设**；③ **D-23② 仿真状态克隆预演砍除**——下游可行性回归 `compat(c,c')` 几何谓词（v4 §2.1 采样近似），由 T-BP 承载；④ 运行时 VLM = **OpenRouter Opus**（`anthropic/claude-opus-4.8`）。附立两条纪律：**冻结纪律**（改选型须新增裁决）+ **最小验证门纪律**（上机任务必带 touch-test 级 infra 验证） | 2026-08-03 | 生效 | 对话裁决（本文件为首个文档出处）+ `harness/EP2_REPORT.md`（✅实测三层 infra bug） |
+| D-25 | **主线收敛**：重构仓 `refactor/active-path-cleanup` merge 回 main（整树采纳 + 最小搬运：STACK / 本台账 / archive 四件）；旧结构停止维护、经第一父提交可溯；5090 唯一 checkout = `demo-graph-lab-workflow` | 2026-08-04 | 生效 | 对话裁决 + 本 merge commit（EP-1/EP-2 代码修复已逐一核实存在于重构代码） |
 
 ---
 
@@ -176,6 +178,17 @@
 ---
 
 ## 2. 工程与流程裁决
+
+### D-25 主线收敛：重构仓 `refactor/active-path-cleanup` merge 回 main，旧结构停止维护
+
+| | |
+|---|---|
+| **裁决** | `refactor/active-path-cleanup`（整仓重构，代码收敛至 `src/demo_graph_lab/`）merge 回 `main`，此后 **main 即唯一主线**。旧结构（`harness/`、`method/`、`oracle/` 等）不再出现在工作树，全部内容经本 merge 的第一父提交可溯：`git show 483a434:<旧路径>`。**最小搬运原则（用户原话「非必要不搬运」）**：仅迁 `docs/STACK.md`（选型冻结，现行有效）、本台账、`docs/archive/{PROPOSAL_v4, PROPOSAL_v5, GENERATOR_SPEC, EP2_REPORT}`。5090 侧唯一维护 checkout = `/home/knowin-sim/demo-graph-lab-workflow`。 |
+| **日期** | 2026-08-04（用户拍板） |
+| **理由** | ① 重构仓已吸收 main 独有的全部代码增量——EP-1/EP-2 四个修复（`_as_numbers` 力解析、`CLAW_TIP_DZ=-0.010` 重标、MP 后 `mp_refine` 伺服补残差、夹爪 0=闭/100=开 语义、`grasp_at(axis=)` 长轴正交抓取）逐一核实存在于 `src/demo_graph_lab/execution/`，main 对重构仓无代码增量；② 双结构并行维护成本高，两套 docs 的 file:line 互指已断链；③ merge 保留双亲历史，「不搬运」零损失。 |
+| **影响** | ① 旧 docs（OVERVIEW/TODO/STATUS/PROGRESS/EXECUTION/ARCHITECTURE、archive v2/v3、`experiments/causal/D0_REPORT.md` 等）不在工作树，引用时走 git 历史；② `AGENTS.md` 文档规则增补：本台账与 `docs/archive/` 适用「只追加/加状态块、不删正文」（D-16 延续），其余工程文档仍按「过期直接删」；③ 迁入文档内的旧路径按历史行号理解（各文件顶部有迁移注）；④ D-24 的选型定案与两条纪律不受影响，继续有效；⑤ `EP1_REPORT.md` 未随迁（已于 `1103ec4` 并入 EP-2 报告线，历史可取）。 |
+| **状态** | 生效（本 merge commit） |
+| **证据** | 本 merge commit 双亲 = 旧 main（`483a434`）× 重构仓（`c539be9`）；EP 修复核实点 = `src/demo_graph_lab/execution/oracle_runtime.py:38,139,627,695` 与 `src/demo_graph_lab/policy/api.py:26`；用户裁决对话（2026-08-04）。 |
 
 ### D-06 主仓迁内网 Gitea；GitHub `origin` 停止维护
 

@@ -1,30 +1,25 @@
-"""P0-14:lift/lower_until 去特权——方法路径控制回路零 oracle 停止判据(破口①)。
+"""lift/lower_until 的控制回路不得使用 oracle 停止判据。
 
-设计依据:docs/TODO.md §2 P0-14、§1.1 环 4、docs/DECISIONS.md D-04(GT 防火墙:
-特权量只准进 evaluator/probe 三类隔离用途,不得进方法路径的控制回路)。
+GT 防火墙要求特权量不得进入 lift/lower_until 的停止判据。
 
-本文件的验收本体 = **方法路径看不见特权位移**:
-  ① lift 的 attach 判据只吃非特权代理(get_xquat 位移 + get_ee_extforce 残余负载);
+本文件验证 **方法路径看不见特权位移**:
+  - lift 的 attach 判据只吃非特权代理(get_xquat 位移 + get_ee_extforce 残余负载);
      构造「只有 _entities(特权实体态)有位移、get_xquat 无位移」的假 rt,
      断言 lift **不因特权位移判成 attached='likely'**(方法路径盲于特权量,不得靠它成功)。
-  ② lower_until 在假接触力信号下正确以 contact_force 停(非特权)。
-  ③ stop_kind=predicate(需特权谓词)→ UNSUPPORTED 记账 + 保守停止,**方法路径零 probes()**。
+  - lower_until 在假接触力信号下正确以 contact_force 停(非特权)。
+  - stop_kind=predicate(需特权谓词)→ UNSUPPORTED 记账 + 保守停止,**方法路径零 probes()**。
 
 风格对齐 tests/test_contract_params.py:纯逻辑、离线、不触 sim/网络/LLM。
-用真 KWRuntime 走真代码路径,只把碰 sim 的底层动作桩掉并记录。
+用真 OracleRuntime 走代码路径,只把碰 sim 的底层动作桩掉并记录。
 """
 
-import sys
 import time
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness.kwadapter import KWRuntime, LIFT_LOAD_FORCE_N
+from demo_graph_lab.execution.oracle_runtime import LIFT_LOAD_FORCE_N, OracleRuntime
 
 
 # --------------------------------------------------------------------------
-# 离线 KWRuntime:
+# 离线 OracleRuntime:
 #   - _entities 注入「特权实体态」缓存(gate/evaluator 侧合法数据源);
 #   - 方法原语(lift/lower_until)碰 sim 的底层动作全部桩掉;
 #   - get_xquat 位移与 get_ee_extforce 力值由参数控制(非特权信号)。
@@ -45,7 +40,7 @@ def _rt(entities=None, force=0.0, ee_z_trajectory=None, probes=None):
     probes          : probes() 返回值(仅用于探测方法路径是否偷调它;应全程为空触碰)。
     """
     g = {"stages": [{"index": 0, "name": "lift", "holes": [], "stage_objects": {}}]}
-    rt = KWRuntime(g)
+    rt = OracleRuntime(g)
     ents = entities if entities is not None else {}
     rt._ents_cache = (time.time() + 1e6, ents)
 
@@ -67,7 +62,7 @@ def _rt(entities=None, force=0.0, ee_z_trajectory=None, probes=None):
     rt._verify_moved = lambda *a, **kw: (True, 0.0, 0.0)
     rt._park_idle_arm = lambda: None
 
-    # probes 探针:一旦方法路径调用即置真(D-04 断言用)。
+    # probes 探针:一旦方法路径调用即置真。
     rt._probes_touched = {"v": False}
     _p = probes or []
 
@@ -93,7 +88,7 @@ def _find(rt, op):
 
 
 # ==========================================================================
-# ① 核心判据(TODO 原文):只有 _entities 有位移、get_xquat 无位移的假 rt
+# 只有 _entities 有位移、get_xquat 无位移的假 runtime。
 #    → 方法路径看不见特权位移,lift 不得判成 attached='likely'。
 # ==========================================================================
 def test_lift_blind_to_privileged_displacement():
@@ -143,19 +138,20 @@ def test_lift_empty_when_ee_rose_but_no_load():
 
 
 def test_lift_never_calls_privileged_probes():
-    """lift 的控制回路全程不得触碰 probes()(D-04:特权量不进方法路径)。"""
+    """lift 的控制回路全程不得触碰 privileged probes()。"""
     rt = _rt(entities={"tube": _entity()}, force=10.0)
     rt.lift("tube")
     assert not rt._probes_touched["v"], "lift 方法路径不得调用 probes()"
 
 
 # ==========================================================================
-# ② lower_until 在非特权接触力信号下正确停。
+# lower_until 在非特权接触力信号下正确停。
 # ==========================================================================
 def test_lower_until_stops_on_fake_contact_force():
     """给高力值(> CONTACT_FORCE_N)→ 应以非特权 contact_force 立即停,不走满预算。"""
     rt = _rt(force=57.0)
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     done = _find(rt, "lower_until_done")
     assert done and done[0]["reason"] == "contact_force"
     assert done[0]["steps"] == 1, "首步即触发接触力应立刻停"
@@ -164,21 +160,23 @@ def test_lower_until_stops_on_fake_contact_force():
 def test_lower_until_contact_never_calls_probes():
     """lower_until 走非特权判据时,方法路径不得触碰 probes()。"""
     rt = _rt(force=57.0)
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     assert not rt._probes_touched["v"], "lower_until contact 判据不得调 probes()"
 
 
 # ==========================================================================
-# ③ predicate 类(需特权谓词)→ UNSUPPORTED 记账 + 保守停止,零 probes()。
+# predicate 类(需特权谓词)→ UNSUPPORTED 记账 + 保守停止,零 probes()。
 # ==========================================================================
 def test_lower_until_predicate_kind_unsupported_no_probes():
-    """stop_kind=predicate 去特权后无非特权实现:
+    """stop_kind=predicate 没有可用的非特权实现时:
     - 记 unsupported_param(param=lower_until.stop_kind);
     - 退回 contact/plateau(此处高力值 → contact_force 停);
     - **绝不调 probes()**(即便 probes 已满足也不看)。"""
     rt = _rt(force=57.0, probes=[{"label": "root_in_bbox", "passed": True},
                                  {"label": "axis_aligned", "passed": True}])
-    rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "predicate"})
     us = [c for c in _find(rt, "unsupported_param")
           if c["param"] == "lower_until.stop_kind"]
     assert us, "predicate 类去特权后应记 UNSUPPORTED"
@@ -186,7 +184,7 @@ def test_lower_until_predicate_kind_unsupported_no_probes():
     done = _find(rt, "lower_until_done")[0]
     assert done["reason"] == "contact_force", "应退回非特权 contact 判据"
     assert done["reason"] != "predicates"
-    assert not rt._probes_touched["v"], "去特权后方法路径绝不调 probes()(D-04)"
+    assert not rt._probes_touched["v"], "非特权方法路径不得调用 probes()"
 
 
 def test_lower_until_predicate_only_no_contact_goes_to_budget():
@@ -195,7 +193,8 @@ def test_lower_until_predicate_only_no_contact_goes_to_budget():
     rt = _rt(force=0.5, ee_z_trajectory=[0.9, 0.7, 0.5, 0.3, 0.1],
              probes=[{"label": "root_in_bbox", "passed": True},
                      {"label": "axis_aligned", "passed": True}])
-    rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "predicate"})
     done = _find(rt, "lower_until_done")[0]
     assert done["reason"] != "predicates", "去特权后不得以特权谓词停"
     assert not rt._probes_touched["v"]

@@ -1,0 +1,46 @@
+{
+  "task": "planning_replay_grasp",
+  "stages": [
+    {
+      "index": 0,
+      "name": "grasp",
+      "stage_objects": {
+        "manipulated": "object",
+        "target": null
+      },
+      "constraints": [
+        {
+          "name": "region_grasp",
+          "args": {
+            "obj": "object",
+            "region": "upper_body"
+          },
+          "provenance": "demo_video"
+        },
+        {
+          "name": "approach_direction",
+          "args": {
+            "cone": "top_down",
+            "target": "object"
+          },
+          "provenance": "demo_video"
+        }
+      ],
+      "acceptance": [],
+      "holes": [
+        {
+          "name": "grasp_pose",
+          "type": "pose_se3",
+          "frame": "robot_base",
+          "solver_hint": "candidate grasp pose"
+        },
+        {
+          "name": "object_axis",
+          "type": "axis_3d",
+          "frame": "robot_base",
+          "solver_hint": "perceived object axis"
+        }
+      ]
+    }
+  ]
+}

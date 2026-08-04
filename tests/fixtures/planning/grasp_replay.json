@@ -1,0 +1,153 @@
+{
+  "case_id": "synthetic_grasp_demo_vs_no_demo",
+  "source_kind": "synthetic_contract_fixture",
+  "stage_index": 0,
+  "observation": {
+    "observation_id": "obs-synthetic-001",
+    "captured_at_s": 10.0,
+    "frame": "robot_base",
+    "calibration_ref": "calibration/synthetic.json",
+    "sensor_refs": [
+      "rgb/synthetic-001.png",
+      "depth/synthetic-001.npy"
+    ],
+    "robot_state": {
+      "joint_positions": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "gripper_positions": [0.0],
+      "end_effector_frame": "robot_base",
+      "end_effector_poses": {},
+      "evidence_ref": "proprioception/synthetic-001.json"
+    },
+    "objects": [
+      {
+        "object_id": "object",
+        "frame": "robot_base",
+        "pose": [0.45, 0.0, 0.75, 0.0, 0.0, 0.0, 1.0],
+        "axis": [0.0, 0.0, 1.0],
+        "extent": {
+          "min": [0.42, -0.03, 0.65],
+          "max": [0.48, 0.03, 0.85]
+        },
+        "evidence_refs": ["perception/object-synthetic-001.json"]
+      }
+    ]
+  },
+  "candidates": [
+    {
+      "candidate_id": "c00",
+      "observation_id": "obs-synthetic-001",
+      "hole_values": {
+        "grasp_pose": {
+          "value": [0.45, 0.0, 0.69, 0.0, 0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        },
+        "object_axis": {
+          "value": [0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        }
+      },
+      "features": {
+        "height_fraction": 0.2,
+        "approach_tilt_deg": 90.0
+      },
+      "provenance": {},
+      "evidence_refs": ["candidate_cards/c00.json"],
+      "hard_checks": [
+        {"check": "reachability", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c00-reachability.json"]},
+        {"check": "collision_free", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c00-collision.json"]},
+        {"check": "gripper_width", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c00-width.json"]}
+      ]
+    },
+    {
+      "candidate_id": "c01",
+      "observation_id": "obs-synthetic-001",
+      "hole_values": {
+        "grasp_pose": {
+          "value": [0.45, 0.0, 0.82, 0.0, 0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        },
+        "object_axis": {
+          "value": [0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        }
+      },
+      "features": {
+        "height_fraction": 0.85,
+        "approach_tilt_deg": 0.0
+      },
+      "provenance": {},
+      "evidence_refs": ["candidate_cards/c01.json"],
+      "hard_checks": [
+        {"check": "reachability", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c01-reachability.json"]},
+        {"check": "collision_free", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c01-collision.json"]},
+        {"check": "gripper_width", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c01-width.json"]}
+      ]
+    },
+    {
+      "candidate_id": "c02",
+      "observation_id": "obs-synthetic-001",
+      "hole_values": {
+        "grasp_pose": {
+          "value": [0.46, 0.0, 0.82, 0.0, 0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        },
+        "object_axis": {
+          "value": [0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        }
+      },
+      "features": {
+        "height_fraction": 0.85,
+        "approach_tilt_deg": 90.0
+      },
+      "provenance": {},
+      "evidence_refs": ["candidate_cards/c02.json"],
+      "hard_checks": [
+        {"check": "reachability", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c02-reachability.json"]},
+        {"check": "collision_free", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c02-collision.json"]},
+        {"check": "gripper_width", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c02-width.json"]}
+      ]
+    },
+    {
+      "candidate_id": "c03",
+      "observation_id": "obs-synthetic-001",
+      "hole_values": {
+        "grasp_pose": {
+          "value": [0.45, 0.01, 0.84, 0.0, 0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        },
+        "object_axis": {
+          "value": [0.0, 0.0, 1.0],
+          "frame": "robot_base",
+          "calibration_ref": "calibration/synthetic.json",
+          "object_id": "object"
+        }
+      },
+      "features": {
+        "height_fraction": 0.95,
+        "approach_tilt_deg": 0.0
+      },
+      "provenance": {},
+      "evidence_refs": ["candidate_cards/c03.json"],
+      "hard_checks": [
+        {"check": "reachability", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c03-reachability.json"]},
+        {"check": "collision_free", "status": "FAIL", "reason": "synthetic_collision", "evidence_refs": ["checks/c03-collision.json"]},
+        {"check": "gripper_width", "status": "PASS", "reason": "synthetic_pass", "evidence_refs": ["checks/c03-width.json"]}
+      ]
+    }
+  ]
+}
