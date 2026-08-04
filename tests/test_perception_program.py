@@ -1,12 +1,14 @@
-"""PerceptionProgram operator registry and contract tests."""
+"""PerceptionProgram contract and fake dry-run tests."""
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from demo_graph_lab.graph import vocab
+from demo_graph_lab.perception.fake_runtime import FakePerceptionRuntime
 from demo_graph_lab.perception.program import (
     ANCHOR,
     GEOMETRY,
@@ -215,3 +217,77 @@ def test_numeric_literal_rule_matches_the_policy_side_rule():
                   {"field": 2}, [], {}]:
         assert perception(value) is policy(value), value
 
+# --------------------------------------------------------------------------
+# 干跑:正常、注入失败与 all-or-nothing。
+# --------------------------------------------------------------------------
+def test_dry_run_walks_each_chain_and_publishes_its_holes():
+    doc = _doc([_opening_program(), _axis_program()])
+    result = FakePerceptionRuntime(_graph()).run(doc)
+
+    assert result["filled"] == {
+        "s0.opening_center": "center",
+        "s0.opening_axis": "axis",
+        "s0.peg_long_axis": "axis",
+    }
+    assert result["unfilled"] == []
+    assert [entry["op"] for entry in result["log"]] == [
+        "localize", "segment", "fit_opening", "publish", "publish",
+        "localize", "segment", "crop_points", "fit_axis", "publish",
+    ]
+    assert {entry["program"] for entry in result["log"]} == {"p0_0", "p0_1"}
+    # 链的根只有 anchor,查询文本不在程序里;中间步骤只拿到不透明 handle。
+    assert result["log"][0]["anchor"] == _OPENING_ANCHOR
+    assert result["log"][1]["input"] == "<BBOX:p0_0.localize>"
+    assert result["log"][2]["input"] == "<MASK:p0_0.segment>"
+    assert result["log"][3]["handle"] == "<GEOMETRY:p0_0.fit_opening>"
+    assert result["log"][8]["input"] == "<POINTS:p0_1.crop_points>"
+
+
+def test_injected_failure_is_all_or_nothing_and_local_to_one_program():
+    doc = _doc([_opening_program(), _axis_program()])
+    runtime = FakePerceptionRuntime(_graph(), fail_at=(0, "fit_opening"))
+    result = runtime.run(doc)
+
+    # 失败程序的两个洞一个都不填;后一个程序不受影响。
+    assert result["filled"] == {"s0.peg_long_axis": "axis"}
+    assert result["unfilled"] == ["s0.opening_axis", "s0.opening_center"]
+    assert [entry["op"] for entry in result["log"]] == [
+        "localize", "segment", "fail",
+        "localize", "segment", "crop_points", "fit_axis", "publish",
+    ]
+    assert result["log"][2] == {
+        "op": "fail", "program": "p0_0", "stage": 0, "at": "fit_opening"}
+
+
+def test_failure_at_the_first_operator_publishes_nothing():
+    doc = _doc([_opening_program()])
+    result = FakePerceptionRuntime(_graph(), fail_at=(0, "localize")).run(doc)
+    assert result["filled"] == {}
+    assert result["unfilled"] == ["s0.opening_axis", "s0.opening_center"]
+    assert [entry["op"] for entry in result["log"]] == ["fail"]
+
+
+def test_dry_run_refuses_an_unvalidated_document_and_a_dead_injection():
+    broken = _doc([dict(_opening_program(), chain=["localize", "segment"])])
+    with pytest.raises(ValueError, match="PerceptionProgram validation failed"):
+        FakePerceptionRuntime(_graph()).run(broken)
+    runtime = FakePerceptionRuntime(_graph(), fail_at=(0, "crop_points"))
+    with pytest.raises(ValueError, match="injected failure never fired"):
+        runtime.run(_doc([_opening_program()]))
+
+# --------------------------------------------------------------------------
+# 护栏:感知层源码不得包含任务名或物体名(与 tests/test_regions.py 同规)。
+# 感知程序 DSL 是通用模块,任务专属信息只能经 graph 文档进入。
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("module", ["program.py", "fake_runtime.py"])
+def test_no_task_or_object_names_in_source(module):
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "demo_graph_lab"
+        / "perception"
+        / module
+    ).read_text("utf-8").lower()
+    for bad in ("insert_tube", "stack_bowl", "deposit", "push_t",
+                "tube", "bowl", "coin", "rack", "slot"):
+        assert bad not in src, f"{module} 出现禁用词 {bad!r}(任务名/物体名硬失败)"
