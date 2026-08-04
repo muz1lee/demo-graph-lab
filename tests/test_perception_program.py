@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from demo_graph_lab.graph import vocab
-from demo_graph_lab.perception.fake_runtime import FakePerceptionRuntime
+from demo_graph_lab.perception.fake_runtime import (
+    FakePerceptionRuntime,
+    qualified_hole,
+)
 from demo_graph_lab.perception.program import (
     ANCHOR,
     GEOMETRY,
@@ -16,10 +19,13 @@ from demo_graph_lab.perception.program import (
     PROVIDABLE_RESOLVERS,
     ROOT_OPERATOR,
     SCHEMA,
+    coverage_by_stage,
     program_id,
     validate_perception_program,
 )
 
+
+_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "graphs"
 
 _OPENING_ANCHOR = {"object_id": "fixture", "part": "hole", "instance": "center"}
 _SIDE_ANCHOR = {"object_id": "fixture", "part": "hole", "instance": "side"}
@@ -27,6 +33,10 @@ _PART_ANCHOR = {"object_id": "peg", "part": "whole"}
 
 _OPENING_CHAIN = ["localize", "segment", "fit_opening"]
 _AXIS_CHAIN = ["localize", "segment", "crop_points", "fit_axis"]
+
+
+def _load(name: str):
+    return json.loads((_FIXTURE_ROOT / name).read_text())
 
 
 def _graph() -> dict:
@@ -217,6 +227,7 @@ def test_numeric_literal_rule_matches_the_policy_side_rule():
                   {"field": 2}, [], {}]:
         assert perception(value) is policy(value), value
 
+
 # --------------------------------------------------------------------------
 # 干跑:正常、注入失败与 all-or-nothing。
 # --------------------------------------------------------------------------
@@ -274,6 +285,74 @@ def test_dry_run_refuses_an_unvalidated_document_and_a_dead_injection():
     runtime = FakePerceptionRuntime(_graph(), fail_at=(0, "crop_points"))
     with pytest.raises(ValueError, match="injected failure never fired"):
         runtime.run(_doc([_opening_program()]))
+
+
+# --------------------------------------------------------------------------
+# 表达力:真实 27 洞 fixture 是本轮的判据。
+# --------------------------------------------------------------------------
+def test_insert_tubes_fixture_covers_every_perception_geometry_hole():
+    graph = _load("insert_tubes.graph.json")
+    doc = _load("insert_tubes.perception_program.json")
+
+    assert validate_perception_program(doc, graph) == []
+    assert coverage_by_stage(doc, graph) == [
+        {"stage": 0,
+         "covered": ["tube_mid_long_axis"],
+         "uncovered": ["tube_mid_grasp_pose"]},
+        {"stage": 1,
+         "covered": ["rack_center_hole_axis", "rack_center_hole_center",
+                     "tube_mid_long_axis"],
+         "uncovered": []},
+        {"stage": 2,
+         "covered": ["tube_right_long_axis"],
+         "uncovered": ["tube_right_grasp_pose"]},
+        {"stage": 3,
+         "covered": ["rack_right_hole_axis", "rack_right_hole_center",
+                     "tube_right_long_axis"],
+         "uncovered": ["tube_right_grasp_pose"]},
+        {"stage": 4,
+         "covered": ["rack_left_hole_center", "tube_left_long_axis"],
+         "uncovered": ["tube_left_grasp_pose"]},
+        {"stage": 5,
+         "covered": ["rack_left_hole_axis", "rack_left_hole_center"],
+         "uncovered": ["retract_pose", "tube_left_long_axis"]},
+    ]
+
+    # 覆盖面恰好是 part_center / part_axis / principal_axis 三类洞的全集;
+    # 未覆盖的每一个洞都由 grasp_candidate 或 motion_derived 解释。
+    covered = {
+        (stage["index"], hole["name"])
+        for stage in graph["stages"] for hole in stage["holes"]
+        if hole.get("resolver") in PROVIDABLE_RESOLVERS
+    }
+    report = {entry["stage"]: entry for entry in coverage_by_stage(doc, graph)}
+    assert covered == {
+        (index, name) for index, entry in report.items()
+        for name in entry["covered"]
+    }
+    assert len(covered) == 12
+    for stage in graph["stages"]:
+        for hole in stage["holes"]:
+            if hole["name"] in report[stage["index"]]["uncovered"]:
+                assert hole["resolver"] in {"grasp_candidate", "motion_derived"}
+
+
+def test_insert_tubes_fixture_dry_runs_to_completion():
+    graph = _load("insert_tubes.graph.json")
+    doc = _load("insert_tubes.perception_program.json")
+    result = FakePerceptionRuntime(graph).run(doc)
+
+    expected = {
+        qualified_hole(program["stage"], entry["hole"]): entry["field"]
+        for program in doc["programs"] for entry in program["provides"]
+    }
+    assert result["filled"] == expected
+    assert len(result["filled"]) == 12
+    assert result["unfilled"] == []
+    assert sum(entry["op"] == "publish" for entry in result["log"]) == 12
+    assert {entry["op"] for entry in result["log"]} == {
+        "localize", "segment", "fit_opening", "crop_points", "fit_axis", "publish"}
+
 
 # --------------------------------------------------------------------------
 # 护栏:感知层源码不得包含任务名或物体名(与 tests/test_regions.py 同规)。

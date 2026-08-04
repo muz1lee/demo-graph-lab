@@ -1,0 +1,72 @@
+{
+  "schema": "demo_graph_lab.perception_program.v1",
+  "task": "insert_tubes",
+  "programs": [
+    {
+      "stage": 0,
+      "chain": ["localize", "segment", "crop_points", "fit_axis"],
+      "provides": [
+        {"field": "axis", "hole": "tube_mid_long_axis"}
+      ]
+    },
+    {
+      "stage": 1,
+      "chain": ["localize", "segment", "fit_opening"],
+      "provides": [
+        {"field": "center", "hole": "rack_center_hole_center"},
+        {"field": "axis", "hole": "rack_center_hole_axis"}
+      ]
+    },
+    {
+      "stage": 1,
+      "chain": ["localize", "segment", "crop_points", "fit_axis"],
+      "provides": [
+        {"field": "axis", "hole": "tube_mid_long_axis"}
+      ]
+    },
+    {
+      "stage": 2,
+      "chain": ["localize", "segment", "crop_points", "fit_axis"],
+      "provides": [
+        {"field": "axis", "hole": "tube_right_long_axis"}
+      ]
+    },
+    {
+      "stage": 3,
+      "chain": ["localize", "segment", "fit_opening"],
+      "provides": [
+        {"field": "center", "hole": "rack_right_hole_center"},
+        {"field": "axis", "hole": "rack_right_hole_axis"}
+      ]
+    },
+    {
+      "stage": 3,
+      "chain": ["localize", "segment", "crop_points", "fit_axis"],
+      "provides": [
+        {"field": "axis", "hole": "tube_right_long_axis"}
+      ]
+    },
+    {
+      "stage": 4,
+      "chain": ["localize", "segment", "fit_opening"],
+      "provides": [
+        {"field": "center", "hole": "rack_left_hole_center"}
+      ]
+    },
+    {
+      "stage": 4,
+      "chain": ["localize", "segment", "crop_points", "fit_axis"],
+      "provides": [
+        {"field": "axis", "hole": "tube_left_long_axis"}
+      ]
+    },
+    {
+      "stage": 5,
+      "chain": ["localize", "segment", "fit_opening"],
+      "provides": [
+        {"field": "center", "hole": "rack_left_hole_center"},
+        {"field": "axis", "hole": "rack_left_hole_axis"}
+      ]
+    }
+  ]
+}
