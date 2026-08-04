@@ -67,6 +67,8 @@ approach → grasp_at → lift → transport → align → lower_until → relea
 
 计划中的运行时 VLM 只能做有限的离散选择、修正建议和视觉证据描述，不能输出连续控制量。完整接口见 [docs/API.md](docs/API.md)。
 
+当前 backend model 只在离线流程中参与：无 trace 时提议阶段切分、建立全视频对象 registry、逐阶段提取约束，以及把 graph 编译成高层 policy。在线候选选择、运动执行和 gate 目前都不调用模型。这里的 backend model 指通过 `common/llm.py` 调用的生成式 VLM/LLM；抓取检测器等感知模型属于非特权感知层，不在这个定义中。
+
 ## 快速开始
 
 只跑测试：

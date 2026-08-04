@@ -2,20 +2,82 @@
 
 这个项目有三层 API。最重要的规则是：VLM 只看高层动作，不看底层数值控制；是否成功由独立 gate 判断。
 
+这里的 backend model 专指通过 `common/llm.py` 调用的生成式 VLM/LLM。对象检测、分割、抓取 proposal 等模型属于非特权感知层，不等同于 backend model。
+
+## Backend model 在 workflow 中的位置
+
+当前 workflow 分成三条相互隔离的路径：
+
 ```text
-VLM / 生成的 policy
-        │
-        ▼
-高层 Runtime API
-        │
-        ▼
-可信 runner、填洞与 gate
-        │
-        ▼
-运动规划与底层 pipeline
-        │
-        ▼
-机器人
+离线语义路径：demo → backend model → graph → policy
+在线方法路径：sensor → perception / candidates → selection → control
+独立评测路径：observation → predicates / gates → verdict
+```
+
+### 当前已经实现的调用
+
+| 步骤 | Backend model 的输入 | 输出 | 调用条件 |
+|---|---|---|---|
+| 阶段切分 | 全视频采样帧、任务指令 | `stages_proposed.json` | 只有上游 trace 缺失时调用 |
+| 对象 registry | 全视频采样帧、trace 中的对象别名 | `objects.json` | 每个 demo 一次 |
+| 约束抽取 | 单阶段关键帧、指令、对象 registry | `constraints / acceptance / holes` | 每阶段调用 `k` 次，再确定性合并 |
+| Policy 合成 | 已抽取 graph、`RuntimeAPI` 源码 | 高层 stage handlers | 每个 graph 单独调用，随后静态检查和 fake dry-run |
+
+视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。在线 hole 求解、候选排序、运动执行、predicate 和 gate 目前也没有 backend model 调用。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
+
+推荐的完整离线顺序是：
+
+```text
+video + optional trace
+  → deterministic ingest
+  → trace stage split；无 trace 才由 VLM 提议
+  → deterministic keyframes
+  → VLM object registry
+  → VLM per-stage graph extraction
+  → deterministic merge / enrich / validate
+  → VLM policy compilation
+  → AST check + fake dry-run
+```
+
+Backend 输出始终是不可信 proposal：结构化结果必须通过词表和 schema 校验，生成代码必须通过 AST 检查和 dry-run。当前 graph 还没有显式声明 primitive sequence 和 hole-to-argument wiring，所以所谓 policy 编译实际上包含高层 policy synthesis：backend 会决定调用哪些高层动作、动作顺序以及 handle 如何接线。它每个 graph 只运行一次，episode 和选择算法对照中必须冻结输出。如果这一步成为主要不稳定源，可以让 graph 显式携带 action wiring，再换成确定性模板编译器，不影响候选选择这一研究主张。
+
+### 当前建议的在线顺序
+
+第一条非特权 baseline 不调用 backend model：
+
+```text
+RGB-D / robot state
+  → perception and grasp candidates
+  → reachability / collision / width hard filter
+  → deterministic region / cone ranking
+  → solve() 返回选中 bundle 的 opaque handles
+  → high-level policy
+  → trusted control
+  → independent gate
+```
+
+这样可以先单独验证候选覆盖、frame transform、抓取与运动、以及 gate 是否可靠。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection，不交给 backend model。
+
+实验需要区分两种模式：component mode 固定人工检查过的 graph 和 policy，只研究候选与执行；end-to-end mode 才重新从 demo 调用 backend 生成 graph 和 policy。选择算法对照必须共享同一 graph、policy、候选和执行预算。
+
+```text
+离线：backend VLM/LLM → graph + policy.py
+
+在线：生成的 policy.py
+          │
+          ▼
+      高层 Runtime API
+          │
+          ▼
+    可信 runner 与填洞
+          │
+          ▼
+   运动规划与底层 pipeline
+          │
+          ▼
+        机器人
+
+独立：动作前后观测 → predicates / gates → verdict
 ```
 
 ## 1. 给生成 policy 的高层 API
@@ -47,6 +109,8 @@ Handle 只允许传给后续高层动作。生成 policy 不能读取其中的�
 `push` 当前没有可靠实现，因此不属于可用 API。需要支持推动任务时，应先实现和测试底层动作，再把它加入高层契约。
 
 生成 policy 不能调用 `verify()` 或自行返回成功。阶段是否通过只由 runner 和 gate 决定。
+
+这里的“独立”指 backend 不输出 `PASS / FAIL`，不表示验收规格完全与 backend 无关：当前 constraint extractor 会提议 `acceptance`，确定性 gate 再执行这些检查。正式任务成功必须另外使用固定的人工或 benchmark evaluator，不能只用模型自己提议的 acceptance，否则过弱的验收条件会让结果虚高。
 
 ## 2. 可信运行层
 
@@ -91,6 +155,8 @@ HTTP 接受请求不代表机器人到位。控制结果必须通过关节、末
 ## 4. 计划中的运行时 VLM 接口
 
 以下接口尚未实现。它们会放在独立模块中，不加入生成 policy 的 `RuntimeAPI`。
+
+它们不是当前 baseline 的依赖。加入顺序是：先打通无运行时模型的完整 episode，再做候选排序，最后才考虑有界修正。
 
 ### `rank_candidates`
 

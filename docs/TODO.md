@@ -11,6 +11,10 @@
 
 ## Demo 与约束图
 
+- 给 stage split、object registry 和 constraint extraction 补完整 schema 校验；模型输出不能只因 JSON 可解析就进入下一步。
+- 统一记录 backend call 的 role、输入 artifact 引用、raw/parsed 输出和 validator 结果；当前 `cost.jsonl` 只记录成本，不足以复查模型行为。
+- stage split 必须在全视频范围取样，不能只使用采样帧列表的前半段；constraint extraction 必须要求已存在 object registry。
+- graph 和报告写入实际使用的 backend model，而不是在 CLI 未显式传参时留下 `null`。
 - 增加镜头切换和无交互片段检查，避免跨场景关键帧。
 - 修复同类多对象的跨阶段 coreference；`insert_tubes` 当前金标已记录错误案例。
 - 让 `holds=throughout/at_end` 的提取和验证更稳定。
@@ -20,6 +24,8 @@
 
 ## Policy
 
+- 只允许通过 graph validation 的输入进入 policy compile；同一 graph 的 policy 编译一次并复用，不在 episode 中重调 backend。
+- 补充 compiler contract 检查：每个声明 hole 被正确使用、API 参数签名正确、每阶段 primitive 与 graph 一致。
 - 给高层 API 的每个方法补一个最小编译和 dry-run 测试。
 - 需要执行未经检查的外部 policy 时，再增加进程隔离；当前 AST 检查只服务于本项目生成代码。
 
@@ -53,6 +59,7 @@
 
 ## Evaluation
 
+- 正式任务成功使用固定的人工或 benchmark evaluator；模型提议的 `acceptance` 只用于阶段 gate 和归因，不能单独定义最终成功。
 - 把实际 grasp point 和 approach direction 传给对应 predicate。
 - 为 `carry` 设计非特权检查；无法可靠检查时继续返回 `UNKNOWN`。
 - 用明显正例和负例校准每个 predicate，再用于任务评价。

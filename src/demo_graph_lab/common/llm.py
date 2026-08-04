@@ -1,4 +1,8 @@
-"""[common] OpenRouter 客户端(OpenAI 兼容)。仅编译期使用;每次调用记账并受成本上限保护。"""
+"""OpenRouter 客户端(OpenAI 兼容)。
+
+只用于离线示范理解和 policy 编译；在线执行路径不调用。每次调用记账并受成本
+上限保护。
+"""
 
 from __future__ import annotations
 
