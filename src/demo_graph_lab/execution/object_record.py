@@ -21,6 +21,7 @@ from ..perception.adapters import (
     validate_point_cloud_manifest_record,
 )
 from ..perception.object_pipeline import (
+    GeometryStatus,
     MASK_SCHEMA,
     OBJECT_POINT_CLOUD_SCHEMA,
     build_object_point_cloud,
@@ -967,9 +968,18 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             observation=object_observation,
         )
         _write_json(object_observation_path, object_observation_record)
+        hole_geometry_status = (
+            hole_geometry["status"] if hole_geometry is not None else None
+        )
         _write_json(directory / "result.json", {
             "schema": _PROJECT_RESULT_SCHEMA,
-            "status": "ACCEPTED",
+            # 请求了几何却估不出来时不许写 ACCEPTED。记录本身确实发生了,所以
+            # manifest 状态和退出码不变;只有这个词必须如实反映几何证据。
+            "status": (
+                "ACCEPTED"
+                if hole_geometry_status in (None, GeometryStatus.PASS.value)
+                else "GEOMETRY_UNKNOWN"
+            ),
             "observation_id": observation.observation_id,
             "assignment_ref": str(assignment_path),
             "point_cloud_ref": str(cloud_path),
@@ -980,9 +990,7 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             "hole_geometry_ref": (
                 str(hole_geometry_path) if hole_geometry is not None else None
             ),
-            "hole_geometry_status": (
-                hole_geometry["status"] if hole_geometry is not None else None
-            ),
+            "hole_geometry_status": hole_geometry_status,
             "object_observation_ref": str(object_observation_path),
         })
         call.update({

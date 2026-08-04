@@ -74,7 +74,7 @@ synthetic fixture candidates
 
 `StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
 
-`planning-record` 提供六个显式步骤：`plan / capture / ground / segment / project / predict`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment` 分别要求 `--allow-model-read`；`project` 只做本地计算。没有一键入口。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。
+`planning-record` 提供六个显式步骤：`plan / capture / ground / segment / project / predict`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment` 分别要求 `--allow-model-read`；`project` 只做本地计算。没有一键入口。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。`project` 的 `object/result.json` 中 `status` 由几何证据派生：请求了几何但其 `hole_geometry_status` 不是 `PASS` 时为 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何时才是 `ACCEPTED`；record 本身确实发生，因此 manifest 的 `OBJECT_CLOUD_RECORDED` 和退出码不受影响。
 
 V1 record 一次只处理一个 graph anchor。它不能在同一个 observation 下同时组装 tube grasp/axis 与 rack-hole center/axis，因此还没有接到 `PlanningOnlyRuntime.solve()`。后续结构必须以 capture 为父 observation、以 anchor 为子任务，并让同一 tube cloud 和同一 hole geometry 分别复用；在此之前只报告 component artifact，不报告完整 stage candidate。
 

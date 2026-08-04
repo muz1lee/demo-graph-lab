@@ -551,6 +551,9 @@ def test_full_object_record_chain_stops_at_validated_raw_grasps(tmp_path) -> Non
     assert object_observation["objects"] == []
     assert len(projection_result["principal_axis"]) == 3
     assert projection_result["extent"]["min"][2] == pytest.approx(1.0)
+    # 本次没有请求几何,status 保持 ACCEPTED。
+    assert projection_result["hole_geometry_status"] is None
+    assert projection_result["status"] == "ACCEPTED"
 
     manifest = predict_record(
         root,
@@ -705,8 +708,53 @@ def test_part_center_records_conservative_hole_geometry(tmp_path) -> None:
     assert geometry["center"] is None
     assert geometry["axis"] is None
     assert result["hole_geometry_status"] == "UNKNOWN"
+    # 几何估不出来时 result 不得自称 ACCEPTED;记录本身仍然发生,所以 manifest
+    # 状态与退出码不变(project_record 正常返回,没有抛异常)。
+    assert result["status"] == "GEOMETRY_UNKNOWN"
     assert object_observation["objects"] == []
     assert not (root / "candidates.json").exists()
+
+
+def test_part_center_accepts_recorded_pass_geometry(tmp_path) -> None:
+    root, mask = _record(
+        tmp_path,
+        resolver="part_center",
+        hole_name="rack_left_hole_center",
+        anchor={
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "left",
+            "selection": None,
+        },
+    )
+    # 让 ROI 在 RGB-D 上真的像一个开口:比周围 rack 面更远、更亮,越过估计器的
+    # 深度/亮度对比度门槛,从而走到 PASS 分支。
+    depth_path = root / "sensor/head_depth_m.npy"
+    depth = np.load(depth_path, allow_pickle=False)
+    depth[mask] += np.float32(0.05)
+    np.save(depth_path, depth, allow_pickle=False)
+    image_path = root / "sensor/head_left_bgr.npy"
+    image = np.load(image_path, allow_pickle=False)
+    image[mask] = 200
+    np.save(image_path, image, allow_pickle=False)
+    FakeSources.reset(mask)
+
+    ground_record(
+        root,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+    segment_record(root, allow_model_read=True, source_module=FakeSources)
+    manifest = project_record(root)
+
+    geometry = json.loads((root / "object/hole_geometry.json").read_text())
+    result = json.loads((root / "object/result.json").read_text())
+    assert manifest["status"] == "OBJECT_CLOUD_RECORDED"
+    assert geometry["status"] == "PASS"
+    assert geometry["center"] is not None and geometry["axis"] is not None
+    assert result["hole_geometry_status"] == "PASS"
+    assert result["status"] == "ACCEPTED"
 
 
 def test_object_perception_chain_has_no_control_or_oracle_imports() -> None:
