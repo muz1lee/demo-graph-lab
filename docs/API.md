@@ -130,6 +130,8 @@ graph 为未来的可信 resolver 层固定以下映射，生成 policy 不直�
 | `part_center` / `part_axis` | opening ROI + local RGB-D contrast + support-plane fit | `PASS/UNKNOWN` artifact 已接，robot-base transform 未接 |
 | `motion_derived` | 当前 EEF、持握状态和受检运动结果 | 未实现；不能退回视觉模型猜测 |
 
+表中前三行的数据路径现在有了显式契约，见「6. PerceptionProgram v1」。
+
 ### 高层动作
 
 | 方法 | 含义 |
@@ -251,3 +253,46 @@ HTTP 接受请求不代表机器人到位。控制结果必须通过关节、末
 `OracleRuntime` 会读取 simulator 的精确 `/state`，只用于集成调试和上界。它不能作为主方法 runtime，也不能为运行时 VLM 生成候选卡片或证据。
 
 主方法允许的信息只有相机、点云、感知模型输出、机器人本体状态、力反馈和由这些信息得到的规划结果。精确对象 pose、AABB、instance ID 和官方 task probe 只能留在隔离评测侧。
+
+## 6. PerceptionProgram v1
+
+`PerceptionProgram` 是与 `StageProgram` 平行的第二个 backend model 产物：`StageProgram` 决定动作怎么接线，`PerceptionProgram` 决定几何 hole 由哪条感知链发布。它是独立编译产物（将来落盘 `perception_program.json`），不是 hole 的字段，graph schema 不变。契约实现在 `src/demo_graph_lab/perception/program.py`，干跑实现在 `perception/fake_runtime.py`。当前只有校验器和 fake 干跑，链上的算子尚未接真实模型或几何实现。
+
+### 文档形状
+
+```json
+{"schema": "demo_graph_lab.perception_program.v1",
+ "task": "<task>",
+ "programs": [
+   {"stage": 0,
+    "chain": ["localize", "segment", "fit_opening"],
+    "provides": [{"field": "center", "hole": "<hole_a>"},
+                 {"field": "axis", "hole": "<hole_b>"}]}]}
+```
+
+顶层与条目的 key 都是闭集，任何多余字段都是违规。程序没有 `name`：身份就是文档内索引，日志和报告里派生成 `p<stage>_<index>`。
+
+### 算子闭集与类型表
+
+v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的中间产物类型，不是 graph hole 类型：
+
+| 算子 | 消费 | 产出 | 发布字段 | 背后实现 |
+|---|---|---|---|---|
+| `localize` | `ANCHOR` | `BBOX` | — | single-box grounding client |
+| `segment` | `BBOX` | `MASK` | — | binary-mask segmentation client |
+| `fit_opening` | `MASK` | `GEOMETRY` | `center: point_3d`、`axis: axis_3d` | `estimate_planar_opening_geometry` |
+| `crop_points` | `MASK` | `POINTS` | — | `project_masked_depth` |
+| `fit_axis` | `POINTS` | `GEOMETRY` | `axis: axis_3d` | `operators.fit_principal_axis` |
+
+链必须以 `localize` 开头（根是 `ANCHOR`）、逐步类型衔接、终点必须产出 `GEOMETRY` 字段。类型表本身是无环的，所以链里不可能出现回路。
+
+### 信息边界
+
+- backend model 只做一件事：把闭集算子组合成线性链，并声明这条链的哪个字段发布哪个 hole。它不写查询文本、不写逐步参数、不写数值；
+- 链的根是被 `provide` 的 hole 已经声明的 `anchor`，程序里不重复声明 anchor，也无法改写它。真正的 `localize` 查询由可信代码从 anchor 渲染，model 不提供自由文本；
+- 同一个程序 `provide` 的所有 hole 必须共享逐字段相同的 anchor：一个程序只观测一个 anchor；
+- 整个文档禁止数值字面量，除 `stage` 索引（指向 graph 的结构性引用）外任何位置出现数字或带单位的字符串都是违规。这条与 `StageProgram` 同规，是纵深防御，不依赖 key 白名单先拦住；
+- hole 身份是 stage 内唯一的 `(stage, hole)`：同名 hole 可以出现在多个 stage，但同一个 stage 的同一个 hole 只能由一个程序发布；
+- v1 只发布被观测到的对象几何，`resolver` 限于 `part_center / part_axis / principal_axis`。`grasp_candidate` 走候选身份与排序机制，`motion_derived` 的值来自执行状态而不是观测，两者出现在 `provides` 里都是违规；
+- 失败语义是 all-or-nothing：链在任何一步失败，该程序的 `provides` 一个都不产出。部分成功会让上层以为 hole 已填，是 bug 不是可接受的降级；
+- 未被任何程序覆盖的几何 hole 不是违规，它们继续走 graph resolver 老路。`coverage_by_stage` 只产出 per stage 的 covered/uncovered 名单供记录，不做准入判断。

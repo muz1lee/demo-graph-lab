@@ -2,6 +2,17 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-04：PerceptionProgram v1 可执行骨架
+
+- 新增 `perception/program.py`：感知侧程序的单一真相源，与 `policy/program.py` 对 `StageProgram` 同构。算子闭集 5 个（`localize / segment / fit_opening / crop_points / fit_axis`），`consumes/produces` 类型表把链钉成 `ANCHOR` 起、`GEOMETRY` 止的无环线性链；每个算子的注释指向背后的现有实现（grounding/segmentation client、`estimate_planar_opening_geometry`、`project_masked_depth`、`operators.fit_principal_axis`），本轮只固定契约，不接线；
+- `validate_perception_program(doc, graph)` 输出确定性 violations 列表：顶层/条目 key 闭集、schema 串与 `task` 对齐 graph、stage 存在、链首尾衔接、`provides` 的 field 属于终点算子、hole 存在且类型一致、同一程序共享逐字段相同 anchor、`resolver` 限于 `PERCEPTION_RESOLVERS - {grasp_candidate}`、一个洞只能由一个程序发布。整个文档另跑一遍数值字面量扫描（`stage` 索引按路径豁免）做纵深防御；`coverage_by_stage` 给 per stage 的 covered/uncovered 名单，未覆盖不算违规；
+- 新增 `perception/fake_runtime.py`：逐程序干跑，算子只记日志、只传不透明 handle，`fail_at=(program_index, op_name)` 注入单点失败，失败语义 all-or-nothing（该程序 `provides` 一个都不产出），注入没打中直接报错；
+- 表达力判据：`tests/fixtures/graphs/insert_tubes.perception_program.json` 用 9 个程序覆盖 27 洞 fixture 中全部 12 个 `part_center/part_axis/principal_axis` 洞，过校验并干跑填满；未覆盖的 6 个洞逐一核对为 `grasp_candidate` 或 `motion_derived`。这份 fixture 同时是将来 compile prompt 的 few-shot 素材；
+- 护栏：仿照 `tests/test_regions.py` 给两个新模块加源码禁词扫描，已反向验证会失败；数值字面量判据与 `policy/program.py` 各自持有实现，另有用例逐值对齐两者；
+- 本地 `420 passed`（基线 383 + 37 个新用例），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：只有校验器和 fake 干跑，没有解释器、没有落盘产物、没有 compile 入口，`perception_program.json` 尚不存在于任何 run 目录。明确没做：改 `graph/validate.py` 与 `policy/`、改 compiler 与 prompts、接真实 grounding/segmentation/几何实现、建 `PerceptionAPI` 类（v1 线性链无逐步参数，注册表就是契约）、`fit_support_surface` 与 `detect_grasps`（前者无消费者，后者牵动 candidate 身份机制）。校验器目前不检查「终点算子与 hole 的 resolver 是否匹配」——`part_axis` 洞可以由 `fit_axis` 发布，语义上应该走 `fit_opening`；这条要不要收紧留给下一轮裁决。
+
 ## 2026-08-04：感知层算子化、去任务先验命名与词表收归
 
 - 新增 `perception/operators.py`：`fit_plane`（SVD 平面拟合 + 平面度 RMSE，保留「第二奇异值 > 1e-8 才算张成 2 维」的退化防护）、`intersect_ray_plane`（保留平行与交点在相机后方两个防护）、`fit_principal_axis`（由 `execution/object_record.py::_principal_axis` 原样移动，失败仍是 raise）。算子用 `OperatorError(reason)` 报前置条件失败，调用方用显式映射表翻译成自己的产物 reason 码，未映射的码直接 KeyError；抽取零行为变化，另用 4000 组随机点集与重构前的内联算法对照，返回值与失败分支逐比特一致；
