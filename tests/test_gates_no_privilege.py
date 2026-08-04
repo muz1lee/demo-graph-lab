@@ -150,7 +150,8 @@ def test_lift_never_calls_privileged_probes():
 def test_lower_until_stops_on_fake_contact_force():
     """给高力值(> CONTACT_FORCE_N)→ 应以非特权 contact_force 立即停,不走满预算。"""
     rt = _rt(force=57.0)
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     done = _find(rt, "lower_until_done")
     assert done and done[0]["reason"] == "contact_force"
     assert done[0]["steps"] == 1, "首步即触发接触力应立刻停"
@@ -159,7 +160,8 @@ def test_lower_until_stops_on_fake_contact_force():
 def test_lower_until_contact_never_calls_probes():
     """lower_until 走非特权判据时,方法路径不得触碰 probes()。"""
     rt = _rt(force=57.0)
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     assert not rt._probes_touched["v"], "lower_until contact 判据不得调 probes()"
 
 
@@ -173,7 +175,8 @@ def test_lower_until_predicate_kind_unsupported_no_probes():
     - **绝不调 probes()**(即便 probes 已满足也不看)。"""
     rt = _rt(force=57.0, probes=[{"label": "root_in_bbox", "passed": True},
                                  {"label": "axis_aligned", "passed": True}])
-    rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "predicate"})
     us = [c for c in _find(rt, "unsupported_param")
           if c["param"] == "lower_until.stop_kind"]
     assert us, "predicate 类去特权后应记 UNSUPPORTED"
@@ -190,7 +193,8 @@ def test_lower_until_predicate_only_no_contact_goes_to_budget():
     rt = _rt(force=0.5, ee_z_trajectory=[0.9, 0.7, 0.5, 0.3, 0.1],
              probes=[{"label": "root_in_bbox", "passed": True},
                      {"label": "axis_aligned", "passed": True}])
-    rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "predicate"})
     done = _find(rt, "lower_until_done")[0]
     assert done["reason"] != "predicates", "去特权后不得以特权谓词停"
     assert not rt._probes_touched["v"]

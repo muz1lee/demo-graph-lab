@@ -7,6 +7,8 @@ gate 必须判 passed=False。
 双查与 violated_midway、at_end 只查出口、无约束阶段的空合取恒真。纯逻辑,无 cv2/网络。
 """
 
+from types import SimpleNamespace
+
 from demo_graph_lab.evaluation import gates
 
 
@@ -28,9 +30,21 @@ class FakeRT:
 
     def verify(self, c):
         name = c.get("name")
-        if c.get("_probe") == "pre" and name in self.pre_verdicts:
-            return self.pre_verdicts[name]
-        return self.verdicts.get(name, True)
+        key = (name, c.get("holds", "at_end"))
+        source = self.pre_verdicts if c.get("_probe") == "pre" else self.verdicts
+        if key in source:
+            return source[key]
+        if name in source:
+            return source[name]
+        return self.verdicts.get(key, self.verdicts.get(name, True))
+
+    def verify3(self, c):
+        value = self.verify(c)
+        if value in (gates.PASS, gates.FAIL, gates.UNKNOWN):
+            status = value
+        else:
+            status = gates.PASS if value else gates.FAIL
+        return SimpleNamespace(status=status)
 
 
 def _run(rt, stage, move=True):
@@ -121,6 +135,36 @@ def test_no_constraints_key_is_vacuously_true():
     assert v["passed"] is True
 
 
+def test_pass_plus_unknown_acceptance_is_undetermined():
+    stage = {
+        "index": 0, "name": "release", "stage_objects": {},
+        "acceptance": [{"name": "above", "args": {}},
+                       {"name": "carry", "args": {}}],
+        "constraints": [],
+    }
+    verdict = _run(FakeRT({"above": gates.PASS, "carry": gates.UNKNOWN}), stage)
+    assert verdict["acceptance_hold"] is None
+    assert verdict["passed"] is False
+
+
+def test_pass_plus_unknown_constraint_is_undetermined():
+    stage = {
+        "index": 0, "name": "release", "stage_objects": {},
+        "acceptance": [{"name": "above", "args": {}}],
+        "constraints": [
+            {"name": "center_align", "args": {}, "holds": "at_end"},
+            {"name": "carry", "args": {}, "holds": "at_end"},
+        ],
+    }
+    verdict = _run(FakeRT({
+        "above": gates.PASS,
+        "center_align": gates.PASS,
+        "carry": gates.UNKNOWN,
+    }), stage)
+    assert verdict["constraints_hold"] is None
+    assert verdict["passed"] is False
+
+
 def test_strict_gate_rejects_unobservable_effect() -> None:
     stage = {
         "index": 0,
@@ -179,6 +223,81 @@ def test_throughout_held_all_along_ok():
     assert v["constraints_hold"] is True
     assert v["violated_midway"] == []
     assert v["passed"] is True
+
+
+def test_throughout_unknown_at_entry_cannot_pass_at_exit():
+    stage = {
+        "index": 1, "name": "release", "stage_objects": {},
+        "acceptance": [{"name": "above", "args": {}}],
+        "constraints": [{"name": "carry", "args": {}, "holds": "throughout"}],
+    }
+    runtime = FakeRT(
+        verdicts={"above": gates.PASS, "carry": gates.PASS},
+        pre_verdicts={"carry": gates.UNKNOWN},
+    )
+    verdict = _run(runtime, stage)
+    assert verdict["constraints_hold"] is None
+    assert verdict["passed"] is False
+
+
+def test_same_predicate_with_different_holds_cannot_overwrite_unknown():
+    stage = {
+        "index": 1, "name": "release", "stage_objects": {},
+        "acceptance": [{"name": "above", "args": {}}],
+        "constraints": [
+            {"name": "carry", "args": {"relation": "tube0_in_gripper"},
+             "holds": "throughout"},
+            {"name": "carry", "args": {"relation": "tube0_in_gripper"},
+             "holds": "at_end"},
+        ],
+    }
+    runtime = FakeRT(
+        verdicts={
+            "above": gates.PASS,
+            ("carry", "throughout"): gates.PASS,
+            ("carry", "at_end"): gates.PASS,
+        },
+        pre_verdicts={("carry", "throughout"): gates.UNKNOWN},
+    )
+    verdict = _run(runtime, stage)
+    assert verdict["constraints_hold"] is None
+    assert verdict["n_constraints"] == 2
+    assert verdict["passed"] is False
+
+
+def test_throughout_acceptance_unknown_at_entry_cannot_pass_at_exit():
+    stage = {
+        "index": 1, "name": "release", "stage_objects": {},
+        "acceptance": [
+            {"name": "carry", "args": {"relation": "tube0_in_gripper"},
+             "holds": "throughout"},
+        ],
+        "constraints": [],
+    }
+    runtime = FakeRT(
+        verdicts={("carry", "throughout"): gates.PASS},
+        pre_verdicts={("carry", "throughout"): gates.UNKNOWN},
+    )
+    verdict = _run(runtime, stage)
+    assert verdict["acceptance_hold"] is None
+    assert verdict["passed"] is False
+
+
+def test_unrelated_object_motion_cannot_satisfy_manipulated_effect():
+    stage = {
+        "index": 1, "name": "lift",
+        "stage_objects": {"manipulated": "bowl0"},
+        "acceptance": [{"name": "above", "args": {}}],
+        "constraints": [],
+    }
+    verdict = _run(FakeRT(
+        verdicts={"above": gates.PASS},
+        positions={"bowl01_prop": [0.0, 0.0, 0.0]},
+    ), stage)
+    assert verdict["max_displacement_m"] > gates.MIN_DISPLACEMENT_M
+    assert verdict["manip_displacement_m"] is None
+    assert verdict["effect_status"] == gates.UNKNOWN
+    assert verdict["passed"] is False
 
 
 # ==========================================================================

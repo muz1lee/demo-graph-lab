@@ -140,14 +140,12 @@ def test_height_fraction_none_when_ungeometrable():
 
 
 # --------------------------------------------------------------------------
-# cone 角度偏好:approach 方向与锥轴夹角越小越优。
+# cone 角度偏好:approach 方向与目标倾角的误差越小越优。
 # --------------------------------------------------------------------------
-def test_cone_axis_known_and_unknown():
-    for cone in vocab.APPROACH_CONES:
-        ax = regions.cone_axis(cone)
-        assert ax is not None and len(ax) == 3
+def test_cone_tilt_known_and_unknown():
+    assert set(regions._CONE_TILT_DEG) == set(vocab.APPROACH_CONES)
     with pytest.raises(ValueError):
-        regions.cone_axis("nonexistent_cone")
+        regions.cone_angle_deg([0, 0, -1], "nonexistent_cone")
 
 
 def test_cone_angle_topdown_perfect_and_opposite():
@@ -170,11 +168,26 @@ def test_rank_by_cone_topdown_prefers_down():
     assert [c["id"] for c in ranked] == ["down", "side", "up"]
 
 
-def test_rank_by_cone_side_prefers_horizontal():
-    cands = [{"id": "down", "approach_dir": [0, 0, -1]},
-             {"id": "side", "approach_dir": [1, 0, 0]}]
+def test_rank_by_cone_side_is_azimuth_symmetric_and_prefers_horizontal():
+    cands = [{"id": "west", "approach_dir": [-1, 0, 0]},
+             {"id": "down", "approach_dir": [0, 0, -1]},
+             {"id": "east", "approach_dir": [1, 0, 0]}]
     ranked = regions.rank_by_cone(cands, "side")
-    assert ranked[0]["id"] == "side"
+    assert [item["id"] for item in ranked] == ["west", "east", "down"]
+    assert regions.cone_angle_deg([-1, 0, 0], "side") == pytest.approx(0.0)
+    assert regions.cone_angle_deg([1, 0, 0], "side") == pytest.approx(0.0)
+
+
+def test_rank_by_cone_oblique_is_azimuth_symmetric():
+    cands = [{"id": "down", "approach_dir": [0, 0, -1]},
+             {"id": "oblique_east", "approach_dir": [1, 0, -1]},
+             {"id": "oblique_west", "approach_dir": [-1, 0, -1]}]
+    ranked = regions.rank_by_cone(cands, "oblique")
+    assert [item["id"] for item in ranked] == [
+        "oblique_east", "oblique_west", "down",
+    ]
+    assert regions.cone_angle_deg([1, 0, -1], "oblique") == pytest.approx(0.0)
+    assert regions.cone_angle_deg([-1, 0, -1], "oblique") == pytest.approx(0.0)
 
 
 def test_rank_by_cone_no_elimination():

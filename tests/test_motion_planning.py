@@ -161,7 +161,7 @@ def test_servo_path_still_available_directly():
 # ---------------------------------------------------------------------------
 def test_cone_name_normalizes_constraint_args_dict():
     """编译出的 policy 传的是 `approach_direction` 约束的**整个 args**
-    ({"cone": "top_down", "target": ...}),而 regions.cone_axis 以锥名作 dict 键。
+    ({"cone": "top_down", "target": ...}),而 regions.cone_angle_deg 以锥名求目标倾角。
     _cone_name 负责形状归一;不归一则 TypeError: unhashable type: 'dict'。"""
     rt = _rt(MovePipe(_mp_result(), START_XQUAT))
     assert rt._cone_name({"cone": "top_down", "target": "tube_left"}) == "top_down"

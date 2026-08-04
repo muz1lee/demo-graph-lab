@@ -203,6 +203,7 @@ def solve_runtime_condition(hole, stage, constraints, rt):
     返回描述子,由 lower_until/verify 在运行期消费;参照物取 manipulated+target。"""
     so = (stage or {}).get("stage_objects") or {}
     return {"kind": "condition", "hole": hole.get("name"),
+            "purpose": hole.get("purpose"),
             "manip": so.get("manipulated"), "target": so.get("target"),
             "ref_source": "stage_objects"}
 

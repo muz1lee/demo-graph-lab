@@ -165,7 +165,8 @@ def _passing_probes():
 def test_lower_until_routes_to_contact_kind():
     """stop_kind=contact → 只启用接触力判据。给高力值,应以 contact_force 停。"""
     rt = _offline_rt(probes=_passing_probes(), force=[57.0])
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     assert _find(rt, "lower_stop_route")[0]["stop_kind"] == "contact"
     done = _find(rt, "lower_until_done")
     assert done and done[0]["reason"] == "contact_force"
@@ -176,7 +177,8 @@ def test_lower_until_contact_kind_ignores_predicates():
     力值低于阈值 + 无高度停 → 走到预算,而不是被 predicates 提前停。"""
     rt = _offline_rt(probes=_passing_probes(), force=[0.5])
     # _cur_xquat 恒定 z → plateau 也可能触发;这里把 plateau 也排除(只留 contact)。
-    rt.lower_until({"kind": "condition", "stop_kind": "contact"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "contact"})
     done = _find(rt, "lower_until_done")[0]
     assert done["reason"] != "predicates", "路由到 contact 不应因谓词停"
 
@@ -196,7 +198,8 @@ def test_lower_until_predicate_kind_is_unsupported_and_falls_back():
         return _orig()
     rt.probes = _spy
 
-    rt.lower_until({"kind": "condition", "stop_kind": "predicate"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "stop_kind": "predicate"})
     assert _find(rt, "lower_stop_route")[0]["stop_kind"] == "predicate"
     us = [c for c in _find(rt, "unsupported_param")
           if c["param"] == "lower_until.stop_kind"]
@@ -211,7 +214,8 @@ def test_lower_until_predicate_kind_is_unsupported_and_falls_back():
 def test_lower_until_no_stop_kind_is_unsupported_and_uses_safe_fallback():
     """缺少显式 stop_kind 时必须记为 UNSUPPORTED,并启用全部默认判据。"""
     rt = _offline_rt(probes=_passing_probes(), force=[57.0])
-    rt.lower_until({"kind": "condition", "hole": "seated_condition"})
+    rt.lower_until({"kind": "condition", "purpose": "lower_stop",
+                    "hole": "seated_condition"})
     us = [c for c in _find(rt, "unsupported_param")
           if c["param"] == "lower_until.stop_condition"]
     assert us, "无 stop_kind 应记 UNSUPPORTED"
@@ -221,12 +225,11 @@ def test_lower_until_no_stop_kind_is_unsupported_and_uses_safe_fallback():
 
 
 def test_lower_until_string_condition_is_unsupported():
-    """裸字符串条件(如 policy 里的 `seated`)无 stop_kind → UNSUPPORTED,不静默。"""
+    """裸字符串条件在任何向下控制发生前被拒绝。"""
     rt = _offline_rt(probes=[], force=[0.0])
-    rt.lower_until("seated")
-    us = [c for c in _find(rt, "unsupported_param")
-          if c["param"] == "lower_until.stop_condition"]
-    assert us
+    with pytest.raises(ValueError, match="purpose='lower_stop'"):
+        rt.lower_until("seated")
+    assert "lower_until_done" not in _ops(rt)
 
 
 # ==========================================================================
@@ -247,3 +250,20 @@ def test_approach_cone_ranking_is_direction_aware():
     top_down = regions.rank_by_cone(cands, "top_down")[0]["id"]
     side = regions.rank_by_cone(cands, "side")[0]["id"]
     assert top_down != side, "不同 cone 应偏好不同 approach 方向"
+
+
+def test_retreat_is_blocked_before_any_motion():
+    """缺少可信退离求解器时，即使 hole 名合法也不下发运动。"""
+    rt = _offline_rt({})
+    target = {"hole": "retract_pose", "xyz": [0.3, -0.2, 1.1]}
+    rt._park_idle_arm = lambda: pytest.fail("retreat must not park the idle arm")
+    with pytest.raises(NotImplementedError, match="trusted runtime solver"):
+        rt.retreat(target)
+    assert rt.moves == []
+
+
+def test_retreat_rejects_generic_pose_before_motion():
+    rt = _offline_rt({})
+    with pytest.raises(ValueError, match="explicit retract/retreat"):
+        rt.retreat({"hole": "target_point", "xyz": [0.3, -0.2, 1.1]})
+    assert rt.moves == []

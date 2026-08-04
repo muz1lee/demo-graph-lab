@@ -1,35 +1,80 @@
-# Prompt: compile a constraint graph into policy code
+# Prompt: propose a structured StageProgram
 
 ---
 
-You are compiling a demonstration-derived constraint graph into an executable Python
-policy module. You will be given (1) the runtime API CONTRACT source code and (2) the
-task's constraint GRAPH as JSON (stages × {constraints, acceptance, holes}).
+You turn a demonstration-derived constraint graph into a small StageProgram. You choose
+only the high-level primitive sequence and wire graph holes or stage objects into the
+primitive arguments. A trusted deterministic compiler will validate this JSON and emit
+Python; you must not write code.
 
-Write ONE Python module containing:
-- one handler per stage: `def stage_<index>(rt):` (e.g. stage_0, stage_1, ...)
-- at the end: `STAGES = {0: stage_0, 1: stage_1, ...}` mapping stage index → handler.
+Output exactly one JSON object with this shape:
 
-Each handler must, using ONLY the rt.* API from the contract:
-1. Solve the holes its stage declares (`rt.solve("<hole_name>")` — exact names from the
-   graph) and pass the returned handles to control primitives.
-2. Perform the stage's action with the declared control primitives, honoring the stage's
-   constraints (e.g. approach cone label from approach_direction; align before insert;
-   grasp region is already baked into the grasp-pose hole).
-3. NOT verify its own success at the end — the trusted runner gates each stage with the
-   graph's acceptance constraints.
+```json
+{
+  "stages": [
+    {
+      "index": 0,
+      "name": "pick",
+      "actions": [
+        {
+          "op": "approach",
+          "args": {
+            "target": {"object": "tube_left"},
+            "cone": "top_down"
+          }
+        },
+        {
+          "op": "grasp_at",
+          "args": {
+            "grasp_pose": {"hole": "tube_grasp_pose"},
+            "axis": {"hole": "tube_axis"}
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
-HARD RULES:
-- NO numeric literals anywhere in the module (no floats, no ints — not even 0 or 1 in
-  handler bodies; the only allowed integers are the stage indices inside the final
-  STAGES dict and in handler names).
-- NO imports, NO file/network access, NO defining helper classes; plain functions only.
-- ONLY call methods that exist on the contract's RuntimeAPI class; only pass hole handles,
-  object-name strings, and discrete labels from the graph.
-- Hole handles are opaque: do not index, unpack, inspect attributes, or perform arithmetic
-  on them.
-- Every hole the stage declares should be solved before use; do not invent hole names.
-- Keep each handler under ~15 lines; comments only where a constraint's handling is
-  non-obvious.
+Include every graph stage exactly once and in graph order. Copy each stage's `index` and `name` exactly.
+Every stage needs at least one action. Preserve action order, which must be a non-decreasing
+subsequence of:
 
-Output: the Python module inside one ```python code fence, nothing else.
+`approach → grasp_at → lift → transport → align → lower_until → release → retreat`
+
+Allowed primitives and argument types:
+
+- `approach(target, cone=None)`: target = stage object or `pose_se3` / `point_3d` hole;
+  cone = `top_down`, `side`, or `oblique`.
+- `grasp_at(grasp_pose, axis=None)`: grasp_pose = `pose_se3` hole; axis = `axis_3d` hole.
+- `lift(obj)`: obj = stage object.
+- `transport(obj, target)`: obj = stage object; target = stage object or
+  `pose_se3` / `point_3d` hole.
+- `align(obj, target, axis=None)`: obj = stage object; target = stage object or
+  `pose_se3` / `point_3d` hole; axis = `axis_3d` hole.
+- `lower_until(stop_condition)`: stop_condition = `runtime_condition` hole whose
+  `purpose` is exactly `lower_stop`; never wire a scalar depth or a release/grasp condition.
+- `release()`: no arguments.
+- `retreat(target)`: target = `pose_se3` / `point_3d` retract or retreat hole; use only
+  after release.
+
+References are explicit:
+
+- hole handle: `{"hole": "exact_declared_hole_name"}`;
+- object name: `{"object": "exact_non_null_value_from_stage_objects"}`;
+- cone is the only direct string argument.
+
+Hard rules:
+
+- `solve` is not an action. The deterministic compiler inserts one `rt.solve` per used
+  hole and reuses its opaque handle.
+- Do not invent holes, objects, primitives, parameters, helper fields, or explanations.
+- For cleanup or retreat, use `retreat` only when the graph declares a compatible
+  retract/retreat pose hole. If no safe primitive can represent a stage, do not substitute
+  `release`; emit an empty `actions` list for that stage so validation fails explicitly.
+- Do not use coordinates, distances, angles, thresholds, or any other numeric literal.
+  Stage `index` is the only allowed number.
+- Omit unused optional arguments. Never use `null` as an argument.
+- Do not call gates or claim success; the trusted runner evaluates acceptance.
+
+Return JSON only. Do not return Python or prose.

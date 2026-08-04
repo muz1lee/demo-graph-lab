@@ -7,7 +7,8 @@
 1. `README.md`：代码架构和入口；
 2. `docs/PROPOSAL.md`：研究假设；
 3. `docs/API.md`：VLM、高层动作和底层控制边界；
-4. `docs/TODO.md` 与 `docs/MILESTONES.md`：当前工作顺序。
+4. `docs/TODO.md` 与 `docs/MILESTONES.md`：当前工作顺序；
+5. `docs/DEVLOG.md`：最近一次开发的范围、验证和停点。
 
 文档与代码冲突时，以可运行代码和测试为准，并同步修正文档。
 
@@ -17,8 +18,9 @@
 
 - `demo/`：示范切阶段、关键帧和对象注册；
 - `graph/`：约束图的提取、补全、校验、报告和指标；
-- `policy/`：给 VLM 的 API、policy 编译和 fake runtime；
-- `selection/`：typed-hole 求解和任务无关的偏好排序；真实候选硬过滤尚未实现；
+- `policy/`：给 backend 的结构化 program 契约、确定性 policy 编译和 fake runtime；
+- `perception/`：非特权 observation 与 proprioception 契约；
+- `selection/`：typed-hole 求解、候选硬过滤和任务无关偏好排序；
 - `execution/`：阶段 runner、runtime、运动规划和 pipeline；
 - `evaluation/`：独立 gate 与谓词；
 - `common/`：仅放确实被多个阶段共用的小工具。
@@ -27,13 +29,14 @@
 
 ## API 与信息边界
 
-生成 policy 只能调用 `src/demo_graph_lab/policy/api.py::RuntimeAPI`。新增高层动作时，要同时更新 API 文档、静态检查相关测试和至少一个 dry-run 测试。
+Backend 只能生成 `StageProgram` JSON；Python policy 必须由确定性 compiler 生成，并且只能调用 `src/demo_graph_lab/policy/api.py::RuntimeAPI`。新增高层动作时，要同时更新 API 文档、program validator、planning-only 硬停、静态检查相关测试和至少一个 dry-run 测试。
 
 必须保持以下边界：
 
 - demo 提供阶段顺序、对象关系和离散偏好，不提供新场景的精确坐标；
 - 世界坐标、轴、距离和停止条件保留为 typed holes，由运行时求解；
 - policy 只能传递 `solve()` 返回的 handle，不能读取或计算内部数值；
+- StageProgram 编译期只允许把 `purpose=lower_stop` 的 runtime condition 接到 `lower_until`；真实 runtime 还必须显式实现停止信号路由；
 - policy 不调用 gate，阶段成功只由 `evaluation/` 独立判断；
 - VLM 不直接调用 `PipelineClient`、`robot_api` 或任何连续控制接口；
 - 检查不了的谓词返回 `UNKNOWN`，不能当作通过。
@@ -48,6 +51,7 @@
 - runner 目前只会重试同一个 handler。没有实现 rollback、换候选或自适应恢复时，不要这样描述。
 - AST 检查只是生成代码的语法约束，不是安全沙箱。
 - prompts 是运行资产。修改 prompt 或 `RuntimeAPI` 后，要跑 policy 编译相关测试。
+- `PlanningOnlyRuntime` 的 adapter 必须只读；启用任何控制前先验证 hole type/frame 并审查完整依赖调用图。
 - 保护工作区里与当前任务无关的改动，不顺手格式化或重写相邻代码。
 
 ## 测试与结果口径
@@ -81,5 +85,6 @@ PYTHONPATH=src python3 -m demo_graph_lab.execution.cli --help
 - `docs/API.md` 写接口和信息边界；
 - `docs/TODO.md` 写具体待办；
 - `docs/MILESTONES.md` 写阶段验收。
+- `docs/DEVLOG.md` 只写短期开发记录、产物和验证命令。
 
 过期内容直接删除或合并，不维护历史状态链。

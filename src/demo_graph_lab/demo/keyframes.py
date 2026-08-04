@@ -10,7 +10,14 @@ from . import ingest
 
 
 def run(task: str, per_stage: int = 5) -> dict:
+    if per_stage <= 0:
+        raise ValueError("per_stage must be positive")
     run_dir = artifacts.latest_run_dir(task)
+    artifacts.invalidate_outputs(run_dir, (
+        "keyframes.json", "graph.json", "validation.json", "report.html",
+        "stage_program.json", "policy.py", "compile_report.json",
+        "compiled_graph.json", "compiled_objects.json",
+    ))
     meta = artifacts.read_json(run_dir / "meta.json")
     stages = artifacts.read_json(run_dir / "stages.json")
     video = meta["video"]["video"]

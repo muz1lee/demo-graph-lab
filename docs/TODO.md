@@ -1,75 +1,67 @@
 # TODO
 
-只列当前方法需要的工作。完成项从本文件删除，稳定事实写进 README 或 milestone。
+只列未完成工作。稳定事实写进 README/API，已完成验证写进 MILESTONES/DEVLOG。
 
 ## 当前顺序
 
-1. 接入真实 grasp candidates，并记录原始候选、过滤原因和最终选择。
-2. 实现独立的非特权 runtime，方法路径不读取 simulator `/state`。
-3. 在 `insert_tubes` 上取得可重复的稳定抓取和完整 episode。
-4. 只有前三项完成后，才实现候选之间的下游兼容性检查。
+1. 接只读 RGB-D/点云 adapter 和真实 grasp candidate provider。
+2. 接 reachability、collision、gripper-width 三个 hard checker，先跑 planning-only。
+3. 对 candidate hole value 做 type、frame、calibration 和 finite 数值校验。
+4. 用固定 candidate replay 验证过滤、排序、日志和无候选失败路径。
+5. 到这里停下评审；得到明确允许后才接一个非特权 stage 的控制与 gate。
 
-## Demo 与约束图
+完整 episode 稳定前，不实现 runtime backend ranking、跨阶段 `compat`、向后传播或训练。
 
-- 给 stage split、object registry 和 constraint extraction 补完整 schema 校验；模型输出不能只因 JSON 可解析就进入下一步。
-- 统一记录 backend call 的 role、输入 artifact 引用、raw/parsed 输出和 validator 结果；当前 `cost.jsonl` 只记录成本，不足以复查模型行为。
-- stage split 必须在全视频范围取样，不能只使用采样帧列表的前半段；constraint extraction 必须要求已存在 object registry。
-- graph 和报告写入实际使用的 backend model，而不是在 CLI 未显式传参时留下 `null`。
-- 增加镜头切换和无交互片段检查，避免跨场景关键帧。
-- 修复同类多对象的跨阶段 coreference；`insert_tubes` 当前金标已记录错误案例。
-- 让 `holds=throughout/at_end` 的提取和验证更稳定。
-- 人工抽查一部分 goldset，记录标注分歧。
+## 离线语义质量
 
-完成定义：固定数据上重复抽取得到稳定阶段和对象 ID；关键约束的 precision/recall 分任务报告，不只给总体平均。
+- 增加镜头切换和无交互片段检查，避免关键帧跨场景。
+- 修复同类多对象的跨阶段 coreference，并人工复核 `insert_tubes` registry。
+- 审阅 `compile_report.json` 的 unwired holes：删除不需要的洞，或给真正的控制参数增加明确 API；不能静默忽略。
+- 人工抽查 goldset，分别报告 constraint precision/recall、object identity 和 stage boundary，不只报 schema pass。
 
-## Policy
+完成定义：固定数据重复运行时对象 ID 和关键约束稳定，失败 sample 能从 `model_calls/` 复查。
 
-- 只允许通过 graph validation 的输入进入 policy compile；同一 graph 的 policy 编译一次并复用，不在 episode 中重调 backend。
-- 补充 compiler contract 检查：每个声明 hole 被正确使用、API 参数签名正确、每阶段 primitive 与 graph 一致。
-- 给高层 API 的每个方法补一个最小编译和 dry-run 测试。
-- 需要执行未经检查的外部 policy 时，再增加进程隔离；当前 AST 检查只服务于本项目生成代码。
+## Perception 与候选
 
-完成定义：缺 handler、未声明 hole、未支持 API 和数字字面量都会在动作执行前失败。
+- 将真实 sensor artifact 规范成 `ObservationPacket`，只使用 typed `Proprioception`。
+- 接入 grasp proposals，并为每个 candidate 保存观测证据、frame 和 hole values。
+- 实现完整 frame transform，包括旋转；不允许只做平移或把 simulator world pose 混入。
+- 审查 adapter 依赖调用图，确认没有 `/state`、官方 probe 或 control side effect。
 
-## Perception
+完成定义：只读主方法输入能产生多个可追溯候选，代码路径不含特权状态。
 
-- 定义最小观测：对象 pose/axis/extent、实例证据、相机标定和 grasp proposals。
-- 接入真实 RGB-D/点云与候选源。
-- 实现完整 frame transform，包括旋转，而不是只做平移。
+## Selection 与 binding
 
-完成定义：非特权观测可以为一个真实任务生成可规划候选，调用图中没有 `/state` 或官方 probe。
+- 实现真实可达、碰撞和夹爪宽度 checker；异常和 `UNKNOWN` 继续 fail-closed。
+- 在 `solve()` 前按 graph hole schema 校验 candidate value 的类型、shape、frame 和 calibration。
+- 固定候选集做反事实测试：只改变 region/cone 标签时，top-1 按预期变化。
+- 将 gate outcome 回填同一 decision record，形成完整的 selection → outcome 数据。
 
-## Selection
-
-- 将真实候选送入可达、碰撞和夹爪宽度硬过滤。
-- 将 `rank_by_region` 与 `rank_by_cone` 接到真实候选，不再只测试手写样例。
-- 固定候选集做反事实测试：改变 demo 标签时 top-1 应按预期变化。
-- 在完整 episode 稳定后，实现相邻阶段候选的 `compat` 和向后检查。
-
-完成定义：每个选择都能追溯到候选 ID、硬过滤结果、示范约束和下游兼容结果。
+完成定义：每次选择能从 observation、完整候选、硬过滤证书、ranking meta 和 gate outcome 重放。
 
 ## Execution
 
-- 解决抬升时物体滑脱。
-- 删除剩余固定 sleep，统一用状态回读判断动作结束。
-- 在非特权接口稳定后，把 `OracleRuntime` 的状态读取与运动控制拆成独立组件。
-- 实现非特权 runtime；Oracle 只保留集成调试用途。
+- 保持 `PlanningOnlyRuntime` 的控制原语全部 `ExecutionDisabled`，直到当前顺序 1–4 验收。
+- 获得允许后，先接单个 stage 的非特权 runtime；无候选、hole 不合法、gate `UNKNOWN` 都 abort。
+- 解决抬升时物体滑脱，并删除剩余固定 sleep，统一用状态回读判断动作结束。
+- `lower_stop` 的 runtime descriptor 要明确路由到非特权 contact / motion plateau，而不是自由文本猜测。
+- 实现可信 retreat target solver：从当前 EEF、接近路径和碰撞检查生成候选；禁止回退到对象质心，完成前保持 Oracle 硬停。
 
-完成定义：至少一个稳定持握可以重复，完整 episode 的第一失败动作能从日志定位。
+完成定义：至少一个稳定持握可重复，第一失败动作能由 decision/action/gate 日志定位。
 
 ## Evaluation
 
-- 正式任务成功使用固定的人工或 benchmark evaluator；模型提议的 `acceptance` 只用于阶段 gate 和归因，不能单独定义最终成功。
+- 正式任务成功使用固定人工或 benchmark evaluator；模型提议的 acceptance 只用于阶段归因。
 - 把实际 grasp point 和 approach direction 传给对应 predicate。
-- 为 `carry` 设计非特权检查；无法可靠检查时继续返回 `UNKNOWN`。
-- 用明显正例和负例校准每个 predicate，再用于任务评价。
+- 为 `carry` 设计非特权检查；检查不了继续返回 `UNKNOWN`。
+- 用明显正例和负例校准 predicate，再用于任务评价。
 
-完成定义：gate 不把 `UNKNOWN` 当通过，且能区分“动作执行了”和“任务关系真的成立”。
+完成定义：gate 不把 `UNKNOWN` 当通过，并区分“动作被调用”和“任务关系成立”。
 
-## Recovery
+## 后续：compat 与 recovery
 
-- 先实现失败后换候选，再考虑 VLM 修正。
-- VLM 修正只能选择允许参数和离散方向，不能重写整个 workflow。
-- 调试随机种子和评测随机种子分开。
+- 完整 episode 稳定后，再实现候选间 `compat(current, next)` 和向后可行性传播。
+- 先做确定性换候选 recovery，再考虑 VLM 的离散修正建议。
+- 所有 recovery 有次数上限；调试 seed 与评测 seed 分开。
 
-完成定义：恢复动作有次数上限，能说明修改了什么、依据哪条残差，并和无恢复基线比较。
+完成定义：能与当前阶段贪心、无 recovery 基线做同候选同预算比较。

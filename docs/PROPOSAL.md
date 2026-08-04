@@ -31,7 +31,8 @@
 示范视频
   → 阶段、对象和关键帧
   → constraints + acceptance + typed holes
-  → 只调用高层 Runtime API 的 policy
+  → StageProgram（primitive sequence + hole wiring）
+  → 确定性编译成只调用高层 Runtime API 的 policy
   → 运行时感知并生成候选
   → 候选过滤、排序和下游检查
   → 执行动作
@@ -39,7 +40,7 @@
   → 失败归因或有界恢复
 ```
 
-当前仓库已经实现示范解析、约束图、policy 编译、顺序执行和 Oracle 联调。真实候选源、非特权感知、下游可行性检查和自适应恢复仍未实现。
+当前仓库已经实现示范解析、约束图、StageProgram、确定性 policy 编译和 Oracle 调试路径；非特权 observation、硬过滤与 planning-only runtime 已有脚手架。真实 sensor/candidate/check adapter、非特权控制、下游可行性检查和自适应恢复仍未实现。
 
 ## 约束图
 
@@ -71,7 +72,7 @@
 VLM 可以参与四个位置，但权限不同：
 
 - 从示范中提取阶段、对象和约束；
-- 根据约束图合成只调用高层 API 的 policy；
+- 根据约束图提议有限的 primitive sequence 和 hole wiring；
 - 在运行时对少量离散候选排序，并引用支持选择的约束；
 - 根据真实执行后的残差提出有界、离散的修正建议。
 
@@ -84,7 +85,7 @@ VLM 不得：
 
 运行时 VLM 的候选排序、修正和视觉证据接口目前只是设计，尚未实现。完整接口边界见 `API.md`。
 
-当前 policy 步骤仍是 synthesis，而非纯机械编译：graph 没有完整声明 primitive sequence 和参数 wiring，backend 会补出这部分高层 workflow。该 policy 在执行前通过静态检查和 fake dry-run，并在同一组选择实验中固定复用；backend 不在 episode 中重新规划。若后续发现这一步随机性过大，再把 action wiring 纳入 graph 并改用确定性模板，不把代码生成本身扩成研究主张。
+当前高层 workflow 仍有一次受限 synthesis：backend 输出结构化 `StageProgram`，决定 primitive sequence 和 hole/object wiring；它不再生成 Python。可信 validator 检查动作顺序、签名、类型、purpose 和引用，随后确定性 compiler 生成 policy 并做静态检查和 fake dry-run。该 program 在同一组选择实验中固定复用，backend 不在 episode 中重新规划；代码生成本身不是研究主张。
 
 ## 后续学习方向（当前不实施）
 
@@ -98,7 +99,7 @@ VLM 不得：
 - RL 学习几何检查未覆盖的真实成功概率，如滑脱、感知误差和控制不确定性；
 - 碰撞、可达、力限制、opaque handle 和独立 gate 继续留在可信代码中。
 
-这个方向不进入当前 TODO 或 milestone。只有非特权完整 episode、真实候选日志和显式下游检查都稳定后，才评估是否开始 SFT 或 RL。当前只要求日志保留完整候选、过滤与兼容结果、最终选择和 gate 结果，避免未来缺少训练所需的反事实数据。
+这个方向不进入当前 TODO 或 milestone。只有非特权完整 episode、真实候选日志和显式下游检查都稳定后，才评估是否开始 SFT 或 RL。当前 decision log 已保留完整候选、过滤证书、ranking meta 和最终选择；跨阶段兼容结果和 gate outcome 的回填仍是后续工作，不能把当前日志当成完整训练数据。
 
 ## 可证伪实验
 

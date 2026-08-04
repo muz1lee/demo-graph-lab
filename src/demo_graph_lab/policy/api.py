@@ -41,3 +41,6 @@ class RuntimeAPI:
 
     def release(self):
         """张爪释放。"""
+
+    def retreat(self, target):
+        """释放后移动到已求解的 retract/retreat pose handle。"""

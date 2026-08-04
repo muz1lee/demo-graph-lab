@@ -58,14 +58,17 @@ def main(argv=None):
     elif args.cmd == "extract":
         extract.run(args.task, args.k, args.model, args.max_stages)
     elif args.cmd == "validate":
-        validate.run(args.task)
+        return 0 if validate.run(args.task)["passed"] else 1
     elif args.cmd == "report":
         report.run(args.task)
     elif args.cmd == "metrics":
         metrics.run(args.task, args.gold)
     elif args.cmd == "compile":
         from .policy import compiler
-        compiler.run(args.task, args.model)
+        report_path = compiler.run(args.task, args.model)
+        compile_report = artifacts.read_json(report_path)
+        return 0 if (compiler.report_ready(compile_report)
+                     and (report_path.parent / "policy.py").exists()) else 1
     elif args.cmd == "all":
         ingest.run(args.task, args.video, args.trace, args.n_frames)
         stages.run(args.task, args.model)
@@ -73,8 +76,9 @@ def main(argv=None):
         registry.run(args.task, args.model)
         extract.run(args.task, args.k, args.model, args.max_stages)
         enrich.run(args.task)
-        validate.run(args.task)
+        validation = validate.run(args.task)
         report.run(args.task)
+        return 0 if validation["passed"] else 1
     return 0
 
 

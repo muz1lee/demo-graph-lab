@@ -66,6 +66,10 @@ def test_axis_parallel_unknown():
     p = P.check(C("axis_parallel", axis_a="ghost.z", axis_b="b.z"), {})
     assert p.status == P.UNKNOWN
 
+    only_a = {"a": ent([0, 0, 0], quat=IDENT_Q)}
+    p = P.check(C("axis_parallel", axis_a="a.z", axis_b="ghost.z"), only_a)
+    assert p.status == P.UNKNOWN and p.reason == "ref_unresolved"
+
 
 # ==========================================================================
 # center_align

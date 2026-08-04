@@ -139,17 +139,13 @@ def pred_axis_parallel(c, entities, **ctx):
     ea, eb = _ent(entities, va), _ent(entities, vb)
     if ea is None or "quat" not in ea:
         return _unknown("axis_parallel", "ref_unresolved", f"axis_a={va}")
+    if eb is None or "quat" not in eb:
+        return _unknown("axis_parallel", "ref_unresolved", f"axis_b={vb}")
     axa = _quat_z_axis(ea["quat"])
-    # axis_b 无实体或无 quat 时按世界竖直近似，并显式记录 detail。
-    if eb is not None and "quat" in eb:
-        axb = _quat_z_axis(eb["quat"])
-        note = ""
-    else:
-        axb = [0, 0, 1]
-        note = "(axis_b≈world_z)"
+    axb = _quat_z_axis(eb["quat"])
     ang = _angle_deg(axa, axb)
     ang = min(ang, 180 - ang)
-    return _from_margin("axis_parallel", _ANGLE_TOL_DEG - ang, f"angle={ang:.1f}{note}")
+    return _from_margin("axis_parallel", _ANGLE_TOL_DEG - ang, f"angle={ang:.1f}")
 
 
 def pred_center_align(c, entities, **ctx):
@@ -246,7 +242,7 @@ def pred_region_grasp(c, entities, *, grasp_point=None, **ctx):
 
 
 def pred_approach_direction(c, entities, *, approach_dir=None, **ctx):
-    """approach 方向与 cone 参照轴的夹角 ≤ 容差。**复用** regions.cone_angle_deg。
+    """approach 方向与 cone 目标倾角的误差 ≤ 容差。**复用** regions.cone_angle_deg。
 
     需要 approach_dir(该次接近的方向向量);快照里没有时 → UNKNOWN(输入缺失,非不可检查)。
     """

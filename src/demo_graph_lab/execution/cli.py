@@ -15,7 +15,8 @@ import json
 import time
 from pathlib import Path
 
-from ..policy.compiler import load_handlers
+from ..policy.compiler import load_handlers, report_ready
+from ..policy.program import compile_program, validate_program
 from .oracle_runtime import ORACLE_BANNER, OracleRuntime
 from .runner import run_policy
 
@@ -23,9 +24,42 @@ from .runner import run_policy
 def _load_artifacts(run_dir: Path):
     run_dir = run_dir.expanduser()
     graph = json.loads((run_dir / "graph.json").read_text())
+    validation = json.loads((run_dir / "validation.json").read_text())
+    if validation.get("passed") is not True:
+        raise ValueError("refusing execution: graph validation did not pass")
+    report = json.loads((run_dir / "compile_report.json").read_text())
+    if not report_ready(report):
+        raise ValueError("refusing execution: compile report is not ready")
+    compiled_graph = json.loads((run_dir / "compiled_graph.json").read_text())
+    if compiled_graph != graph:
+        raise ValueError("refusing execution: graph changed after policy compilation")
     objects_path = run_dir / "objects.json"
     objects = json.loads(objects_path.read_text()) if objects_path.exists() else []
+    compiled_objects = json.loads((run_dir / "compiled_objects.json").read_text())
+    if compiled_objects != objects:
+        raise ValueError("refusing execution: object registry changed after compilation")
+    program = json.loads((run_dir / "stage_program.json").read_text())
+    if report.get("compiled_program") != program:
+        raise ValueError(
+            "refusing execution: StageProgram changed after compile dry-run"
+        )
+    program_violations = validate_program(program, graph)
+    if program_violations:
+        raise ValueError(
+            f"refusing execution: StageProgram is invalid: {program_violations[:3]}"
+        )
+    if any(
+        action.get("op") == "retreat"
+        for stage in program.get("stages", [])
+        for action in stage.get("actions", [])
+        if isinstance(action, dict)
+    ):
+        raise ValueError(
+            "refusing execution: retreat solver is unavailable; no episode was started"
+        )
     code = (run_dir / "policy.py").read_text()
+    if code != compile_program(program, graph):
+        raise ValueError("refusing execution: policy does not match StageProgram")
     handlers = load_handlers(code, graph)
     return graph, objects, handlers
 
@@ -43,6 +77,7 @@ def smoke(args):
     print("probes:", [(p.get("label"), p.get("passed")) for p in s.get("probes", [])])
     xyz, quat = rt._cur_xquat()
     print(f"arm{args.arm} xquat: xyz={[round(v,3) for v in xyz]} quat={[round(v,3) for v in quat]}")
+    return 0
 
 
 def episode(args):
@@ -67,6 +102,7 @@ def episode(args):
           [(s.get("index"), s.get("status")) for s in result["stages"]])
     print("probes_after:", [(p.get("label"), p.get("passed")) for p in report["probes_after"]])
     print("report:", out)
+    return 0 if result.get("ok") is True else 1
 
 
 def main(argv=None):
@@ -82,8 +118,8 @@ def main(argv=None):
             q.add_argument("--run-dir", required=True)
             q.add_argument("--max-attempts", type=int, default=2)
     args = p.parse_args(argv)
-    (smoke if args.cmd == "smoke" else episode)(args)
+    return (smoke if args.cmd == "smoke" else episode)(args)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

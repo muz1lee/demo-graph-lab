@@ -56,15 +56,30 @@ def read_json(path: Path):
     return json.loads(Path(path).read_text())
 
 
+def invalidate_outputs(run_dir: Path, names) -> None:
+    """Remove generated files before rebuilding them so stale data cannot pass gates."""
+    for name in names:
+        (Path(run_dir) / name).unlink(missing_ok=True)
+
+
+def accumulated_cost(run_dir: Path) -> float:
+    """Return the cost already recorded for a run; malformed ledgers fail closed."""
+    ledger = Path(run_dir) / "cost.jsonl"
+    if not ledger.exists():
+        return 0.0
+    return sum(
+        json.loads(line).get("cost", 0.0) or 0.0
+        for line in ledger.read_text().splitlines()
+        if line.strip()
+    )
+
+
 def append_cost(run_dir: Path, record: dict) -> float:
     """追加一条 LLM 调用成本记录,返回累计成本(USD)。"""
     ledger = run_dir / "cost.jsonl"
     with ledger.open("a") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    total = 0.0
-    for line in ledger.read_text().splitlines():
-        total += json.loads(line).get("cost", 0.0) or 0.0
-    return total
+    return accumulated_cost(run_dir)
 
 
 def cost_cap() -> float:

@@ -143,19 +143,15 @@ def rank_by_region(candidates, region, *, with_meta=False):
 
 
 # ==========================================================================
-# cone 角度偏好：approach 方向与 cone 轴的夹角越小越优。
+# cone 角度偏好：只看 approach 方向相对重力的倾角。
 # 与 region 同构处理为偏好函数，不在这里设置硬阈值。
 # ==========================================================================
-# cone → 世界系代表轴(单位向量)。approach 方向与该轴夹角越小,越贴合该 cone。
-#   top_down : 从正上方下探      → 期望 approach 方向 ≈ −z(向下)
-#   side     : 水平侧向接触      → 期望 approach 方向 ≈ 水平(与 z 正交)
-#   oblique  : 斜向(约 45°)     → 期望 approach 方向 ≈ (−z 与水平各半)
-# 轴向量只表达「方向偏好的参照」,不含任何场景度量魔数、不含任务/物体名。
-_SIDE_AXIS_XY = 0.0                     # side/oblique 的水平分量方向自由,z 分量定成败
-_CONE_AXIS = {
-    "top_down": [0.0, 0.0, -1.0],
-    "side":     [1.0, 0.0, 0.0],
-    "oblique":  [1.0, 0.0, -1.0],
+# 倾角从“竖直向下”起算：top_down=0°、oblique=45°、side=90°。
+# 水平方位不属于 cone 语义；+x/-x/+y/-y 的同倾角候选必须等价。
+_CONE_TILT_DEG = {
+    "top_down": 0.0,
+    "oblique": 45.0,
+    "side": 90.0,
 }
 
 
@@ -166,29 +162,34 @@ def _unit(v):
     return [x / n for x in v]
 
 
-def cone_axis(cone):
-    """cone 名 → 世界系单位参照轴;未知 cone → ValueError(封闭词表,不兜底)。"""
-    axis = _CONE_AXIS.get(cone)
-    if axis is None:
+def _cone_tilt_deg(cone):
+    """Return the gravity-relative target tilt for a closed-vocabulary cone."""
+    tilt = _CONE_TILT_DEG.get(cone)
+    if tilt is None:
         raise ValueError(
             f"未知 cone {cone!r};合法(vocab.APPROACH_CONES):{vocab.APPROACH_CONES}")
-    return _unit(axis)
+    return tilt
 
 
 def cone_angle_deg(approach_dir, cone):
-    """approach 方向向量与 cone 参照轴的夹角(度)∈[0,180];方向缺失/零向量 → None。"""
+    """Return angular error from the cone's gravity-relative target tilt.
+
+    Horizontal azimuth is intentionally ignored. Missing and zero-length
+    directions return ``None``; an unknown cone raises ``ValueError``.
+    """
     if not approach_dir:
         return None
     a = _unit(approach_dir)
-    b = cone_axis(cone)
-    if a is None or b is None:
+    target_tilt = _cone_tilt_deg(cone)
+    if a is None:
         return None
-    dot = max(-1.0, min(1.0, sum(a[i] * b[i] for i in range(3))))
-    return math.degrees(math.acos(dot))
+    cos_from_down = max(-1.0, min(1.0, -a[2]))
+    actual_tilt = math.degrees(math.acos(cos_from_down))
+    return abs(actual_tilt - target_tilt)
 
 
 def cone_preference(approach_dir, cone):
-    """cone 偏好分:与参照轴越对齐越高。分 = cos(夹角)∈[−1,1](越大越优)。
+    """cone 偏好分:相对目标倾角的误差越小越高。分 = cos(误差)∈[−1,1]。
 
     与 region 偏好同一「越大越优」约定,便于 approach 侧用同一套稳定降序逻辑。
     零向量/未知 cone 分别按 None / ValueError 处理。
@@ -205,7 +206,7 @@ def rank_by_cone(candidates, cone, *, dir_key="approach_dir", with_meta=False):
     candidates : dict 列表,每个带 `dir_key`(缺省 "approach_dir")= 该候选的 approach 方向。
     与 rank_by_region 同规:不淘汰、稳定、等分/不可算保序(分不出的候选沉末尾且保序)。
     """
-    cone_axis(cone)          # 未知 cone 在此 ValueError
+    _cone_tilt_deg(cone)     # 未知 cone 在此 ValueError
     items = list(candidates or [])
 
     def _key(c):

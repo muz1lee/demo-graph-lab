@@ -21,7 +21,7 @@
 | 阶段切分 | 全视频采样帧、任务指令 | `stages_proposed.json` | 只有上游 trace 缺失时调用 |
 | 对象 registry | 全视频采样帧、trace 中的对象别名 | `objects.json` | 每个 demo 一次 |
 | 约束抽取 | 单阶段关键帧、指令、对象 registry | `constraints / acceptance / holes` | 每阶段调用 `k` 次，再确定性合并 |
-| Policy 合成 | 已抽取 graph、`RuntimeAPI` 源码 | 高层 stage handlers | 每个 graph 单独调用，随后静态检查和 fake dry-run |
+| Program 提议 | 已校验 graph、`RuntimeAPI` 源码 | `StageProgram`：primitive sequence + hole wiring | 每个 graph 一次；backend 不写 Python |
 
 视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。在线 hole 求解、候选排序、运动执行、predicate 和 gate 目前也没有 backend model 调用。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
 
@@ -35,33 +35,36 @@ video + optional trace
   → VLM object registry
   → VLM per-stage graph extraction
   → deterministic merge / enrich / validate
-  → VLM policy compilation
+  → backend StageProgram proposal
+  → deterministic validation / Python compilation
   → AST check + fake dry-run
 ```
 
-Backend 输出始终是不可信 proposal：结构化结果必须通过词表和 schema 校验，生成代码必须通过 AST 检查和 dry-run。当前 graph 还没有显式声明 primitive sequence 和 hole-to-argument wiring，所以所谓 policy 编译实际上包含高层 policy synthesis：backend 会决定调用哪些高层动作、动作顺序以及 handle 如何接线。它每个 graph 只运行一次，episode 和选择算法对照中必须冻结输出。如果这一步成为主要不稳定源，可以让 graph 显式携带 action wiring，再换成确定性模板编译器，不影响候选选择这一研究主张。
+Backend 输出始终是不可信 proposal。stage、registry、constraint sample 和 `StageProgram` 都经过严格 schema；无效 sample 不参加投票，分母固定为请求次数。同名阶段的约束只有达到严格多数才传播。`StageProgram` 只决定高层 primitive sequence 和 hole/object 接线，validator 检查动作顺序、API 签名、hole 类型与 purpose、对象引用和数字字面量，可信 compiler 再生成 Python。每次调用的脱敏请求、raw reply、parsed result 和 validator 结论都保存在 `model_calls/<tag>/`；同 tag 的再次调用保留在 `history/`，不会把不同请求和回复混在一起。
 
 ### 当前建议的在线顺序
 
-第一条非特权 baseline 不调用 backend model：
+第一条非特权 baseline 不调用 backend model。当前已经实现 planning-only 部分：
 
 ```text
 RGB-D / robot state
   → perception and grasp candidates
   → reachability / collision / width hard filter
   → deterministic region / cone ranking
+  → PlanningOnlyRuntime 写 decisions.jsonl
   → solve() 返回选中 bundle 的 opaque handles
-  → high-level policy
-  → trusted control
-  → independent gate
+  → 所有 control primitive 抛 ExecutionDisabled
 ```
 
-这样可以先单独验证候选覆盖、frame transform、抓取与运动、以及 gate 是否可靠。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection，不交给 backend model。
+`ObservationPacket` 只接受 sensor artifact 引用、对象观测和显式 `Proprioception`；不接受任意 `robot_state` mapping。候选数据会冻结并检查为 finite、JSON-safe，缺失/异常/`UNKNOWN` 的硬检查全部 fail-closed。当前还没有真实 sensor/candidate adapter，也没有 candidate value 对 graph hole type/frame 的完整校验，所以不能连接控制。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
 
 实验需要区分两种模式：component mode 固定人工检查过的 graph 和 policy，只研究候选与执行；end-to-end mode 才重新从 demo 调用 backend 生成 graph 和 policy。选择算法对照必须共享同一 graph、policy、候选和执行预算。
 
 ```text
-离线：backend VLM/LLM → graph + policy.py
+离线：backend VLM/LLM → graph + StageProgram
+                              │
+                              ▼
+                       deterministic compiler → policy.py
 
 在线：生成的 policy.py
           │
@@ -105,8 +108,11 @@ Handle 只允许传给后续高层动作。生成 policy 不能读取其中的�
 | `align(obj, target, axis=None)` | 在下放前完成对象与目标对齐 |
 | `lower_until(stop_condition)` | 下放到运行时停止条件触发 |
 | `release()` | 释放夹爪 |
+| `retreat(target)` | 释放后的退离动作；当前只有 opcode/接线契约，Oracle 在可信 pose solver 完成前拒绝执行 |
 
 `push` 当前没有可靠实现，因此不属于可用 API。需要支持推动任务时，应先实现和测试底层动作，再把它加入高层契约。
+
+`retreat` 的 graph hole 目前只能证明 backend 显式选择了 retract/retreat 语义，不能证明数值 pose 安全。真正接控制前，可信 runtime 必须基于当前 EEF、接近路径和碰撞检查生成退离候选；不得回退到对象质心。当前 Oracle loader 会在 reset 和任何控制前拒绝含 `retreat` 的 episode；方法自身也保留 `NotImplementedError` 作为第二道硬停。
 
 生成 policy 不能调用 `verify()` 或自行返回成功。阶段是否通过只由 runner 和 gate 决定。
 
@@ -121,13 +127,24 @@ Handle 只允许传给后续高层动作。生成 policy 不能读取其中的�
 - typed-hole 求解和任务无关的 region/cone 偏好函数；
 - `evaluation.gates` 和 `evaluation.predicates`：读取独立观测并给出 `PASS / FAIL / UNKNOWN`。
 
-真实候选的可达、碰撞和夹爪宽度硬过滤，以及跨阶段兼容性检查，仍是计划中的功能。
+硬过滤和排序骨架已经存在，但真实的 reachability、collision、gripper-width checker adapter 尚未接入。跨阶段兼容性检查仍是后续功能。
 
 当前 runner 失败后只重复同一个 handler。它不会 rollback、换候选或修改搜索范围。缺少 handler、hole 歧义和未知谓词都必须停止或返回 `UNKNOWN`，不能猜一个默认值继续执行。
 
 当前 Oracle 从 simulator state 直接得到 world-frame 几何，因此数值 handle 明确标为 `frame="world"`，同时保留 graph 请求的 `requested_frame` 供检查。非特权 runtime 不能照搬这个捷径，必须使用相机与机器人标定完成真正的 frame transform。
 
-`scalar` 和 `runtime_condition` 可以返回延迟描述子，由后续高层控制器结合当前状态求值；它们不是 VLM 猜出的数值。
+`scalar` 和 `runtime_condition` 可以返回延迟描述子，由后续高层控制器结合当前状态求值；它们不是 VLM 猜出的数值。插入阶段由 deterministic enrich 补 `purpose=lower_stop` 的控制洞；StageProgram validator 只允许这类洞接到 `lower_until`。它目前只声明应读取非特权 contact/motion-plateau 信号，不生成阈值；把 descriptor 明确路由到 Oracle 的停止类型仍是执行前 TODO。
+
+### 执行前门槛
+
+以下四项未完成前，`PlanningOnlyRuntime.execution_enabled` 保持 `False`：
+
+1. 真实 observation/candidate/check adapters 的完整调用图确认只读、无 `/state` 和 control side effect；
+2. 每个 candidate hole value 按 graph type、frame、finite 数值和 calibration 做硬校验；
+3. 固定 candidate replay 能复现过滤原因、ranking meta 和最终选择；
+4. 一个非特权 stage 的 gate 输入和 abort 行为通过离线/仿真前检查。
+
+特权 Oracle 也不会只凭一个旧 `policy.py` 启动：加载器要求当前 validation 与 compile report 通过，graph 和 object registry 与编译快照一致，StageProgram 与 compile report 中实际 dry-run 的内容一致，并重新校验 program、确定性生成 policy 后做逐字比对。episode 中任一 stage 失败会返回非零。`retreat` 的可信 pose solver 未完成，因此即使其余产物通过，含该动作的 episode 也会在 reset 和任何控制前硬停。
 
 ## 3. 底层控制 API
 

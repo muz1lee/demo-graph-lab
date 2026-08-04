@@ -1,4 +1,4 @@
-"""Compile a graph into a constrained policy, then check and dry-run it."""
+"""Ask the backend for a StageProgram, then compile and dry-run it locally."""
 
 from __future__ import annotations
 
@@ -8,22 +8,29 @@ import json
 from pathlib import Path
 
 from ..common import artifacts
+from ..graph import validate as graph_validate
+from .program import compile_program, unwired_holes, validate_program
+
+
+def report_ready(report: dict) -> bool:
+    """Return whether compile contracts and both fake dry-runs passed."""
+    dryrun = report.get("dryrun", {})
+    return bool(
+        report.get("graph_validation") == "passed"
+        and not report.get("program_violations")
+        and not report.get("static_violations")
+        and not report.get("dryrun_error")
+        and not report.get("publish_error")
+        and isinstance(report.get("compiled_program"), dict)
+        and dryrun.get("normal", {}).get("ok") is True
+        and dryrun.get("retry_injection", {}).get("ok") is True
+    )
 
 
 def _contract_methods() -> set[str]:
     from . import api
     return {n for n, _ in inspect.getmembers(api.RuntimeAPI, inspect.isfunction)
             if not n.startswith("_")}
-
-
-def extract_code(text: str) -> str:
-    t = text.strip()
-    if "```" in t:
-        seg = t.split("```", 2)[1]
-        if seg.startswith("python"):
-            seg = seg[len("python"):]
-        return seg.strip()
-    return t
 
 
 def static_check(code: str) -> list[str]:
@@ -121,28 +128,128 @@ def run(task: str, model: str | None = None) -> Path:
     from ..common import llm
     from . import api
     run_dir = artifacts.latest_run_dir(task)
+    policy_path = run_dir / "policy.py"
+    program_path = run_dir / "stage_program.json"
+    graph_snapshot_path = run_dir / "compiled_graph.json"
+    objects_snapshot_path = run_dir / "compiled_objects.json"
+    compile_report_path = run_dir / "compile_report.json"
+    policy_path.unlink(missing_ok=True)
+    program_path.unlink(missing_ok=True)
+    graph_snapshot_path.unlink(missing_ok=True)
+    objects_snapshot_path.unlink(missing_ok=True)
+    compile_report_path.unlink(missing_ok=True)
     graph = artifacts.read_json(run_dir / "graph.json")
+    validation_path = run_dir / "validation.json"
+    report = {
+        "task": task,
+        "graph_validation": "passed",
+        "program_violations": [],
+        "static_violations": [],
+        "unwired_holes": [],
+    }
+    if not validation_path.exists():
+        report["graph_validation"] = "missing"
+        artifacts.write_json(run_dir / "compile_report.json", report)
+        print(f"[compile] {task}: FAIL graph validation artifact missing")
+        return run_dir / "compile_report.json"
+    validation = artifacts.read_json(validation_path)
+    if validation.get("passed") is not True:
+        report["graph_validation"] = "failed"
+        report["graph_violations"] = validation.get("violations", [])
+        artifacts.write_json(run_dir / "compile_report.json", report)
+        print(f"[compile] {task}: FAIL graph validation did not pass")
+        return run_dir / "compile_report.json"
+    validation = graph_validate.validate_run_dir(run_dir, task)
+    if validation.get("passed") is not True:
+        report["graph_validation"] = "failed"
+        report["graph_violations"] = validation.get("violations", [])
+        artifacts.write_json(run_dir / "compile_report.json", report)
+        print(f"[compile] {task}: FAIL current graph validation did not pass")
+        return run_dir / "compile_report.json"
+    try:
+        graph = artifacts.read_json(run_dir / "graph.json")
+        objects = artifacts.read_json(run_dir / "objects.json")
+    except (OSError, ValueError) as error:
+        report["graph_validation"] = "failed"
+        report["graph_violations"] = [
+            f"validated inputs could not be frozen: {type(error).__name__}: {error}"
+        ]
+        artifacts.write_json(run_dir / "compile_report.json", report)
+        print(f"[compile] {task}: FAIL validated inputs could not be frozen")
+        return run_dir / "compile_report.json"
+
     prompt = (artifacts.PROMPT_ROOT / "compile_policy.md").read_text().split("---", 1)[1]
     msg = (prompt
            + "\n\n## CONTRACT SOURCE\n```python\n" + inspect.getsource(api) + "```"
            + "\n\n## GRAPH JSON\n```json\n"
            + json.dumps(graph, ensure_ascii=False, indent=1) + "\n```")
-    out = llm.chat([{"role": "user", "content": msg}], run_dir, tag="compile",
-                   model=model, max_tokens=4000, temperature=0.1)
-    code = extract_code(out)
-    (run_dir / "policy.py").write_text(code)
-    violations = static_check(code)
-    report = {"task": task, "static_violations": violations}
-    if not violations:
-        try:
-            report["dryrun"] = dry_run(code, graph)
-        except Exception as e:
-            report["dryrun_error"] = f"{type(e).__name__}: {e}"
+    tag = "compile"
+    messages = [{"role": "user", "content": msg}]
+    input_refs = ["graph.json", "package:policy/api.py",
+                  "package:prompts/compile_policy.md"]
+    request = llm.request_record(
+        messages, tag=tag, role="policy_program", model=llm.resolve_model(model),
+        max_tokens=4000, temperature=0.1, input_refs=input_refs)
+    out = llm.cached_response(run_dir, tag, request)
+    if out is None:
+        out = llm.chat(
+            messages, run_dir, tag=tag, model=model, max_tokens=4000,
+            temperature=0.1, role="policy_program", input_refs=input_refs)
+    try:
+        program = llm.parse_json_block(out)
+    except ValueError as error:
+        llm.record_result(run_dir, tag, parse_error=str(error))
+        report["program_violations"] = [str(error)]
+        artifacts.write_json(run_dir / "compile_report.json", report)
+        print(f"[compile] {task}: FAIL invalid StageProgram JSON")
+        return run_dir / "compile_report.json"
+
+    artifacts.write_json(program_path, program)
+    program_violations = validate_program(program, graph)
+    llm.record_result(
+        run_dir, tag, parsed=program, validation_errors=program_violations)
+    report["program_violations"] = program_violations
+    if not program_violations:
+        report["unwired_holes"] = unwired_holes(program, graph)
+        code = compile_program(program, graph)
+        violations = static_check(code)
+        report["static_violations"] = violations
+        if not violations:
+            try:
+                report["dryrun"] = dry_run(code, graph)
+            except Exception as e:
+                report["dryrun_error"] = f"{type(e).__name__}: {e}"
+            else:
+                normal = report["dryrun"].get("normal", {}).get("ok") is True
+                retry = report["dryrun"].get("retry_injection", {}).get("ok") is True
+                if normal and retry:
+                    try:
+                        current_graph = artifacts.read_json(run_dir / "graph.json")
+                        current_objects = artifacts.read_json(run_dir / "objects.json")
+                        if current_graph != graph or current_objects != objects:
+                            raise RuntimeError(
+                                "graph or object registry changed during compilation"
+                            )
+                        artifacts.write_json(graph_snapshot_path, graph)
+                        artifacts.write_json(objects_snapshot_path, objects)
+                        policy_path.write_text(code)
+                        report["compiled_program"] = program
+                    except Exception as error:
+                        report["publish_error"] = f"{type(error).__name__}: {error}"
+                else:
+                    report["dryrun_error"] = "normal or retry-injection dry-run failed"
     artifacts.write_json(run_dir / "compile_report.json", report)
     dr = report.get("dryrun", {})
-    print(f"[compile] {task}: static {'PASS' if not violations else violations} | "
-          f"dryrun normal={dr.get('normal', {}).get('ok')} "
-          f"retry={dr.get('retry_injection', {}).get('ok')} "
-          f"holes={len(dr.get('holes_solved', []))} gates={dr.get('gates_checked')}"
-          if not violations or dr else f"[compile] {task}: FAIL {violations[:3]}")
+    violations = report["program_violations"] or report["static_violations"]
+    terminal_error = report.get("dryrun_error") or report.get("publish_error")
+    if violations:
+        print(f"[compile] {task}: FAIL {violations[:3]}")
+    elif terminal_error:
+        print(f"[compile] {task}: FAIL {terminal_error}")
+    else:
+        print(f"[compile] {task}: contracts PASS | "
+              f"dryrun normal={dr.get('normal', {}).get('ok')} "
+              f"retry={dr.get('retry_injection', {}).get('ok')} "
+              f"holes={len(dr.get('holes_solved', []))} "
+              f"gates={dr.get('gates_checked')}")
     return run_dir / "compile_report.json"

@@ -75,6 +75,19 @@ def test_check_item_validates_argument_signature():
     assert check_item(optional, 0, "constraints") == []
 
 
+def test_carry_relation_accepts_registry_id_inside_snake_case_relation():
+    item = {
+        "name": "carry",
+        "args": {"relation": "tube_right_in_gripper"},
+        "provenance": "demo_video",
+    }
+    assert check_item(item, 0, "constraints", {"tube_right", "rack"}) == []
+
+    item["args"]["relation"] = "unknown_object_in_gripper"
+    errors = check_item(item, 0, "constraints", {"tube_right", "rack"})
+    assert any("未引用 object registry" in error for error in errors)
+
+
 def test_stages_from_trace():
     trace = {"segments": [
         {"index": 0, "start_sec": 0.0, "end_sec": 1.5, "label": "grasp tube",
@@ -93,7 +106,8 @@ def test_enrich_propagation_and_order():
                                  "stage_objects": {"manipulated": manip, "target": "rack"},
                                  "constraints": list(cons), "acceptance": []}
     inside = lambda o: {"name": "inside", "args": {"obj_a": o, "obj_b": "rack.hole"},
-                        "provenance": "demo_video", "confidence": 0.8}
+                        "holds": "at_end", "provenance": "demo_video",
+                        "confidence": 0.8}
     graph = {"stages": [mk(1, "tube_a", [inside("tube_a")]),
                         mk(3, "tube_b", [inside("tube_b")]),
                         mk(5, "tube_c", [])]}
@@ -101,9 +115,124 @@ def test_enrich_propagation_and_order():
     assert n == 1
     added = graph["stages"][2]["constraints"][0]
     assert added["args"]["obj_a"] == "tube_c" and added["provenance"] == "derived"
+    assert added["holds"] == "at_end"
     assert add_order(graph)
-    assert any(c["name"] == "order" for c in graph["stages"][0]["constraints"])
+    order = next(c for c in graph["stages"][0]["constraints"] if c["name"] == "order")
+    assert order["holds"] == "throughout"
     assert propagate(graph) == 0        # derived 不作为来源,不链式扩散
+
+
+def test_enrich_keeps_different_holds_patterns_separate():
+    from demo_graph_lab.graph.enrich import propagate
+
+    def stage(index, holds=None):
+        constraints = [] if holds is None else [{
+            "name": "inside",
+            "args": {"obj_a": f"tube_{index}", "obj_b": "rack.hole"},
+            "holds": holds,
+            "provenance": "demo_video",
+        }]
+        return {
+            "index": index,
+            "name": "insertion",
+            "role": "core",
+            "stage_objects": {"manipulated": f"tube_{index}", "target": "rack"},
+            "constraints": constraints,
+            "acceptance": [],
+        }
+
+    graph = {"stages": [
+        stage(0, "at_end"), stage(1, "at_end"),
+        stage(2, "throughout"), stage(3),
+    ]}
+    assert propagate(graph) == 0
+    assert graph["stages"][3]["constraints"] == []
+
+
+def test_enrich_repairs_legacy_derived_holds_from_majority_sources():
+    from demo_graph_lab.graph.enrich import add_order, propagate
+
+    def stage(index, constraint):
+        return {
+            "index": index,
+            "name": "insertion",
+            "role": "core",
+            "stage_objects": {"manipulated": f"tube_{index}", "target": "rack"},
+            "constraints": [constraint] if constraint else [],
+            "acceptance": [],
+        }
+
+    def inside(index, **extra):
+        return {
+            "name": "inside",
+            "args": {"obj_a": f"tube_{index}", "obj_b": "rack.hole"},
+            **extra,
+        }
+
+    graph = {"stages": [
+        stage(0, inside(0, holds="at_end", provenance="demo_video")),
+        stage(1, inside(1, holds="at_end", provenance="demo_video")),
+        stage(2, inside(2, provenance="derived", derived_from=[0, 1])),
+    ]}
+    assert propagate(graph) == 1
+    repaired = graph["stages"][2]["constraints"]
+    assert len(repaired) == 1
+    assert repaired[0]["holds"] == "at_end"
+    assert repaired[0]["derived_from"] == [0, 1]
+
+    graph["stages"][0]["constraints"].append({
+        "name": "order", "args": {"stage_sequence": "s0<s1<s2"},
+        "provenance": "derived",
+    })
+    assert add_order(graph) is False
+    assert graph["stages"][0]["constraints"][-1]["holds"] == "throughout"
+
+
+def test_enrich_does_not_propagate_one_vote_across_two_stages():
+    from demo_graph_lab.graph.enrich import propagate
+
+    def stage(index, cone=None):
+        constraints = [] if cone is None else [{
+            "name": "approach_direction",
+            "args": {"cone": cone, "target": f"tube_{index}"},
+            "provenance": "demo_video",
+        }]
+        return {
+            "index": index,
+            "name": "pick",
+            "role": "core",
+            "stage_objects": {"manipulated": f"tube_{index}", "target": None},
+            "constraints": constraints,
+            "acceptance": [],
+        }
+
+    graph = {"stages": [stage(0, "top_down"), stage(1)]}
+    assert propagate(graph) == 0
+    assert graph["stages"][1]["constraints"] == []
+
+
+def test_enrich_adds_a_dedicated_lower_stop_control_hole():
+    from demo_graph_lab.graph.enrich import add_control_holes
+
+    graph = {"stages": [{
+        "index": 1,
+        "name": "insertion",
+        "stage_objects": {"manipulated": "tube_left", "target": "rack"},
+        "constraints": [{"name": "inside"}],
+        "acceptance": [],
+        "holes": [{"name": "insertion_depth", "type": "scalar"}],
+    }]}
+    assert add_control_holes(graph) == 1
+    control = graph["stages"][0]["holes"][-1]
+    assert control == {
+        "name": "tube_left_lower_stop_condition",
+        "type": "runtime_condition",
+        "solver_hint": "non_privileged_contact_or_motion_plateau",
+        "frame": "runtime",
+        "purpose": "lower_stop",
+        "votes": "derived",
+    }
+    assert add_control_holes(graph) == 0
 
 
 def test_gates_vacuity_and_effect():
@@ -182,6 +311,7 @@ def test_runtime_api_surface_is_small_and_explicit():
         "align",
         "lower_until",
         "release",
+        "retreat",
     }
 
 

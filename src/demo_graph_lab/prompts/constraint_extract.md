@@ -20,6 +20,8 @@ Extract THREE things for this stage, as strict JSON:
 3. `holes`: every metric quantity execution will need, as typed holes:
    `{"name": ..., "type": pose_se3|axis_3d|point_3d|scalar|runtime_condition,
      "solver_hint": <perception source>, "frame": <coordinate frame>}`.
+   Hole `name` MUST be plain snake_case with underscores and no dots. Prefix an object
+   id with `_`, for example `tube_left_grasp_pose`, never `tube_left.grasp_pose`.
 
 HARD RULES:
 - NEVER output numeric values for positions, offsets, sizes, angles-as-targets, or coordinates.
@@ -55,7 +57,7 @@ inside(obj_a, obj_b) · order(stage_sequence) · carry(relation) · clearance(ob
 
 Example constraint (format reference only):
 {"name": "region_grasp", "args": {"obj": "tube0", "region": "upper_body"},
- "confidence": 0.85, "evidence_frames": [3, 5]}
+ "holds": "throughout", "confidence": 0.85, "evidence_frames": [3, 5]}
 
 Output JSON schema:
 {"stage": str,

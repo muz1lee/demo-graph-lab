@@ -804,6 +804,11 @@ class OracleRuntime:
         ``predicate`` 需要特权状态，不能进入控制回路，因此记录 UNSUPPORTED 并
         使用 contact/plateau。缺少 stop_kind 时记录该情况并启用非特权判据。
         """
+        if (not isinstance(stop_condition, dict)
+                or stop_condition.get("purpose") != "lower_stop"):
+            raise ValueError(
+                "lower_until requires a runtime condition with purpose='lower_stop'"
+            )
         kind, raw = self._stop_kind(stop_condition)
         if kind is None:
             if stop_condition is not None:
@@ -844,6 +849,18 @@ class OracleRuntime:
     def release(self):
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         self._wait_grip(GRIP_OPEN)
+
+    def retreat(self, target):
+        """Refuse motion until a trusted solver can produce a safe retreat pose."""
+        hole_name = target.get("hole") if isinstance(target, dict) else None
+        purpose = target.get("purpose", "") if isinstance(target, dict) else ""
+        semantic = f"{hole_name or ''} {purpose}".lower()
+        if "retreat" not in semantic and "retract" not in semantic:
+            raise ValueError("retreat requires an explicit retract/retreat handle")
+        raise NotImplementedError(
+            "retreat execution is blocked until a trusted runtime solver provides "
+            "a safe pose from current EEF state"
+        )
 
     # ---------- contract: 验证(词表几何三值检验,oracle 态) ----------
     def _ent_snapshot(self, constraint: dict) -> dict:
