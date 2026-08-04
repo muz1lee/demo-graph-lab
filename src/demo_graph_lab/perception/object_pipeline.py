@@ -18,6 +18,8 @@ import re
 from types import MappingProxyType
 from typing import Any
 
+from .operators import OperatorError, fit_plane, intersect_ray_plane
+
 
 MASK_SCHEMA = "demo_graph_lab.object_mask.v1"
 OBJECT_ASSIGNMENT_SCHEMA = "demo_graph_lab.object_assignment.v1"
@@ -556,6 +558,17 @@ def _dilate(mask, iterations: int):
     return expanded
 
 
+# Geometry operators fail with their own generic codes; this function publishes
+# its own reason vocabulary, so every operator code is translated explicitly and
+# an unmapped one raises instead of leaking into the artifact.
+_OPERATOR_REASONS = {
+    "plane_fit_failed": "plane_fit_failed",
+    "plane_points_are_degenerate": "ring_geometry_is_degenerate",
+    "ray_parallel_to_plane": "hole_ray_parallel_to_rack_plane",
+    "plane_intersection_behind_camera": "rack_plane_intersection_behind_camera",
+}
+
+
 def estimate_rack_hole_geometry(
     rgb,
     depth_m,
@@ -689,39 +702,28 @@ def estimate_rack_hole_geometry(
         intrinsics,
         min_points=min_ring_points,
     )
-    ring64 = ring_points.astype(np.float64)
-    plane_center = ring64.mean(axis=0)
-    centered = ring64 - plane_center
     try:
-        _, singular_values, right_vectors = np.linalg.svd(
-            centered, full_matrices=False
-        )
-    except np.linalg.LinAlgError:
-        return unknown("plane_fit_failed")
-    if len(singular_values) < 3 or singular_values[1] <= 1e-8:
-        return unknown("ring_geometry_is_degenerate")
-    normal = right_vectors[-1]
-    normal /= np.linalg.norm(normal)
-    distances = centered @ normal
-    plane_rmse = float(np.sqrt(np.mean(distances * distances)))
+        normal, plane_center, plane_rmse = fit_plane(ring_points)
+    except OperatorError as error:
+        return unknown(_OPERATOR_REASONS[error.reason])
     metrics["plane_rmse_m"] = plane_rmse
     if plane_rmse > max_plane_rmse_m:
         return unknown("rack_surface_not_planar")
 
     center_row = float(rows.mean())
     center_column = float(columns.mean())
-    ray = np.asarray([
-        (center_column - values["cx"]) / values["fx"],
-        (center_row - values["cy"]) / values["fy"],
-        1.0,
-    ], dtype=np.float64)
-    denominator = float(normal @ ray)
-    if abs(denominator) <= 1e-8:
-        return unknown("hole_ray_parallel_to_rack_plane")
-    ray_scale = float((normal @ plane_center) / denominator)
-    if not math.isfinite(ray_scale) or ray_scale <= 0.0:
-        return unknown("rack_plane_intersection_behind_camera")
-    center = ray * ray_scale
+    try:
+        center = intersect_ray_plane(
+            [
+                (center_column - values["cx"]) / values["fx"],
+                (center_row - values["cy"]) / values["fy"],
+                1.0,
+            ],
+            normal=normal,
+            plane_point=plane_center,
+        )
+    except OperatorError as error:
+        return unknown(_OPERATOR_REASONS[error.reason])
     if float(normal @ center) < 0.0:
         normal = -normal
     metrics.update({

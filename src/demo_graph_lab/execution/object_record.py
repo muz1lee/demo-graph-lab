@@ -30,6 +30,7 @@ from ..perception.object_pipeline import (
     validate_mask_record,
     validate_object_assignment_record,
 )
+from ..perception.operators import fit_principal_axis
 from .planning_record import (
     _load_manifest,
     _read_json,
@@ -793,31 +794,6 @@ def _extent(points) -> dict[str, list[float]]:
     }
 
 
-def _principal_axis(points) -> list[float]:
-    import numpy as np
-
-    if len(points) < 3:
-        raise ValueError("object point cloud needs at least three points for PCA")
-    values = points.astype(np.float64)
-    centered = values - values.mean(axis=0)
-    try:
-        _, singular_values, right_vectors = np.linalg.svd(
-            centered, full_matrices=False
-        )
-    except np.linalg.LinAlgError as error:
-        raise ValueError("object PCA failed") from error
-    if not len(singular_values) or singular_values[0] <= 1e-8:
-        raise ValueError("object point cloud has no stable principal axis")
-    if len(singular_values) > 1 and singular_values[1] / singular_values[0] > 0.8:
-        raise ValueError("object principal axis is ambiguous")
-    axis = right_vectors[0]
-    axis /= np.linalg.norm(axis)
-    dominant = int(np.argmax(np.abs(axis)))
-    if axis[dominant] < 0.0:
-        axis = -axis
-    return [float(item) for item in axis]
-
-
 def project_record(record_dir: str | Path) -> dict[str, Any]:
     """Create a proposed anchor binding, object cloud, and derived observation."""
 
@@ -924,7 +900,7 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             hole_geometry = geometry.to_record()
             _write_json(hole_geometry_path, hole_geometry)
         else:
-            axis = _principal_axis(cloud.points)
+            axis = fit_principal_axis(cloud.points)
         np.savez_compressed(cloud_path, points=cloud.points)
         np.save(pixels_path, cloud.pixels_rc, allow_pickle=False)
         _write_json(full_manifest_path, cloud.manifest_record())
