@@ -1,22 +1,20 @@
-"""harness.regions 单测(P0-03,改动 C-4/C-5)。
+"""任务无关 region 偏好的纯逻辑测试。
 
 覆盖:六 region 偏好函数形状、稳定排序(等分保序)、rim/handle UNCHECKABLE 行为、
-cone 角度偏好。纯逻辑、离线、pytest 或直接 python3 皆可跑(风格对齐 test_harness_units)。
-判据出处 docs/TODO.md §1.2 C-4/C-5、§1.3 CC-1′。
+cone 角度偏好。纯逻辑、离线，由 pytest 运行。
+These tests pin the task-independent preference semantics.
 """
 
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness import regions, vocab
+from demo_graph_lab.graph import vocab
+from demo_graph_lab.selection import regions
 
 
 # --------------------------------------------------------------------------
-# 六 region 偏好函数形状(逐字对 TODO §1.2 C-4 表)。
+# 六 region 偏好函数形状。
 # --------------------------------------------------------------------------
 def test_pref_upper_body_monotone_increasing():
     f = regions.region_preference("upper_body")
@@ -142,7 +140,7 @@ def test_height_fraction_none_when_ungeometrable():
 
 
 # --------------------------------------------------------------------------
-# cone 角度偏好(C-5):approach 方向与锥轴夹角越小越优。
+# cone 角度偏好:approach 方向与锥轴夹角越小越优。
 # --------------------------------------------------------------------------
 def test_cone_axis_known_and_unknown():
     for cone in vocab.APPROACH_CONES:
@@ -188,23 +186,16 @@ def test_rank_by_cone_no_elimination():
 
 
 # --------------------------------------------------------------------------
-# 纪律护栏:regions.py 源码零任务名/物体名(与门禁 grep 同规,自测一份)。
+# 护栏:regions.py 源码不得包含任务名或物体名。
 # --------------------------------------------------------------------------
 def test_no_task_or_object_names_in_source():
-    src = (Path(__file__).resolve().parents[1] / "harness" / "regions.py").read_text("utf-8").lower()
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "demo_graph_lab"
+        / "selection"
+        / "regions.py"
+    ).read_text("utf-8").lower()
     for bad in ("insert_tube", "stack_bowl", "deposit", "push_t",
                 "tube", "bowl", "coin", "rack", "slot"):
         assert bad not in src, f"regions.py 出现禁用词 {bad!r}(任务名/物体名硬失败)"
-
-
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"PASS {fn.__name__}")
-        except AssertionError as e:
-            failed += 1
-            print(f"FAIL {fn.__name__}: {str(e).splitlines()[0]}")
-    print(f"{len(fns) - failed} passed, {failed} failed")

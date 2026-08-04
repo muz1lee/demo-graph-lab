@@ -1,124 +1,116 @@
 # demo-graph-lab
 
-**一段 demo 教的是「每个阶段什么必须成立」，不是「照抄哪条轨迹」。**
+从一段机器人示范中提取阶段和定性约束，再把它们编译成可执行、可独立检查的操作策略。
 
-我们把演示视频编译成一份**带 typed holes 的约束程序**：阶段结构和几何关系从视频里读出来，
-但**所有度量数值都留成洞**，执行时由现场感知填。同一条约束有两个消费者——既生成动作决策，
-又当阶段验收判据。编译一次、代码冻结，换场景只有感知返回值变，代码一个字节不动。
+这个仓库是研究原型。基于录制示范的解析、约束图、policy 编译和阶段执行已经接通；在线执行目前只有读取仿真精确状态的 `OracleRuntime`，用于调试和上界，不代表主方法已经完成。非特权感知、真实抓取候选和下游可行性选择仍在开发中。
 
-权威方案 [`docs/PROPOSAL.md`](docs/PROPOSAL.md)（v3，2026-07-30）· 执行文档 [`docs/EXECUTION.md`](docs/EXECUTION.md) · 投递目标 **RSS 2027**
-
----
-
-## 架构
+## 代码架构
 
 ```text
-                   ┌──────── 编译期（Phase 0，唯一有 LLM 的阶段）────────┐
-demo 视频 + 一句指令
-   ├─ ingest / stages / keyframes    抽帧、切阶段、选关键帧
-   ├─ objects      物体登记表                    ◀── LLM ×1
-   ├─ extract      阶段 × {约束, 验收, 洞}        ◀── LLM ×(阶段×k)，k=5 自一致性
-   ├─ enrich       一致性传播（确定性）
-   └─ validate     四层校验（含「零度量字面量」扫描）
-   ▼  graph.json          ← 只有关系与洞，没有数值
-   └─ compile      LLM 写 Python policy          ◀── LLM ×1
-   ▼  policy.py
-                   └────────────────────────────────────────────────────┘
-
-                   ┌──────── 运行期（Phase 1，零 LLM）──────────────────┐
-policy.py + graph.json
-   └─ fakerun.run_policy        可信 runner，两级 ReAct 骨架
-         每阶段： gates.snapshot → handler(rt) → gates.evaluate
-   └─ kwadapter.KWRuntime       contract.Runtime 的实现
-         rt.solve  → 感知填洞（当前走 ORACLE-M1A 特权态）
-         rt.ctrl   → pipeline :8000
-         rt.verify → 约束词表几何检查
-   ▼  episode_report.json → 机器人动作
-                   └────────────────────────────────────────────────────┘
+demo video / trace
+        │
+        ▼
+demo          切阶段、取关键帧、统一对象 ID
+        │
+        ▼
+graph         提取 constraints / acceptance / typed holes（待求解的带类型参数）
+        │
+        ▼
+policy        编译只调用高层 API 的 Python handlers
+        │
+        ▼
+execution     按 stage 执行动作
+     │                 │
+     ▼                 ▼
+selection           evaluation
+填洞与偏好函数       独立 gate 判定
 ```
 
-两条纪律是**结构性保证**，不是约定：
+核心代码全部在 `src/demo_graph_lab/`，每个目录只负责一个阶段：
 
-| 纪律 | 怎么强制的 |
-|---|---|
-| policy 里**不可能**出现度量常数 | `rt.solve()` 返回不透明句柄，policy 能传不能读；编译后 AST 静态检查 |
-| policy **不能自证成功** | 验收由 runner 拿图里的 acceptance 调 `rt.verify()`，不经过 policy |
+| 目录 | 输入 | 输出 | 当前职责 |
+|---|---|---|---|
+| `demo/` | 视频、动作 trace | stages、keyframes、objects | 整理示范证据 |
+| `graph/` | stages 与关键帧 | `graph.json`、报告、指标 | 提取和校验约束图 |
+| `policy/` | graph 与高层 API | `policy.py`、编译报告 | 生成、静态检查、fake dry-run |
+| `selection/` | typed holes、约束、候选 | 不透明 handle 或排序 | 填洞与任务无关偏好 |
+| `execution/` | stage handlers、handles | 动作日志与 episode 报告 | runner、运动规划、机器人调用 |
+| `evaluation/` | 动作前后观测、阶段约束 | `PASS / FAIL / UNKNOWN` | 独立检查阶段结果 |
+| `common/` | — | 路径、实验产物、VLM 客户端 | 少量共享工具 |
+| `prompts/` | graph/VLM 输入 | 结构化输出要求 | 代码实际读取的 prompt |
 
-细节（逐跳的输入/输出/实现文件、数据结构样例、契约的 11 个方法）见 [`docs/OVERVIEW.md`](docs/OVERVIEW.md)。
+仓库其余目录：
 
----
+```text
+benchmarks/goldsets/   约束抽取标注草案，研究者复核待完成
+docs/                  研究方案、API、TODO、里程碑
+scripts/               启动 Oracle 仿真所需的小脚本
+tests/                 纯逻辑测试和固定输入 fixture
+```
 
-## 现在到哪
+一次实验的产物写到 `runs/<task>/<timestamp>/`。示范处理、graph、policy 和执行报告都留在同一个 run 目录，便于从结果反查输入。
 
-| Phase | 状态 | 一句话 |
-|---|---|---|
-| **Phase 0** 理解层 | ✅ 已达标 | micro P **0.931** / R **0.865**，两道门全过 |
-| **Phase 1** 执行绑定 | 🔄 到 M1a oracle | 软件链全通、**零次真实抓取**，solve 全走特权 oracle |
-| **Phase 2** 冻结协议 | ⏳ 未开 | — |
+## API 边界
 
-> ⚠️ **最重要的缺口**：demo 提取出的约束**目前还没有真正影响抓取**。
-> `region_grasp` 在运行期被丢弃，抓取点来自 oracle 几何 + 硬编码偏移——
-> 把图里的 region 改成任何值，输出逐比特相同。这是主张与实现之间最大的一条裂缝。
+生成的 policy 只能看到 `policy/api.py` 里的 `RuntimeAPI`：
 
-进展、阻塞、主张链健康度见 [`docs/STATUS.md`](docs/STATUS.md)；历史实验总账见 [`docs/PROGRESS.md`](docs/PROGRESS.md)。
+```text
+solve
+approach → grasp_at → lift → transport → align → lower_until → release
+```
 
----
+- `solve()` 返回不透明 handle；policy 只能传递，不能读取坐标或阈值。
+- policy 不调用 `verify()`，也不能自行宣布阶段成功。
+- `selection`、`runner` 和 `evaluation` 属于可信运行层，不暴露给 VLM。
+- `execution/robot_api.py` 和 `execution/pipeline.py` 是底层数值控制，只由 runtime 调用。
+- `OracleRuntime` 会读取 simulator `/state`，只能用于集成调试。
+
+计划中的运行时 VLM 只能做有限的离散选择、修正建议和视觉证据描述，不能输出连续控制量。完整接口见 [docs/API.md](docs/API.md)。
 
 ## 快速开始
 
-```bash
-# Phase 0（mac 或 5090）
-python3 -m harness.cli all      --task insert_tubes
-python3 -m harness.cli compile  --task insert_tubes     # compile 不在 all 里，要显式跑
+只跑测试：
 
-# 本地检查
-python3 -m pytest -q method/demo_graph/tests adapters/tests experiments/insert_tubes tests
-python3 scripts/public_release_check.py
+```bash
+python3 -m pip install -e ".[dev]"
+python3 -m pytest -q
 ```
 
-前置：`.env` 里的 `OPENROUTER_API_KEY`、demo 素材（`HARNESS_DATA_ROOT`）、`opencv-python`——**都不在 git 里**。
-**不要从仓根裸跑 `pytest`**（`components/` 需各自 rootdir）。
+运行完整示范处理流水线需要 OpenCV、OpenRouter 客户端和示范数据：
 
-**Phase 1 只能在 5090**（需要仿真、EvalServer、pipeline），跑法与前置条件见
-[`docs/OVERVIEW.md`](docs/OVERVIEW.md)。
+```bash
+python3 -m pip install -e ".[dev,pipeline]"
+export OPENROUTER_API_KEY=...
+export DGL_VLM_MODEL=...
+export DGL_DATA_ROOT=/path/to/robot-subtask-seg
 
----
+dgl all --task insert_tubes
+dgl compile --task insert_tubes
+dgl metrics --task insert_tubes \
+  --gold benchmarks/goldsets/insert_tubes_gold.json
+```
 
-## 文档
+`all` 负责从示范到约束图；`compile` 单独把最新 graph 编译成 policy。不使用命令行入口时，可以从仓库根目录运行 `PYTHONPATH=src python3 -m demo_graph_lab ...`。
 
-| 先读 | |
-|---|---|
-| [`docs/PROPOSAL.md`](docs/PROPOSAL.md) | **当前唯一权威方案（v3）**：主张、框架分层、硬边界、冻结定义、假设 A1–A7 |
-| [`docs/EXECUTION.md`](docs/EXECUTION.md) | **执行文档**：实验与验收、代码框架、TODO、预算、环境约束 |
-| [`docs/archive/PROPOSAL_v2.md`](docs/archive/PROPOSAL_v2.md) | v2 归档；**§1.2 独家证据**与 **§5 Phase 0 方法定义**仍有效（v3 未收录） |
-| [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | 方法的细节视图 + 完整文档花名册 |
-| [`docs/STATUS.md`](docs/STATUS.md) | 现在到哪、卡在哪、下一步 |
-| [`docs/DECISIONS.md`](docs/DECISIONS.md) | 关键裁决与理由（**改动前先查，避免重开已裁决的问题**） |
-| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 实验总账，所有数字的出处与「⚠️ 待核」标记 |
-| [`AGENTS.md`](AGENTS.md) | 工作边界 / 信息边界 / 代码边界 |
+Oracle 集成入口：
 
-代码即规范：[`harness/contract.py`](harness/contract.py)（53 行，读完就知道生成代码能干什么）、
-[`harness/vocab.py`](harness/vocab.py)（封闭约束词表）。
+```bash
+dgl-oracle smoke --task-id robodojo_insert_tubes_000
+dgl-oracle episode \
+  --run-dir runs/insert_tubes/<timestamp> \
+  --task-id robodojo_insert_tubes_000
+```
 
----
+这两个命令都不是非特权方法评测。
 
-## 仓库结构
+## 当前研究重点
 
-| 目录 | 定位 |
-|---|---|
-| **`harness/`** | ✅ **当前主线（v2）**：出**数字**。每个模块 docstring 第 1 行带阶段标签，`head -1 harness/*.py` 即归属图。见 [`harness/README.md`](harness/README.md) |
-| `method/` | **v1 协议与不变量层**：出**纪律**——冻结协议、provenance 防火墙、RunManifest、隔离沙箱，**harness 侧均无等价物**。这些是 v2 的 H1 假设所依赖、但还没写到的部分，不是旧代码。见 [`method/README.md`](method/README.md) |
-| `adapters/` | v1，但含唯一一条通往主线的活边（`kwadapter.py:17` → `knowin_world/pipeline.py`）。见 [`adapters/README.md`](adapters/README.md) |
-| `experiments/` | v1 期入口，现为**移植源**（冻结断言、消融 B 的幸存者计数）。见 [`experiments/README.md`](experiments/README.md) |
-| `components/` | WHT 组件的字节级只读快照，来源与脱敏记录在 `SOURCE_MANIFEST.json` |
-| `oracle/` `tools/` `third_party/` | 手写资产。曾被误列进 `.gitignore`，代价是两份审计文档**已永久丢失** |
-| `runs/` `harness/runs/` | 实验产物，不进 git（**新 checkout 是空的**） |
+下一条真实主线是：接入 grasp candidates → 做物理硬过滤和示范排序 → 实现独立的非特权 runtime → 打通一个完整 episode。只有这条链稳定后，才加入跨阶段兼容性（`compat`）检查和恢复。
 
----
+详细内容：
 
-## 边界与远程
-
-- **实验场地**：5090（仓库 checkout + `~/phase1`）。2026-07-29 起自 1022 迁出。
-- **Knowin World / 仿真数据**：外部共享依赖，**只读借用**，不 vendoring 进本仓；禁止写入、部署、改配置或启停其服务。
-- **主仓 = 内网 Gitea 私有仓**（remote `gitea`）；GitHub `origin` 自 2026-07-29 **停止维护**，其上内容视为已公开。
-- 5090 用 `ssh -A` 拉取（agent forwarding 必需）。push 前跑门禁，详见 [`docs/SECURITY.md`](docs/SECURITY.md)。
+- [docs/PROPOSAL.md](docs/PROPOSAL.md)：研究问题与实验方法；
+- [docs/API.md](docs/API.md)：VLM、高层 runtime、可信 gate 和底层控制的边界；
+- [docs/TODO.md](docs/TODO.md)：当前待办；
+- [docs/MILESTONES.md](docs/MILESTONES.md)：阶段目标和验收条件；
+- [AGENTS.md](AGENTS.md)、[CLAUDE.md](CLAUDE.md)：仓库协作规则。

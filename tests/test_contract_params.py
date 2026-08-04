@@ -1,30 +1,24 @@
-"""P0-15:五个契约参数「消费或显式 UNSUPPORTED 记账」的单测(破口③)。
+"""契约参数必须被消费,或显式记为 UNSUPPORTED。
 
-静默丢弃归零是本任务的验收本体,所以每条断言都盯 rt.calls(调用账本):
+每条断言都检查 rt.calls(调用账本),防止参数被静默丢弃:
 参数要么改变行为(align.axis → 不同末端腕姿;lower_until.stop_condition → 只启用某类判据),
-要么被记进 unsupported_param(param/value/reason 三字段可断言)。绝不再无声吞掉。
+要么被记进 unsupported_param(param/value/reason 三字段可断言)。
 
-对照:approach.cone 已由 P0-03 消费(regions.rank_by_cone),此处仅回归确认它进账本,
-不重复实现。
+approach.cone 必须参与 regions.rank_by_cone 排序并进入账本。
 
 风格对齐 tests/test_solve_dispatch.py:纯逻辑、离线、不触 sim/网络/LLM。
-用真 KWRuntime 走真代码路径,只把碰 sim 的底层动作(_move/_ctrl/_wait_settle/
+用真 OracleRuntime 走真代码路径,只把碰 sim 的底层动作(_move/_ctrl/_wait_settle/
 _cur_xquat/probes/pipe)桩掉并记录——参数消费逻辑本身全部真跑。
 """
 
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness import regions
-from harness.kwadapter import KWRuntime
+from demo_graph_lab.execution.oracle_runtime import OracleRuntime
+from demo_graph_lab.selection import regions
 
 
 # --------------------------------------------------------------------------
-# 离线 KWRuntime:注入 oracle 实体缓存,桩掉全部碰 sim 的底层动作。
+# 离线 OracleRuntime:注入 oracle 实体缓存,桩掉全部碰 sim 的底层动作。
 # align/transport/lower_until 的参数消费逻辑(_consume_obj/_axis_vec/_align_quat/
 # _stop_kind)全部真跑;只有会发 HTTP 的 _move/_ctrl/... 被替换成记录桩。
 # --------------------------------------------------------------------------
@@ -36,7 +30,7 @@ def _entity(x=0.4, y=0.1, z=0.8, half=0.06):
 
 def _offline_rt(entities=None, probes=None, force=None):
     g = {"stages": [{"index": 0, "name": "insert", "holes": [], "stage_objects": {}}]}
-    rt = KWRuntime(g)
+    rt = OracleRuntime(g)
     ents = entities if entities is not None else {}
     # 注入实体缓存(_entities 的短 TTL 缓存),让 _ent/_resolve 离线可解析。
     import time
@@ -72,7 +66,7 @@ def _find(rt, op):
 
 
 # ==========================================================================
-# 1. align.axis(最要命):不同 axis → 不同末端腕姿。
+# align.axis:不同 axis → 不同末端腕姿。
 # ==========================================================================
 def _axis_handle(vec):
     """binding.solve_axis_3d 的句柄形态。"""
@@ -100,7 +94,7 @@ def test_align_axis_changes_behavior_vs_no_axis():
     """有 axis(水平)时锁定腕姿,与 axis=None(退回竖直姿态,quat=None)行为不同。"""
     rt_none = _offline_rt({"tube": _entity(), "rack": _entity()})
     rt_none.align("tube", "rack", axis=None)
-    assert rt_none.moves[-1]["quat"] is None, "无 axis 应退回 _move(quat=None) 旧竖直姿态"
+    assert rt_none.moves[-1]["quat"] is None, "无 axis 应使用 _move(quat=None) 的竖直姿态"
     assert not _find(rt_none, "align_axis")
     # axis=None 不是「读到用不上」,是压根没传 → 不记 UNSUPPORTED。
     assert not _find(rt_none, "unsupported_param")
@@ -123,7 +117,7 @@ def test_align_axis_vertical_is_unsupported_for_yaw():
 
 
 # ==========================================================================
-# 2. align.obj / 4. transport.obj:参照物按参数解析并记账;解析不到 → UNSUPPORTED。
+# align.obj / transport.obj:参照物按参数解析并记账;解析不到 → UNSUPPORTED。
 # ==========================================================================
 def test_align_obj_resolved_is_logged():
     rt = _offline_rt({"tube": _entity(x=0.2), "rack": _entity(x=0.5)})
@@ -158,10 +152,10 @@ def test_align_obj_unresolvable_is_unsupported():
 
 
 # ==========================================================================
-# 3. lower_until.stop_condition:消费参数选择停止判据类别。
-#    (P0-14 已去特权:contact/plateau 为非特权判据;predicate 类无非特权实现,
-#     路由到它会记 UNSUPPORTED 并退回 contact/plateau。predicate-stop 的深入断言
-#     见 tests/test_gates_no_privilege.py。)
+# lower_until.stop_condition:消费参数选择停止判据类别。
+#    contact/plateau 是非特权判据;predicate 没有非特权实现,
+#    因此记为 UNSUPPORTED 并退回 contact/plateau。更深入的防火墙断言
+#    见 tests/test_gates_no_privilege.py。
 # ==========================================================================
 def _passing_probes():
     return [{"label": "root_in_bbox", "passed": True},
@@ -188,9 +182,10 @@ def test_lower_until_contact_kind_ignores_predicates():
 
 
 def test_lower_until_predicate_kind_is_unsupported_and_falls_back():
-    """P0-14 去特权:stop_kind=predicate 需特权实体态谓词(旧读 rt.probes()),
-    去特权后无非特权实现 → 记 UNSUPPORTED + 退回 contact/plateau,**绝不再调 probes()**。
-    给高力值 → 应以 contact_force 停(退回的非特权判据生效),reason 绝非 'predicates'。"""
+    """predicate 停止需要特权谓词,无非特权实现时必须记账并退回。
+
+    控制路径不得调用 probes();高力值应由非特权 contact_force 判据停止。
+    """
     called = {"probes": False}
 
     rt = _offline_rt(probes=_passing_probes(), force=[57.0])
@@ -210,18 +205,18 @@ def test_lower_until_predicate_kind_is_unsupported_and_falls_back():
     done = _find(rt, "lower_until_done")[0]
     assert done["reason"] != "predicates", "去特权后不得以特权谓词停"
     assert done["reason"] == "contact_force", "应退回非特权 contact 判据停"
-    assert not called["probes"], "方法路径控制回路不得再调 probes()(D-04)"
+    assert not called["probes"], "方法路径控制回路不得调用 probes()"
 
 
-def test_lower_until_no_stop_kind_is_unsupported_and_keeps_old_behavior():
-    """参数缺显式 stop_kind(现有语料均如此)→ UNSUPPORTED 记账 + 三判据全开旧行为。"""
+def test_lower_until_no_stop_kind_is_unsupported_and_uses_safe_fallback():
+    """缺少显式 stop_kind 时必须记为 UNSUPPORTED,并启用全部默认判据。"""
     rt = _offline_rt(probes=_passing_probes(), force=[57.0])
     rt.lower_until({"kind": "condition", "hole": "seated_condition"})
     us = [c for c in _find(rt, "unsupported_param")
           if c["param"] == "lower_until.stop_condition"]
     assert us, "无 stop_kind 应记 UNSUPPORTED"
     assert "keep_all_criteria" in us[0]["reason"]
-    # 三判据全开:高力值 → 仍能以 contact_force 停(旧行为保留)。
+    # 三判据全开:高力值应以 contact_force 停止。
     assert _find(rt, "lower_until_done")[0]["reason"] == "contact_force"
 
 
@@ -235,20 +230,20 @@ def test_lower_until_string_condition_is_unsupported():
 
 
 # ==========================================================================
-# 5. approach.cone:P0-03 已消费(regions.rank_by_cone)。此处仅回归确认进账本。
+# approach.cone:参与 regions.rank_by_cone 排序并进入账本。
 # ==========================================================================
-def test_approach_cone_already_consumed_by_p0_03():
-    """cone 参与排序并记 approach_cone(P0-03 已兑现),不属本任务新增。"""
+def test_approach_cone_is_consumed():
+    """cone 参与排序,并记入 approach_cone。"""
     rt = _offline_rt({"bowl": _entity()})
     rt.approach("bowl", cone="side")
     got = _find(rt, "approach_cone")
-    assert got, "approach.cone 应已被 P0-03 消费并记账"
+    assert got, "approach.cone 应参与排序并被记账"
     assert got[0]["cone"] == "side"
 
 
 def test_approach_cone_ranking_is_direction_aware():
-    """回归 P0-03:rank_by_cone 对不同 cone 给不同 top-1 方向。"""
-    cands = list(KWRuntime._APPROACH_DIR_CANDIDATES)
+    """rank_by_cone 对不同 cone 给出不同 top-1 方向。"""
+    cands = list(OracleRuntime._APPROACH_DIR_CANDIDATES)
     top_down = regions.rank_by_cone(cands, "top_down")[0]["id"]
     side = regions.rank_by_cone(cands, "side")[0]["id"]
     assert top_down != side, "不同 cone 应偏好不同 approach 方向"

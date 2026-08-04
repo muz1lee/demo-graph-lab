@@ -6,48 +6,20 @@
 *.pem
 .openaikey
 .qwenkey
-configs/secrets.env
-configs/local/
-/configs/env.sh
-configs/pipeline_runtime.env
-/services/
 
-# Generated experiment artifacts
-# 注意:本段只放「可再生成的产物」。手写资产不要加到这里——
-# oracle/、tools/、*_AUDIT.md 曾被误列于此(它们是手写的),后果是 PREDICATE_AUDIT.md
-# 与 PROVENANCE_CORRECTION.md 已永久丢失、PRIMITIVE_API_AUDIT.md 在 5090 上取不到。
-# 2026-07-30 已移出并纳入版本控制。
-runs/
-outputs/
-artifacts/
-cache/
-logs/
-audit/
-backups/
-camera_probe/
-demo_evidence/
-/*.jpg
-/*.png
+# Generated runtime artifacts
+/runs/
+/data/
+/models/
+/weights/
+/checkpoints/
 *.log
 *.pid
 *.mp4
 
-# Models, datasets, environments, and vendored repositories
-models/
-weights/
-checkpoints/
-/data/
-vendor/
-repos/
+# Python environments and caches
 .venv*/
 venv/
-knowin-world/
-knowin-world-data/
-/kw-aspire-robodojo/
-/task_specs/
-/venvs/
-
-# Python and test caches
 **/__pycache__/
 **/*.py[cod]
 .pytest_cache/

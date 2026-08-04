@@ -1,18 +1,13 @@
-"""P0-04 / C-6:gate 消费 stage["constraints"]。
+"""Gate 必须消费 stage["constraints"]。
 
-核心断言(TODO §1.2 C-6 交付):造一个 constraints 全违反、但 acceptance 全过的 stage,
-gate 必须判 passed=False——旧行为(gate 一行不读 constraints)会判过。
+核心断言:造一个 constraints 全违反、但 acceptance 全过的 stage,
+gate 必须判 passed=False。
 
 同时覆盖字段级可分(acceptance_hold / constraints_hold 独立)、throughout 的 entry/exit
 双查与 violated_midway、at_end 只查出口、无约束阶段的空合取恒真。纯逻辑,无 cv2/网络。
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from harness import gates
+from demo_graph_lab.evaluation import gates
 
 
 class FakeRT:
@@ -49,7 +44,7 @@ def _run(rt, stage, move=True):
 
 
 # ==========================================================================
-# C-6 核心:constraints 全违反 + acceptance 全过 → passed=False(旧行为是过)
+# constraints 全违反 + acceptance 全过 → passed=False。
 # ==========================================================================
 def test_constraints_violated_acceptance_ok_fails():
     stage = {
@@ -68,7 +63,7 @@ def test_constraints_violated_acceptance_ok_fails():
     v = _run(rt, stage)
     assert v["acceptance_hold"] is True         # 验收全过
     assert v["constraints_hold"] is False       # 约束全违反
-    assert v["passed"] is False                 # ← C-6:旧行为会是 True
+    assert v["passed"] is False                 # constraints 必须参与最终判定
     assert "constraints failed" in v["reason"]
 
 
@@ -111,7 +106,7 @@ def test_both_ok_with_effect_passes():
 
 
 # ==========================================================================
-# 无 constraints 的阶段:空合取恒真(无待检约束 ≠ 失败),不改旧口径
+# 无 constraints 的阶段:空合取恒真(无待检约束 ≠ 失败)。
 # ==========================================================================
 def test_no_constraints_key_is_vacuously_true():
     stage = {
@@ -124,6 +119,24 @@ def test_no_constraints_key_is_vacuously_true():
     assert v["constraints_hold"] is True   # 无约束 → 空合取真
     assert v["n_constraints"] == 0
     assert v["passed"] is True
+
+
+def test_strict_gate_rejects_unobservable_effect() -> None:
+    stage = {
+        "index": 0,
+        "name": "lift",
+        "stage_objects": {"manipulated": "bowl0"},
+        "acceptance": [{"name": "above", "args": {}}],
+    }
+    runtime = FakeRT(verdicts={"above": True}, positions={})
+    entry = gates.snapshot(runtime, stage)
+
+    strict = gates.evaluate(runtime, stage, entry, strict=True)
+    relaxed = gates.evaluate(runtime, stage, entry, strict=False)
+
+    assert strict["effect_status"] == gates.UNKNOWN
+    assert strict["passed"] is False
+    assert relaxed["passed"] is True
 
 
 # ==========================================================================
@@ -191,10 +204,3 @@ def test_at_end_only_checks_exit():
     assert v["constraints_hold"] is True
     assert v["violated_midway"] == []
     assert v["passed"] is True
-
-
-if __name__ == "__main__":
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            fn()
-            print("ok", name)
