@@ -47,8 +47,9 @@ Backend 输出始终是不可信 proposal。stage、registry、constraint sample
 第一条非特权 baseline 不调用 backend model。当前已经实现 planning-only 部分：
 
 ```text
-RGB-D / robot state
-  → perception and grasp candidates
+recorded RGB-D refs / robot state
+  → strict observation and candidate adapters
+  → observation-bound typed-hole validation
   → reachability / collision / width hard filter
   → deterministic region / cone ranking
   → PlanningOnlyRuntime 写 decisions.jsonl
@@ -56,7 +57,15 @@ RGB-D / robot state
   → 所有 control primitive 抛 ExecutionDisabled
 ```
 
-`ObservationPacket` 只接受 sensor artifact 引用、对象观测和显式 `Proprioception`；不接受任意 `robot_state` mapping。候选数据会冻结并检查为 finite、JSON-safe，缺失/异常/`UNKNOWN` 的硬检查全部 fail-closed。当前还没有真实 sensor/candidate adapter，也没有 candidate value 对 graph hole type/frame 的完整校验，所以不能连接控制。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
+`ObservationPacket` 只接受 sensor artifact 引用、对象观测和显式 `Proprioception`；不接受任意 `robot_state` mapping。EEF pose 另带 `end_effector_frame`，不能默认继承 camera frame。record adapter 拒绝 schema 漂移、非有限数值、数值位置的 bool 和空证据。Candidate 必须携带同一次 `observation_id`，并把会改变数值语义的规范化步骤写入结构化 `provenance`；几何 hole value 使用精确的 `{value, frame, calibration_ref, object_id}` envelope，pose 顺序固定为 `[x,y,z,qx,qy,qz,qw]`。frame 必须同时等于 observation、object observation 和 graph hole 的 frame；V1 没有隐式 transform/alias resolver。标定、对象、shape 或单位向量检查不通过时，不会调用 IK、碰撞或宽度 checker。
+
+当前 graph hole 还没有结构化 object anchor。只有 stage 中恰好一个对象时，runtime 才能证明 candidate 的 `object_id` 绑定正确；manipulated 与 target 同时存在时不能从 hole 名或 `solver_hint` 猜，必须返回 `UNKNOWN`。正式多对象 replay 前要先补 graph/program 可校验的 hole→object 接线。
+
+`StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
+
+当前只有纯离线 record adapter：它能把保存的 observation、candidate record 和实际 GraspNet `/predict` raw schema 规范化，但不会发起服务调用。GraspNet reply 只有同时提供米制 point-cloud manifest，以及经过记录的 `graspnet_parallel_jaw → runtime_ee` 刚体变换，才会变成可绑定的 runtime pose；变换必须带属于当前 observation 的独立 `evidence_ref`，其数值、parent/child frame、米制单位和 XYZW 约定全部保存在 candidate provenance，矩阵转 quaternion 本身不算 TCP 标定。模型 `object_id` 还必须由调用方显式映射到 graph registry ID。adapter 不猜 `approach_tilt_deg`、`height_fraction` 或碰撞状态。
+
+在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`；缺少某项排序特征时，对应 preference meta 是 `UNCHECKABLE`，只有部分候选有特征时为 `PARTIAL`，不能把 ID tie-break 误写成 demo ranking。固定 synthetic replay 已经验证一次 hard filter 后共享 accepted set 的 demo/no-demo 对照；这不是 live 感知或物理 checker 结果。当前 replay loader 只接受 `synthetic_contract_fixture`，在真实 provenance/manifest contract 完成前会拒绝任何 `recorded_real` 标签。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
 
 实验需要区分两种模式：component mode 固定人工检查过的 graph 和 policy，只研究候选与执行；end-to-end mode 才重新从 demo 调用 backend 生成 graph 和 policy。选择算法对照必须共享同一 graph、policy、候选和执行预算。
 
@@ -127,22 +136,39 @@ Handle 只允许传给后续高层动作。生成 policy 不能读取其中的�
 - typed-hole 求解和任务无关的 region/cone 偏好函数；
 - `evaluation.gates` 和 `evaluation.predicates`：读取独立观测并给出 `PASS / FAIL / UNKNOWN`。
 
-硬过滤和排序骨架已经存在，但真实的 reachability、collision、gripper-width checker adapter 尚未接入。跨阶段兼容性检查仍是后续功能。
+typed-hole 校验、硬过滤、排序和 fixed replay 已经存在，但真实的 reachability、collision、gripper-width checker adapter 尚未接入。跨阶段兼容性检查仍是后续功能。
 
 当前 runner 失败后只重复同一个 handler。它不会 rollback、换候选或修改搜索范围。缺少 handler、hole 歧义和未知谓词都必须停止或返回 `UNKNOWN`，不能猜一个默认值继续执行。
 
 当前 Oracle 从 simulator state 直接得到 world-frame 几何，因此数值 handle 明确标为 `frame="world"`，同时保留 graph 请求的 `requested_frame` 供检查。非特权 runtime 不能照搬这个捷径，必须使用相机与机器人标定完成真正的 frame transform。
 
-`scalar` 和 `runtime_condition` 可以返回延迟描述子，由后续高层控制器结合当前状态求值；它们不是 VLM 猜出的数值。插入阶段由 deterministic enrich 补 `purpose=lower_stop` 的控制洞；StageProgram validator 只允许这类洞接到 `lower_until`。它目前只声明应读取非特权 contact/motion-plateau 信号，不生成阈值；把 descriptor 明确路由到 Oracle 的停止类型仍是执行前 TODO。
+Oracle 的 `scalar` 和 `runtime_condition` 可以返回延迟描述子；非特权 planning runtime 尚未实现对应 resolver，因此当前会 fail-closed，而不是让 candidate 或 VLM 猜值。插入阶段由 deterministic enrich 补 `purpose=lower_stop` 的控制洞；StageProgram validator 只允许这类洞接到 `lower_until`。它目前只声明应读取非特权 contact/motion-plateau 信号，不生成阈值；明确的停止信号路由仍是执行前 TODO。
+
+### 已确认但尚未接入的真实接口
+
+5090 的只读静态盘点确认了 head RGB-D、点云、GraspNet `/predict` 和纯 IK 的代码路径，但还不能把它们报告为完整候选链：
+
+- live depth 已经是米，旧 point-cloud helper 必须显式使用 `depth_scale=1.0`；
+- 旧 adapter 调 `/propose`，与实际 `/predict` 文件路径契约不兼容；
+- GraspNet 不做碰撞过滤，也不直接给 graph object ID、`approach_tilt_deg` 或 `height_fraction`；
+- recorded reply 的 point-cloud ref、frame ID 和 coordinate frame 必须与当前 observation 精确一致，structured grasp fields 还要与原始 17D array 一致；
+- point-cloud manifest 必须显式声明米、frame 和 calibration；grasp center 必须经带独立 evidence artifact 的 grasp-frame→runtime-EEF transform，不能直接当 TCP pose；
+- 现有 IK 会先 clip 越界目标，reachability checker 必须检查原目标和最终残差；
+- 当前 motion-planning wrapper 丢失 planner success，不能签发可信 `PASS`；
+- candidate width 是米，而 K1 只有 motor angle，未做 opening-width 标定前 width checker 必须返回 `UNKNOWN`。
+
+因此 v1 先消费冻结文件，再单独采集第一份真实 replay；不能用接口“存在”替代 certificate 语义正确。
 
 ### 执行前门槛
 
-以下四项未完成前，`PlanningOnlyRuntime.execution_enabled` 保持 `False`：
+以下项目全部完成前，`PlanningOnlyRuntime.execution_enabled` 保持 `False`：
 
-1. 真实 observation/candidate/check adapters 的完整调用图确认只读、无 `/state` 和 control side effect；
-2. 每个 candidate hole value 按 graph type、frame、finite 数值和 calibration 做硬校验；
-3. 固定 candidate replay 能复现过滤原因、ranking meta 和最终选择；
+1. live observation/candidate/check adapters 的完整调用图确认只读、无 `/state` 和 control side effect；
+2. 第一份真实 replay 能复现 typed binding、三个 hard-check 原因、ranking meta 和最终选择；
+3. reachability 不接受 clipped target，collision 参数与 K1 对齐，width 有物理标定；
 4. 一个非特权 stage 的 gate 输入和 abort 行为通过离线/仿真前检查。
+
+候选 type/frame/calibration 校验和 synthetic fixed replay 已完成，只是上述门槛的合约验证，不等于真实链验收。
 
 特权 Oracle 也不会只凭一个旧 `policy.py` 启动：加载器要求当前 validation 与 compile report 通过，graph 和 object registry 与编译快照一致，StageProgram 与 compile report 中实际 dry-run 的内容一致，并重新校验 program、确定性生成 policy 后做逐字比对。episode 中任一 stage 失败会返回非零。`retreat` 的可信 pose solver 未完成，因此即使其余产物通过，含该动作的 episode 也会在 reset 和任何控制前硬停。
 

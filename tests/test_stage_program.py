@@ -15,6 +15,7 @@ from demo_graph_lab.policy.program import (
     compile_program,
     unwired_holes,
     validate_program,
+    wired_holes_by_stage,
 )
 
 
@@ -231,6 +232,23 @@ def test_unwired_holes_are_reported_without_rejecting_program():
             "target_point", "tube_axis",
         ],
     }]
+
+
+def test_wired_holes_follow_runtime_signature_not_json_key_order():
+    program = _program([
+        {
+            "op": "grasp_at",
+            "args": {
+                "axis": {"hole": "tube_axis"},
+                "grasp_pose": {"hole": "grasp_pose"},
+            },
+        }
+    ])
+
+    assert validate_program(program, _graph()) == []
+    assert wired_holes_by_stage(program) == {
+        0: ("grasp_pose", "tube_axis"),
+    }
 
 
 def test_compile_command_writes_program_then_deterministic_policy(tmp_path, monkeypatch):

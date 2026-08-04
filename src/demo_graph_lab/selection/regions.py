@@ -18,6 +18,7 @@ extent 用**全边长**(max−min,不是半长)。候选若已带 height_fractio
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import math
 
 from ..graph import vocab
@@ -25,6 +26,36 @@ from ..graph import vocab
 
 # 显式不可检查态:排序退化为恒等,调用方须能从返回中读到 uncheckable 标志。
 UNCHECKABLE = "UNCHECKABLE"
+PARTIAL = "PARTIAL"
+
+
+def _finite_number(value, name):
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value)):
+        raise ValueError(f"{name} must be a finite number")
+    return float(value)
+
+
+def _vector3(value, name):
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise ValueError(f"{name} must contain three finite numbers")
+    return [_finite_number(item, name) for item in value]
+
+
+def _ranking_meta(kind, label, available, total):
+    if available == 0:
+        status = UNCHECKABLE
+    elif available < total:
+        status = PARTIAL
+    else:
+        status = "ranked"
+    return {
+        kind: label,
+        "status": status,
+        "uncheckable": available == 0,
+        "available_count": available,
+        "total_count": total,
+    }
 
 
 # ==========================================================================
@@ -84,23 +115,51 @@ def _height_fraction(candidate):
     两者都取不到 → None(调用方据此判 s 不可算,稳定排序退化为恒等)。
     """
     if "height_fraction" in candidate and candidate["height_fraction"] is not None:
-        return float(candidate["height_fraction"])
+        fraction = _finite_number(
+            candidate["height_fraction"], "height_fraction"
+        )
+        if not 0.0 <= fraction <= 1.0:
+            raise ValueError("height_fraction must be within [0, 1]")
+        return fraction
 
-    p = candidate.get("xyz") or candidate.get("point")
+    p = candidate.get("xyz")
+    if p is None:
+        p = candidate.get("point")
     ext = candidate.get("extent")
-    if p is None or not isinstance(ext, dict):
+    if p is None or not isinstance(ext, Mapping):
         return None
-    u = candidate.get("axis_up") or [0.0, 0.0, 1.0]
+    p = _vector3(p, "candidate point")
+    axis_up = candidate.get("axis_up")
+    if axis_up is None:
+        axis_up = [0.0, 0.0, 1.0]
+    u = _vector3(axis_up, "axis_up")
     lo, hi = ext.get("min"), ext.get("max")
     if lo is None or hi is None:
         return None
+    lo = _vector3(lo, "extent.min")
+    hi = _vector3(hi, "extent.max")
+    if any(lower > upper for lower, upper in zip(lo, hi)):
+        raise ValueError("extent min values must not exceed max values")
     proj = sum(p[i] * u[i] for i in range(3))
-    proj_lo = sum(lo[i] * u[i] for i in range(3))
-    proj_hi = sum(hi[i] * u[i] for i in range(3))   # 全边长:hi−lo,不是半长
+    # ``extent`` is a frame-space AABB.  Its projection extrema are generally
+    # different corners when an axis contains negative components; simply
+    # projecting the stored min and max corners is only correct for an axis in
+    # the all-positive octant.
+    proj_lo = sum(
+        (lo[i] if u[i] >= 0.0 else hi[i]) * u[i]
+        for i in range(3)
+    )
+    proj_hi = sum(
+        (hi[i] if u[i] >= 0.0 else lo[i]) * u[i]
+        for i in range(3)
+    )   # 全边长:hi−lo,不是半长
     span = proj_hi - proj_lo
     if span == 0:
         return None
-    return (proj - proj_lo) / span
+    fraction = (proj - proj_lo) / span
+    if not 0.0 <= fraction <= 1.0:
+        raise ValueError("derived height_fraction must be within [0, 1]")
+    return fraction
 
 
 # ==========================================================================
@@ -127,8 +186,10 @@ def rank_by_region(candidates, region, *, with_meta=False):
     items = list(candidates or [])
 
     if pref is UNCHECKABLE:
-        meta = {"region": region, "status": UNCHECKABLE, "uncheckable": True}
+        meta = _ranking_meta("region", region, 0, len(items))
         return (items, meta) if with_meta else items
+
+    available = sum(_height_fraction(item) is not None for item in items)
 
     # 稳定降序:key = −score;s 不可算的候选给 −inf 的分(沉到末尾但彼此保序)。
     def _key(c):
@@ -138,7 +199,7 @@ def rank_by_region(candidates, region, *, with_meta=False):
         return -pref(s)
 
     ranked = sorted(items, key=_key)
-    meta = {"region": region, "status": "ranked", "uncheckable": False}
+    meta = _ranking_meta("region", region, available, len(items))
     return (ranked, meta) if with_meta else ranked
 
 
@@ -177,9 +238,9 @@ def cone_angle_deg(approach_dir, cone):
     Horizontal azimuth is intentionally ignored. Missing and zero-length
     directions return ``None``; an unknown cone raises ``ValueError``.
     """
-    if not approach_dir:
+    if approach_dir is None:
         return None
-    a = _unit(approach_dir)
+    a = _unit(_vector3(approach_dir, "approach_dir"))
     target_tilt = _cone_tilt_deg(cone)
     if a is None:
         return None
@@ -208,6 +269,16 @@ def rank_by_cone(candidates, cone, *, dir_key="approach_dir", with_meta=False):
     """
     _cone_tilt_deg(cone)     # 未知 cone 在此 ValueError
     items = list(candidates or [])
+    for candidate in items:
+        direction = candidate.get(dir_key)
+        if direction is not None and _unit(
+            _vector3(direction, dir_key)
+        ) is None:
+            raise ValueError(f"{dir_key} must be non-zero")
+    available = sum(
+        cone_preference(candidate.get(dir_key), cone) is not None
+        for candidate in items
+    )
 
     def _key(c):
         score = cone_preference(c.get(dir_key), cone)
@@ -216,7 +287,45 @@ def rank_by_cone(candidates, cone, *, dir_key="approach_dir", with_meta=False):
         return -score
 
     ranked = sorted(items, key=_key)
-    meta = {"cone": cone, "status": "ranked", "uncheckable": False}
+    meta = _ranking_meta("cone", cone, available, len(items))
+    return (ranked, meta) if with_meta else ranked
+
+
+def rank_by_gravity_tilt(
+    candidates,
+    cone,
+    *,
+    tilt_key="approach_tilt_deg",
+    with_meta=False,
+):
+    """Rank candidate records by a precomputed gravity-relative tilt.
+
+    Planning candidates use this scalar instead of a bare direction vector, so
+    selection cannot silently treat camera-frame ``-z`` as gravity down.
+    """
+
+    target_tilt = _cone_tilt_deg(cone)
+    items = list(candidates or [])
+    tilts = {}
+    for index, candidate in enumerate(items):
+        value = candidate.get(tilt_key)
+        if value is None:
+            continue
+        tilt = _finite_number(value, tilt_key)
+        if not 0.0 <= tilt <= 180.0:
+            raise ValueError(f"{tilt_key} must be within [0, 180]")
+        tilts[index] = tilt
+
+    ranked_with_index = sorted(
+        enumerate(items),
+        key=lambda item: (
+            float("inf")
+            if item[0] not in tilts
+            else abs(tilts[item[0]] - target_tilt)
+        ),
+    )
+    ranked = [item for _, item in ranked_with_index]
+    meta = _ranking_meta("cone", cone, len(tilts), len(items))
     return (ranked, meta) if with_meta else ranked
 
 

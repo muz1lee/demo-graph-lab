@@ -11,6 +11,7 @@ import pytest
 
 from demo_graph_lab.graph import vocab
 from demo_graph_lab.selection import regions
+from demo_graph_lab.selection.candidates import CandidateBundle, deterministic_select
 
 
 # --------------------------------------------------------------------------
@@ -119,6 +120,32 @@ def test_rank_unrankable_candidates_sink_and_preserve_order():
     assert [x["id"] for x in ranked[1:]] == ["no1", "no2"]   # 保输入序,未丢
 
 
+def test_region_meta_distinguishes_missing_and_partial_features():
+    missing, missing_meta = regions.rank_by_region(
+        [{"id": "a"}, {"id": "b"}], "upper_body", with_meta=True,
+    )
+    partial, partial_meta = regions.rank_by_region(
+        [{"id": "a"}, {"id": "b", "height_fraction": 0.8}],
+        "upper_body",
+        with_meta=True,
+    )
+
+    assert [item["id"] for item in missing] == ["a", "b"]
+    assert missing_meta["status"] == regions.UNCHECKABLE
+    assert missing_meta["available_count"] == 0
+    assert [item["id"] for item in partial] == ["b", "a"]
+    assert partial_meta["status"] == regions.PARTIAL
+    assert partial_meta["available_count"] == 1
+
+
+@pytest.mark.parametrize("value", [True, "high", -0.1, 1.1, float("nan")])
+def test_explicit_height_fraction_must_be_finite_and_normalized(value):
+    with pytest.raises(ValueError):
+        regions.rank_by_region(
+            [{"id": "bad", "height_fraction": value}], "upper_body"
+        )
+
+
 # --------------------------------------------------------------------------
 # _height_fraction:几何路径(s = (p·u−min)/(max−min),全边长)。
 # --------------------------------------------------------------------------
@@ -129,6 +156,51 @@ def test_height_fraction_from_geometry_full_extent():
     assert regions._height_fraction(c) == pytest.approx(0.5)
 
 
+def test_height_fraction_projects_aabb_along_mixed_sign_axis():
+    diagonal = 2 ** -0.5
+    candidate = {
+        "xyz": [0.75, 0.25, 0.0],
+        "axis_up": [diagonal, -diagonal, 0.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+
+    assert regions._height_fraction(candidate) == pytest.approx(0.75)
+
+
+def test_height_fraction_zero_axis_is_uncheckable():
+    candidate = {
+        "xyz": [0.5, 0.5, 0.5],
+        "axis_up": [0.0, 0.0, 0.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+
+    assert regions._height_fraction(candidate) is None
+
+
+@pytest.mark.parametrize("field", ["axis_up", "xyz"])
+def test_height_fraction_rejects_explicit_empty_geometry(field):
+    candidate = {
+        "xyz": [0.5, 0.5, 0.5],
+        "axis_up": [0.0, 0.0, 1.0],
+        "extent": {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]},
+    }
+    candidate[field] = []
+
+    with pytest.raises(ValueError):
+        regions._height_fraction(candidate)
+
+
+def test_height_fraction_rejects_inverted_extent():
+    candidate = {
+        "xyz": [0.5, 0.5, 0.8],
+        "axis_up": [0.0, 0.0, 1.0],
+        "extent": {"min": [0.0, 0.0, 1.0], "max": [1.0, 1.0, 0.0]},
+    }
+
+    with pytest.raises(ValueError, match="min values"):
+        regions._height_fraction(candidate)
+
+
 def test_height_fraction_prefers_explicit_field():
     c = {"height_fraction": 0.33, "xyz": [0, 0, 0.80],
          "extent": {"min": [0, 0, 0.72], "max": [0, 0, 0.88]}}
@@ -137,6 +209,30 @@ def test_height_fraction_prefers_explicit_field():
 
 def test_height_fraction_none_when_ungeometrable():
     assert regions._height_fraction({"id": "x"}) is None
+
+
+def test_candidate_bundle_nested_geometry_remains_rankable():
+    candidates = [
+        CandidateBundle(
+            candidate_id=name,
+            observation_id="obs-1",
+            hole_values={},
+            features={
+                "xyz": [0.0, 0.0, height],
+                "extent": {
+                    "min": [0.0, 0.0, 0.0],
+                    "max": [0.0, 0.0, 1.0],
+                },
+            },
+            evidence_refs=(f"candidates/{name}.json",),
+        )
+        for name, height in (("low", 0.2), ("high", 0.8))
+    ]
+
+    result = deterministic_select(candidates, region="upper_body")
+
+    assert [item.candidate_id for item in result.ranked] == ["high", "low"]
+    assert result.region_meta["status"] == "ranked"
 
 
 # --------------------------------------------------------------------------
@@ -196,6 +292,61 @@ def test_rank_by_cone_no_elimination():
              {"id": "c"}]                              # 无方向 → 沉末尾但不丢
     ranked = regions.rank_by_cone(cands, "top_down")
     assert len(ranked) == 3 and ranked[-1]["id"] == "c"
+
+
+def test_cone_meta_distinguishes_missing_and_partial_features():
+    _, missing_meta = regions.rank_by_cone(
+        [{"id": "a"}, {"id": "b"}], "top_down", with_meta=True,
+    )
+    _, partial_meta = regions.rank_by_cone(
+        [{"id": "a"}, {"id": "b", "approach_dir": [0, 0, -1]}],
+        "top_down",
+        with_meta=True,
+    )
+
+    assert missing_meta["status"] == regions.UNCHECKABLE
+    assert partial_meta["status"] == regions.PARTIAL
+    assert partial_meta["available_count"] == 1
+
+
+@pytest.mark.parametrize("value", ["down", [0, 0], [0, 0, 0], [0, 0, float("inf")]])
+def test_candidate_approach_direction_must_be_finite_nonzero_vector(value):
+    with pytest.raises(ValueError):
+        regions.rank_by_cone(
+            [{"id": "bad", "approach_dir": value}], "top_down"
+        )
+
+
+def test_gravity_tilt_ranking_is_frame_independent_and_strict():
+    candidates = [
+        {"id": "side", "approach_tilt_deg": 90.0},
+        {"id": "down", "approach_tilt_deg": 0.0},
+        {"id": "missing"},
+    ]
+
+    ranked, meta = regions.rank_by_gravity_tilt(
+        candidates, "top_down", with_meta=True
+    )
+
+    assert [item["id"] for item in ranked] == ["down", "side", "missing"]
+    assert meta["status"] == regions.PARTIAL
+    with pytest.raises(ValueError, match=r"\[0, 180\]"):
+        regions.rank_by_gravity_tilt(
+            [{"id": "bad", "approach_tilt_deg": 181.0}], "top_down"
+        )
+
+
+def test_planning_selector_rejects_frame_less_approach_direction():
+    candidate = CandidateBundle(
+        candidate_id="bad-direction",
+        observation_id="obs-1",
+        hole_values={},
+        features={"approach_dir": [0.0, 0.0, -1.0]},
+        evidence_refs=("candidates/bad-direction.json",),
+    )
+
+    with pytest.raises(ValueError, match="frame-less approach_dir"):
+        deterministic_select((candidate,), cone="top_down")
 
 
 # --------------------------------------------------------------------------

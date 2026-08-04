@@ -9,10 +9,12 @@
   dgl report    --task insert_tubes
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
+  dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
 """
 
 import argparse
 import sys
+from pathlib import Path
 
 from .common import artifacts
 
@@ -40,7 +42,22 @@ def main(argv=None):
             p.add_argument("--max-stages", type=int, default=None)
         if name == "metrics":
             p.add_argument("--gold", required=True)
+    replay = sub.add_parser(
+        "planning-replay",
+        help="compare demo/no-demo selection on one frozen, read-only replay",
+    )
+    replay.add_argument("--graph", required=True)
+    replay.add_argument("--replay", required=True)
+    replay.add_argument("--output", required=True)
     args = parser.parse_args(argv)
+
+    if args.cmd == "planning-replay":
+        from .execution.planning_replay import run_replay
+
+        result = run_replay(args.graph, args.replay)
+        artifacts.write_json(Path(args.output), result)
+        return 0
+
     artifacts.load_env()
 
     from .demo import ingest, keyframes, registry, stages

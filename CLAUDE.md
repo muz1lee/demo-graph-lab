@@ -20,7 +20,10 @@
 - `solve()` 的结果是不透明 handle，只能交给高层动作。
 - `evaluation/` 独立做 gate；`execution/robot_api.py` 和 `pipeline.py` 只在可信底层调用。
 - `OracleRuntime` 读取仿真精确状态，只用于调试；不得把 Oracle episode 写成主方法成功。
-- observation/candidate 契约不等于真实 adapter 已接通；真实感知、candidate generation、typed binding、compat 和 recovery 的状态必须如实区分。
+- candidate 必须绑定同一次 observation；typed-hole 校验必须早于所有物理 checker，几何值不做隐式 frame alias。
+- scalar/runtime condition 不由 candidate provider 填写；每阶段 required holes 以已校验 StageProgram 的 wiring 为准。
+- record adapter 不等于 live adapter 已接通；synthetic replay、真实 replay、live 感知、compat 和 recovery 的状态必须如实区分。
+- cone 排序不接 frame-less `approach_dir`；GraspNet grasp pose 未经带独立 evidence artifact 的显式 tool transform 不能当 runtime EEF/TCP pose，变换数值语义必须保存在 candidate provenance。
 
 ## 改动方式
 

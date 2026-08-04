@@ -322,18 +322,29 @@ def _render_value(value, hole_vars: dict[str, str]) -> str:
     return repr(value["object"])
 
 
+def wired_holes_by_stage(program: dict) -> dict[int, tuple[str, ...]]:
+    """Return hole names in first-use order from an already validated program."""
+
+    result = {}
+    for stage in program["stages"]:
+        names = []
+        for action in stage["actions"]:
+            _, _, argument_order = _primitive_parameters(action["op"])
+            for argument_name in argument_order:
+                value = action["args"].get(argument_name)
+                if (isinstance(value, dict) and "hole" in value
+                        and value["hole"] not in names):
+                    names.append(value["hole"])
+        result[stage["index"]] = tuple(names)
+    return result
+
+
 def unwired_holes(program: dict, graph: dict) -> list[dict]:
     """List declared holes omitted from wiring; some, such as scalar, are expected."""
-    programs_by_index = {stage["index"]: stage for stage in program["stages"]}
+    wired = wired_holes_by_stage(program)
     report = []
     for graph_stage in graph["stages"]:
-        stage_program = programs_by_index[graph_stage["index"]]
-        used = {
-            value["hole"]
-            for action in stage_program["actions"]
-            for value in action["args"].values()
-            if isinstance(value, dict) and "hole" in value
-        }
+        used = set(wired[graph_stage["index"]])
         declared = {
             hole["name"] for hole in graph_stage.get("holes", [])
             if isinstance(hole, dict) and isinstance(hole.get("name"), str)

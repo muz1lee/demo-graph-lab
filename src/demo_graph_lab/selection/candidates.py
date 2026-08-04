@@ -12,7 +12,7 @@ import math
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Sequence
 
-from ..perception import ObservationPacket
+from ..perception.observations import ObservationPacket
 from . import regions
 
 
@@ -27,7 +27,9 @@ REQUIRED_HARD_CHECKS = ("reachability", "collision_free", "gripper_width")
 
 def _freeze_json(value, path: str):
     """Normalize provider data to immutable, finite, JSON-safe values."""
-    if value is None or isinstance(value, (str, bool, int)):
+    if isinstance(value, bool):
+        raise TypeError(f"{path} must not contain boolean candidate data")
+    if value is None or isinstance(value, (str, int)):
         return value
     if isinstance(value, float):
         if not math.isfinite(value):
@@ -55,32 +57,49 @@ def _to_json(value):
 
 @dataclass(frozen=True)
 class CandidateBundle:
-    """One trusted candidate and the values it could bind to typed holes."""
+    """One normalized provider candidate awaiting binding and hard checks."""
 
     candidate_id: str
+    observation_id: str
     hole_values: Mapping[str, Any]
     features: Mapping[str, Any] = field(default_factory=dict)
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.candidate_id:
-            raise ValueError("candidate_id must not be empty")
+        if not isinstance(self.candidate_id, str) or not self.candidate_id.strip():
+            raise ValueError("candidate_id must be a non-empty string")
+        if not isinstance(self.observation_id, str) or not self.observation_id.strip():
+            raise ValueError("observation_id must be a non-empty string")
+        if not isinstance(self.hole_values, Mapping):
+            raise TypeError("hole_values must be a mapping")
+        if not isinstance(self.features, Mapping):
+            raise TypeError("features must be a mapping")
+        if not isinstance(self.provenance, Mapping):
+            raise TypeError("provenance must be a mapping")
         if "id" in self.features:
             raise ValueError("candidate feature name 'id' is reserved")
         object.__setattr__(self, "hole_values", _freeze_json(
             self.hole_values, f"candidate[{self.candidate_id}].hole_values"))
         object.__setattr__(self, "features", _freeze_json(
             self.features, f"candidate[{self.candidate_id}].features"))
-        if (not isinstance(self.evidence_refs, tuple)
-                or any(not isinstance(ref, str) or not ref for ref in self.evidence_refs)
+        object.__setattr__(self, "provenance", _freeze_json(
+            self.provenance, f"candidate[{self.candidate_id}].provenance"))
+        if (not isinstance(self.evidence_refs, tuple) or not self.evidence_refs
+                or any(not isinstance(ref, str) or not ref.strip()
+                       for ref in self.evidence_refs)
                 or len(self.evidence_refs) != len(set(self.evidence_refs))):
-            raise ValueError("candidate evidence_refs must be a tuple of unique strings")
+            raise ValueError(
+                "candidate evidence_refs must be a non-empty tuple of unique strings"
+            )
 
     def to_record(self) -> dict:
         return {
             "candidate_id": self.candidate_id,
+            "observation_id": self.observation_id,
             "hole_values": _to_json(self.hole_values),
             "features": _to_json(self.features),
+            "provenance": _to_json(self.provenance),
             "evidence_refs": list(self.evidence_refs),
         }
 
@@ -95,12 +114,21 @@ class CheckCertificate:
     evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.check:
-            raise ValueError("check name must not be empty")
+        if not isinstance(self.check, str) or not self.check.strip():
+            raise ValueError("check name must be a non-empty string")
         if not isinstance(self.status, CheckStatus):
             raise TypeError("status must be a CheckStatus")
-        if not self.reason:
-            raise ValueError("check certificate must include a reason")
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ValueError("check certificate must include a non-empty reason")
+        if (not isinstance(self.evidence_refs, tuple)
+                or any(not isinstance(ref, str) or not ref.strip()
+                       for ref in self.evidence_refs)
+                or len(self.evidence_refs) != len(set(self.evidence_refs))):
+            raise ValueError(
+                "check evidence_refs must be a tuple of unique non-empty strings"
+            )
+        if self.status is not CheckStatus.UNKNOWN and not self.evidence_refs:
+            raise ValueError("PASS/FAIL check certificates must include evidence_refs")
 
     def to_record(self) -> dict:
         return {
@@ -120,8 +148,10 @@ class HardCheck:
     evaluate: CheckFunction
 
     def __post_init__(self) -> None:
-        if not self.name:
-            raise ValueError("hard check name must not be empty")
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("hard check name must be a non-empty string")
+        if not callable(self.evaluate):
+            raise TypeError("hard check evaluate must be callable")
 
 
 @dataclass(frozen=True)
@@ -265,7 +295,14 @@ def deterministic_select(
 
     cone_meta = None
     if cone is not None:
-        records, cone_meta = regions.rank_by_cone(records, cone, with_meta=True)
+        if any("approach_dir" in item.features for item in items):
+            raise ValueError(
+                "planning candidates must provide gravity-relative "
+                "approach_tilt_deg, not a frame-less approach_dir"
+            )
+        records, cone_meta = regions.rank_by_gravity_tilt(
+            records, cone, with_meta=True
+        )
 
     region_meta = None
     if region is not None:

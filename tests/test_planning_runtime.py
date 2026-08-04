@@ -13,7 +13,7 @@ from demo_graph_lab.execution.planning_runtime import (
     OpaqueHandle,
     PlanningOnlyRuntime,
 )
-from demo_graph_lab.perception import ObservationPacket, Proprioception
+from demo_graph_lab.perception import ObjectObservation, ObservationPacket, Proprioception
 from demo_graph_lab.selection.candidates import (
     CandidateBundle,
     CheckCertificate,
@@ -33,22 +33,48 @@ def _observation() -> ObservationPacket:
         sensor_refs=("rgb/frame-10.png", "depth/frame-10.npy"),
         robot_state=Proprioception(
             joint_positions=(0.0,) * 7,
+            end_effector_frame="robot_base",
             gripper_positions=(0.0,),
             evidence_ref="proprioception/frame-10.json",
+        ),
+        objects=(
+            ObjectObservation(
+                object_id="object",
+                frame="robot_base",
+                pose=(0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0),
+                axis=(0.0, 0.0, 1.0),
+                evidence_refs=("objects/object.json",),
+            ),
         ),
     )
 
 
-def _candidate(candidate_id: str, *, height: float = 0.5, direction=None) -> CandidateBundle:
+def _candidate(
+    candidate_id: str,
+    *,
+    height: float = 0.5,
+    approach_tilt_deg: float = 0.0,
+) -> CandidateBundle:
     return CandidateBundle(
         candidate_id=candidate_id,
+        observation_id="obs-001",
         hole_values={
-            "grasp_pose": {"xyz": [0.4, 0.1, 0.8], "frame": "robot_base"},
-            "object_axis": [0.0, 0.0, 1.0],
+            "grasp_pose": {
+                "value": [0.4, 0.1, 0.8, 0.0, 0.0, 0.0, 1.0],
+                "frame": "robot_base",
+                "calibration_ref": "calibration/run-1.json",
+                "object_id": "object",
+            },
+            "object_axis": {
+                "value": [0.0, 0.0, 1.0],
+                "frame": "robot_base",
+                "calibration_ref": "calibration/run-1.json",
+                "object_id": "object",
+            },
         },
         features={
             "height_fraction": height,
-            "approach_dir": direction or [0.0, 0.0, -1.0],
+            "approach_tilt_deg": approach_tilt_deg,
         },
         evidence_refs=(f"candidate_cards/{candidate_id}.json",),
     )
@@ -116,9 +142,9 @@ def test_missing_required_check_is_unknown_and_fail_closed() -> None:
 
 def test_deterministic_selection_uses_region_then_cone_then_id() -> None:
     candidates = [
-        _candidate("a-side", height=0.8, direction=[1.0, 0.0, 0.0]),
-        _candidate("z-down", height=0.8, direction=[0.0, 0.0, -1.0]),
-        _candidate("b-low", height=0.2, direction=[0.0, 0.0, -1.0]),
+        _candidate("a-side", height=0.8, approach_tilt_deg=90.0),
+        _candidate("z-down", height=0.8, approach_tilt_deg=0.0),
+        _candidate("b-low", height=0.2, approach_tilt_deg=0.0),
     ]
 
     result = deterministic_select(candidates, region="upper_body", cone="top_down")
@@ -138,9 +164,18 @@ def _graph() -> dict:
             {
                 "index": 0,
                 "name": "grasp",
+                "stage_objects": {"manipulated": "object", "target": None},
                 "holes": [
-                    {"name": "grasp_pose", "type": "pose_se3"},
-                    {"name": "object_axis", "type": "axis_3d"},
+                    {
+                        "name": "grasp_pose",
+                        "type": "pose_se3",
+                        "frame": "robot_base",
+                    },
+                    {
+                        "name": "object_axis",
+                        "type": "axis_3d",
+                        "frame": "robot_base",
+                    },
                 ],
                 "constraints": [
                     {
@@ -166,8 +201,8 @@ def _runtime(tmp_path: Path, candidates) -> PlanningOnlyRuntime:
 
 def test_planning_runtime_returns_opaque_handle_and_jsonl_trace(tmp_path: Path) -> None:
     candidates = [
-        _candidate("a-side", height=0.8, direction=[1.0, 0.0, 0.0]),
-        _candidate("z-down", height=0.8, direction=[0.0, 0.0, -1.0]),
+        _candidate("a-side", height=0.8, approach_tilt_deg=90.0),
+        _candidate("z-down", height=0.8, approach_tilt_deg=0.0),
     ]
     runtime = _runtime(tmp_path, candidates)
 
@@ -194,6 +229,42 @@ def test_planning_runtime_returns_opaque_handle_and_jsonl_trace(tmp_path: Path) 
     assert records[0]["ranking"] == ["z-down", "a-side"]
     assert records[0]["selected_candidate_id"] == "z-down"
     assert records[0]["candidates"][0]["certificates"]
+
+
+def test_stage_program_wiring_defines_required_candidate_holes(tmp_path: Path) -> None:
+    full = _candidate("pose-only")
+    pose_only = CandidateBundle(
+        candidate_id=full.candidate_id,
+        observation_id=full.observation_id,
+        hole_values={"grasp_pose": full.hole_values["grasp_pose"]},
+        features=full.features,
+        evidence_refs=full.evidence_refs,
+    )
+    program = {
+        "stages": [
+            {
+                "index": 0,
+                "name": "grasp",
+                "actions": [
+                    {
+                        "op": "grasp_at",
+                        "args": {"grasp_pose": {"hole": "grasp_pose"}},
+                    }
+                ],
+            }
+        ]
+    }
+    runtime = PlanningOnlyRuntime(
+        _graph(),
+        observation_provider=lambda stage: _observation(),
+        candidate_provider=lambda stage, observation: (pose_only,),
+        hard_checks=_all_pass_checks(),
+        decision_log_path=tmp_path / "online_decisions.jsonl",
+        stage_program=program,
+    )
+
+    runtime.begin_stage(_graph()["stages"][0])
+    assert isinstance(runtime.solve("grasp_pose"), OpaqueHandle)
 
 
 def test_no_candidate_logs_decision_then_stops(tmp_path: Path) -> None:
@@ -252,22 +323,53 @@ def test_candidate_data_is_immutable_finite_and_json_safe() -> None:
     with pytest.raises(TypeError):
         candidate.features["height_fraction"] = 0.0
     with pytest.raises(TypeError, match="non-JSON value"):
-        CandidateBundle(candidate_id="bad", hole_values={"pose": object()})
+        CandidateBundle(
+            candidate_id="bad",
+            observation_id="obs-001",
+            hole_values={"pose": object()},
+        )
     with pytest.raises(ValueError, match="NaN"):
-        CandidateBundle(candidate_id="nan", hole_values={"score": float("nan")})
+        CandidateBundle(
+            candidate_id="nan",
+            observation_id="obs-001",
+            hole_values={"score": float("nan")},
+        )
+    with pytest.raises(TypeError, match="boolean"):
+        CandidateBundle(
+            candidate_id="bool",
+            observation_id="obs-001",
+            hole_values={},
+            features={"reachable": True},
+            evidence_refs=("candidate_cards/bool.json",),
+        )
     json.dumps(candidate.to_record(), allow_nan=False)
 
 
-def test_solve_rejects_null_hole_value(tmp_path: Path) -> None:
+def test_null_hole_value_is_rejected_before_physical_checks(tmp_path: Path) -> None:
     candidate = CandidateBundle(
         candidate_id="null-pose",
-        hole_values={"grasp_pose": None, "object_axis": [0.0, 0.0, 1.0]},
+        observation_id="obs-001",
+        hole_values={
+            "grasp_pose": None,
+            "object_axis": {
+                "value": [0.0, 0.0, 1.0],
+                "frame": "robot_base",
+                "calibration_ref": "calibration/run-1.json",
+                "object_id": "object",
+            },
+        },
         evidence_refs=("candidate_cards/null-pose.json",),
     )
     runtime = _runtime(tmp_path, [candidate])
-    runtime.begin_stage(_graph()["stages"][0])
-    with pytest.raises(NoFeasibleCandidate, match="no usable value"):
-        runtime.solve("grasp_pose")
+    with pytest.raises(NoFeasibleCandidate, match="no candidate"):
+        runtime.begin_stage(_graph()["stages"][0])
+    record = json.loads((tmp_path / "online_decisions.jsonl").read_text("utf-8"))
+    checks = {
+        item["check"]: item
+        for item in record["candidates"][0]["certificates"]
+    }
+    assert checks["typed_hole_values"]["status"] == "FAIL"
+    assert checks["reachability"]["reason"].startswith("not_run:")
 
 
 def test_every_control_primitive_is_explicitly_disabled(tmp_path: Path) -> None:

@@ -40,7 +40,7 @@
   → 失败归因或有界恢复
 ```
 
-当前仓库已经实现示范解析、约束图、StageProgram、确定性 policy 编译和 Oracle 调试路径；非特权 observation、硬过滤与 planning-only runtime 已有脚手架。真实 sensor/candidate/check adapter、非特权控制、下游可行性检查和自适应恢复仍未实现。
+当前仓库已经实现示范解析、约束图、StageProgram、确定性 policy 编译和 Oracle 调试路径；非特权 record adapter、typed-hole binding、硬过滤、planning-only runtime 与 synthetic fixed replay 已有脚手架。live sensor adapter、真实 hard checker、非特权控制、下游可行性检查和自适应恢复仍未实现。
 
 ## 约束图
 

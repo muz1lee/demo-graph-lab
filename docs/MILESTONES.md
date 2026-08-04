@@ -29,17 +29,28 @@
 状态：完成。
 
 - `ObservationPacket` 和 `Proprioception` 不接受任意 robot-state 字段；
-- candidate data 是 immutable、finite、JSON-safe；
+- recorded observation/candidate adapter 使用闭合 schema，candidate data 是 immutable、finite、JSON-safe；
+- recorded GraspNet `/predict` reply 只有在米制 point-cloud manifest 和带独立 evidence artifact 的 grasp-frame→runtime-EEF 变换存在时才转换为 pose envelope；candidate provenance 保留变换数值、frame、单位和四元数约定，不会发请求或猜排序/碰撞结论；
+- candidate 必须绑定同一次 observation，并通过 hole type、shape、frame、calibration 和 graph object 校验；
+- typed binding 失败时物理 checker 不运行，`solve()` 还会再次校验；
 - reachability / collision / width 缺失、异常或 `UNKNOWN` 均 fail-closed；
 - region 主、cone 次、candidate ID 最终 tie-break；
 - decision JSONL 记录 observation refs、候选、证书、ranking meta 和选择；
+- synthetic fixed replay 只过滤一次，并让 demo/no-demo 共用 accepted set；
 - opaque handle 不暴露数值，所有控制原语抛 `ExecutionDisabled`。
 
-注意：这只是脚手架，当前没有真实 sensor/candidate/check adapter。
+注意：这只是合约与 synthetic replay 脚手架，当前没有 live sensor adapter、真实 hard checker 或合格的真实 replay。
 
 ## 真实候选链
 
-状态：未完成。
+状态：合约已完成，真实数据链未完成。
+
+已完成：
+
+- 严格 observation/candidate record schema；
+- 实际 GraspNet raw response 的无网络 normalization adapter；
+- typed-hole binding 与 StageProgram required-hole 接线；
+- synthetic demo/no-demo replay 和 CLI。
 
 验收条件：
 

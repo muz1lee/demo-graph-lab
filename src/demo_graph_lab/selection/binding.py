@@ -12,7 +12,235 @@ representation.  The requested frame is kept for diagnostics.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import math
+from typing import Iterable, Mapping
+
 from ..graph import vocab
+from ..perception.observations import ObservationPacket
+from .candidates import CandidateBundle, CheckStatus
+
+
+_GEOMETRIC_HOLE_LENGTHS = {
+    "pose_se3": 7,
+    "axis_3d": 3,
+    "point_3d": 3,
+}
+_CANDIDATE_VALUE_FIELDS = {"value", "frame", "calibration_ref", "object_id"}
+
+
+@dataclass(frozen=True)
+class BindingValidation:
+    """Fail-closed result for one candidate's typed-hole values."""
+
+    status: CheckStatus
+    reasons: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.reasons:
+            raise ValueError("binding validation must include at least one reason")
+
+
+def _numeric_vector(value, length: int) -> bool:
+    return (
+        isinstance(value, tuple)
+        and len(value) == length
+        and all(
+            not isinstance(item, bool)
+            and isinstance(item, (int, float))
+            and math.isfinite(item)
+            for item in value
+        )
+    )
+
+
+def _unit_vector(value, *, tolerance: float = 1e-3) -> bool:
+    return math.isclose(
+        math.sqrt(sum(float(item) ** 2 for item in value)),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=tolerance,
+    )
+
+
+def _stage_object_ids(stage: Mapping) -> set[str]:
+    stage_objects = stage.get("stage_objects") or {}
+    return {
+        value
+        for value in stage_objects.values()
+        if isinstance(value, str) and value
+    }
+
+
+def _validate_geometry_value(
+    hole: Mapping,
+    raw_value,
+    stage_object_ids: set[str],
+    observation: ObservationPacket,
+) -> tuple[CheckStatus, tuple[str, ...]]:
+    name = str(hole.get("name", ""))
+    hole_type = hole.get("type")
+    expected_length = _GEOMETRIC_HOLE_LENGTHS[hole_type]
+    reasons: list[str] = []
+    status = CheckStatus.PASS
+
+    if not isinstance(raw_value, Mapping) or set(raw_value) != _CANDIDATE_VALUE_FIELDS:
+        return CheckStatus.FAIL, (f"{name}:invalid_value_envelope",)
+
+    vector = raw_value.get("value")
+    if not _numeric_vector(vector, expected_length):
+        reasons.append(f"{name}:invalid_{hole_type}_shape")
+        status = CheckStatus.FAIL
+    elif hole_type == "pose_se3" and not _unit_vector(vector[3:7]):
+        reasons.append(f"{name}:quaternion_not_unit_xyzw")
+        status = CheckStatus.FAIL
+    elif hole_type == "axis_3d" and not _unit_vector(vector):
+        reasons.append(f"{name}:axis_not_unit")
+        status = CheckStatus.FAIL
+
+    frame = raw_value.get("frame")
+    requested_frame = hole.get("frame")
+    if not isinstance(frame, str) or not frame:
+        reasons.append(f"{name}:missing_frame")
+        status = CheckStatus.FAIL
+    elif not isinstance(requested_frame, str) or not requested_frame:
+        reasons.append(f"{name}:hole_frame_not_declared")
+        status = CheckStatus.FAIL
+    elif frame != requested_frame:
+        reasons.append(f"{name}:frame_mismatch:{frame}!={requested_frame}")
+        status = CheckStatus.FAIL
+    elif frame != observation.frame:
+        reasons.append(
+            f"{name}:observation_frame_mismatch:{frame}!={observation.frame}"
+        )
+        status = CheckStatus.FAIL
+
+    calibration_ref = raw_value.get("calibration_ref")
+    if not isinstance(calibration_ref, str) or not calibration_ref:
+        reasons.append(f"{name}:missing_calibration_ref")
+        status = CheckStatus.FAIL
+    elif calibration_ref != observation.calibration_ref:
+        reasons.append(f"{name}:calibration_mismatch")
+        status = CheckStatus.FAIL
+
+    object_id = raw_value.get("object_id")
+    if not isinstance(object_id, str) or not object_id:
+        reasons.append(f"{name}:missing_object_id")
+        status = CheckStatus.FAIL
+    elif object_id not in stage_object_ids:
+        reasons.append(f"{name}:object_not_in_stage:{object_id}")
+        status = CheckStatus.FAIL
+    else:
+        if len(stage_object_ids) > 1:
+            reasons.append(f"{name}:hole_object_anchor_ambiguous")
+            if status is CheckStatus.PASS:
+                status = CheckStatus.UNKNOWN
+        observed = next(
+            (item for item in observation.objects if item.object_id == object_id),
+            None,
+        )
+        if observed is None:
+            reasons.append(f"{name}:object_not_observed:{object_id}")
+            if status is CheckStatus.PASS:
+                status = CheckStatus.UNKNOWN
+        elif isinstance(frame, str) and observed.frame != frame:
+            reasons.append(
+                f"{name}:object_frame_mismatch:{observed.frame}!={frame}"
+            )
+            status = CheckStatus.FAIL
+
+    return status, tuple(reasons or (f"{name}:valid",))
+
+
+def validate_candidate_bindings(
+    candidate: CandidateBundle,
+    stage: Mapping,
+    observation: ObservationPacket,
+    *,
+    required_holes: Iterable[str] | None = None,
+) -> BindingValidation:
+    """Validate candidate values before any physical checker is allowed to run.
+
+    Geometry uses one closed representation::
+
+        {"value": [...], "frame": "...", "calibration_ref": "...",
+         "object_id": "..."}
+
+    Pose values are ``[x, y, z, qx, qy, qz, qw]``.  V1 does not perform
+    implicit frame aliases or transforms.  Scalar and runtime-condition holes
+    must come from a separate trusted resolver, never from a candidate provider.
+    """
+
+    if candidate.observation_id != observation.observation_id:
+        return BindingValidation(
+            CheckStatus.FAIL,
+            ("candidate_observation_mismatch",),
+        )
+
+    holes = {
+        hole.get("name"): hole
+        for hole in stage.get("holes", [])
+        if isinstance(hole, Mapping) and isinstance(hole.get("name"), str)
+    }
+    required = (
+        tuple(
+            name
+            for name, hole in holes.items()
+            if hole.get("type") in _GEOMETRIC_HOLE_LENGTHS
+        )
+        if required_holes is None
+        else tuple(required_holes)
+    )
+    reasons: list[str] = []
+    statuses: list[CheckStatus] = []
+
+    for name in required:
+        hole = holes.get(name)
+        if hole is None:
+            reasons.append(f"unknown_required_hole:{name}")
+            statuses.append(CheckStatus.FAIL)
+        elif name not in candidate.hole_values:
+            if hole.get("type") in {"scalar", "runtime_condition"}:
+                reasons.append(f"{name}:trusted_runtime_source_unavailable")
+                statuses.append(CheckStatus.UNKNOWN)
+            else:
+                reasons.append(f"{name}:missing_required_value")
+                statuses.append(CheckStatus.FAIL)
+
+    stage_objects = _stage_object_ids(stage)
+    for name, raw_value in candidate.hole_values.items():
+        hole = holes.get(name)
+        if hole is None:
+            reasons.append(f"unknown_candidate_hole:{name}")
+            statuses.append(CheckStatus.FAIL)
+            continue
+        hole_type = hole.get("type")
+        if hole_type in {"scalar", "runtime_condition"}:
+            reasons.append(f"{name}:candidate_source_forbidden:{hole_type}")
+            statuses.append(CheckStatus.FAIL)
+            continue
+        if hole_type not in _GEOMETRIC_HOLE_LENGTHS:
+            reasons.append(f"{name}:unknown_hole_type:{hole_type}")
+            statuses.append(CheckStatus.FAIL)
+            continue
+        value_status, value_reasons = _validate_geometry_value(
+            hole,
+            raw_value,
+            stage_objects,
+            observation,
+        )
+        statuses.append(value_status)
+        reasons.extend(value_reasons)
+
+    if CheckStatus.FAIL in statuses:
+        status = CheckStatus.FAIL
+    elif CheckStatus.UNKNOWN in statuses:
+        status = CheckStatus.UNKNOWN
+    else:
+        status = CheckStatus.PASS
+    if not reasons:
+        reasons.append("candidate_bindings_valid")
+    return BindingValidation(status, tuple(reasons))
 
 
 class UnsolvedHole(Exception):

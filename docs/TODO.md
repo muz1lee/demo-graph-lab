@@ -4,11 +4,11 @@
 
 ## 当前顺序
 
-1. 接只读 RGB-D/点云 adapter 和真实 grasp candidate provider。
-2. 接 reachability、collision、gripper-width 三个 hard checker，先跑 planning-only。
-3. 对 candidate hole value 做 type、frame、calibration 和 finite 数值校验。
-4. 用固定 candidate replay 验证过滤、排序、日志和无候选失败路径。
-5. 到这里停下评审；得到明确允许后才接一个非特权 stage 的控制与 gate。
+1. 只读采集一份 head RGB-D、米制 depth、点云、本体状态和标定，保存为完整 observation record。
+2. 离线调用 GraspNet 后保存原始 `/predict` 回复；显式建立模型 object ID 到 graph registry ID 的映射，并从受检的 rotation/object extent 派生排序特征。
+3. 接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定并记录 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
+4. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
+5. 审查一个非特权 stage 的 gate 输入与 abort 行为，然后停下评审；得到明确允许后才连接控制。
 
 完整 episode 稳定前，不实现 runtime backend ranking、跨阶段 `compat`、向后传播或训练。
 
@@ -23,18 +23,20 @@
 
 ## Perception 与候选
 
-- 将真实 sensor artifact 规范成 `ObservationPacket`，只使用 typed `Proprioception`。
-- 接入 grasp proposals，并为每个 candidate 保存观测证据、frame 和 hole values。
+- 实现 head camera 的 live-to-record adapter；hand camera 在实时 EEF frame transform 明确前不接。
+- 接入真实 grasp proposals，并为每个 candidate 保存原始回复、观测证据、frame、object mapping 和 hole values。
+- 给 `height_fraction` 与重力相对的 `approach_tilt_deg` 写独立、可检查的派生逻辑；禁止把 camera-frame 裸 `approach_dir` 直接用于 cone 排序。
+- 采集真实 point-cloud manifest 与 K1 grasp-center→runtime-EEF/TCP 标定 artifact；变换值、frame 约定和独立 evidence ref 必须一起保存，只有矩阵转 quaternion 不算完成 pose 语义转换。
+- 为 graph hole 增加结构化 object anchor，并让 validator/StageProgram 检查；完成前多对象 stage 的 candidate binding 保持 `UNKNOWN`。
 - 实现完整 frame transform，包括旋转；不允许只做平移或把 simulator world pose 混入。
-- 审查 adapter 依赖调用图，确认没有 `/state`、官方 probe 或 control side effect。
+- 对 live adapter 做最终依赖审查，确认没有 `/state`、官方 probe 或 control side effect；记录同步 render 这一只读传感副作用。
 
 完成定义：只读主方法输入能产生多个可追溯候选，代码路径不含特权状态。
 
 ## Selection 与 binding
 
 - 实现真实可达、碰撞和夹爪宽度 checker；异常和 `UNKNOWN` 继续 fail-closed。
-- 在 `solve()` 前按 graph hole schema 校验 candidate value 的类型、shape、frame 和 calibration。
-- 固定候选集做反事实测试：只改变 region/cone 标签时，top-1 按预期变化。
+- 用真实固定候选集重复反事实测试：只改变 region/cone 标签时，top-1 按预期变化；synthetic contract fixture 不作为效果数据。
 - 将 gate outcome 回填同一 decision record，形成完整的 selection → outcome 数据。
 
 完成定义：每次选择能从 observation、完整候选、硬过滤证书、ranking meta 和 gate outcome 重放。
