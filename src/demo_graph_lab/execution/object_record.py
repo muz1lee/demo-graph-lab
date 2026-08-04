@@ -25,7 +25,7 @@ from ..perception.object_pipeline import (
     MASK_SCHEMA,
     OBJECT_POINT_CLOUD_SCHEMA,
     build_object_point_cloud,
-    estimate_rack_hole_geometry,
+    estimate_planar_opening_geometry,
     make_object_assignment_record,
     validate_mask_record,
     validate_object_assignment_record,
@@ -72,7 +72,7 @@ _PROJECT_ARTIFACTS = {
     "object_pixel_lineage": "object/pixels_rc.npy",
     "object_cloud_manifest_full": "object/cloud_manifest.json",
     "object_cloud_manifest": "object/pointcloud_manifest.json",
-    "rack_hole_geometry": "object/hole_geometry.json",
+    "opening_geometry": "object/opening_geometry.json",
     "object_observation": "object/observation.json",
     "object_projection_result": "object/result.json",
     "object_projection_call": "object/call.json",
@@ -835,7 +835,7 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
         assignment_path = (directory / "assignment.json").resolve()
         full_manifest_path = (directory / "cloud_manifest.json").resolve()
         compact_manifest_path = (directory / "pointcloud_manifest.json").resolve()
-        hole_geometry_path = (directory / "hole_geometry.json").resolve()
+        opening_geometry_path = (directory / "opening_geometry.json").resolve()
         object_observation_path = (directory / "observation.json").resolve()
         request = {
             "schema": "demo_graph_lab.object_projection_request.v1",
@@ -875,17 +875,17 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
         )
         extent = _extent(cloud.points)
         axis = None
-        hole_geometry = None
+        opening_geometry = None
         if request_spec["resolver"] in {"part_center", "part_axis"}:
             jpeg_path = (root / "grounding/input.jpg").resolve()
             try:
                 import cv2
             except ImportError as error:  # pragma: no cover - optional live install
-                raise RuntimeError("rack-hole geometry requires opencv-python") from error
+                raise RuntimeError("opening geometry requires opencv-python") from error
             image = cv2.imread(str(jpeg_path), cv2.IMREAD_COLOR)
             if image is None or image.shape != (*depth.shape, 3):
                 raise ValueError("frozen grounding JPEG cannot be decoded at RGB-D shape")
-            geometry = estimate_rack_hole_geometry(
+            geometry = estimate_planar_opening_geometry(
                 image,
                 depth,
                 mask,
@@ -897,8 +897,8 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
                 depth_ref=str(depth_path),
                 roi_record=mask_record,
             )
-            hole_geometry = geometry.to_record()
-            _write_json(hole_geometry_path, hole_geometry)
+            opening_geometry = geometry.to_record()
+            _write_json(opening_geometry_path, opening_geometry)
         else:
             axis = fit_principal_axis(cloud.points)
         np.savez_compressed(cloud_path, points=cloud.points)
@@ -929,8 +929,8 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
                 "object/pointcloud_manifest.json",
             )
         ]
-        if hole_geometry is not None:
-            derived_refs.append(str(hole_geometry_path))
+        if opening_geometry is not None:
+            derived_refs.append(str(opening_geometry_path))
         object_observation_record = {
             **dict(observation_record),
             "sensor_refs": list(dict.fromkeys([
@@ -944,8 +944,8 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             observation=object_observation,
         )
         _write_json(object_observation_path, object_observation_record)
-        hole_geometry_status = (
-            hole_geometry["status"] if hole_geometry is not None else None
+        opening_geometry_status = (
+            opening_geometry["status"] if opening_geometry is not None else None
         )
         _write_json(directory / "result.json", {
             "schema": _PROJECT_RESULT_SCHEMA,
@@ -953,7 +953,7 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             # manifest 状态和退出码不变;只有这个词必须如实反映几何证据。
             "status": (
                 "ACCEPTED"
-                if hole_geometry_status in (None, GeometryStatus.PASS.value)
+                if opening_geometry_status in (None, GeometryStatus.PASS.value)
                 else "GEOMETRY_UNKNOWN"
             ),
             "observation_id": observation.observation_id,
@@ -963,10 +963,11 @@ def project_record(record_dir: str | Path) -> dict[str, Any]:
             "pixel_lineage_ref": str(pixels_path),
             "extent": extent,
             "principal_axis": axis,
-            "hole_geometry_ref": (
-                str(hole_geometry_path) if hole_geometry is not None else None
+            "opening_geometry_ref": (
+                str(opening_geometry_path)
+                if opening_geometry is not None else None
             ),
-            "hole_geometry_status": hole_geometry_status,
+            "opening_geometry_status": opening_geometry_status,
             "object_observation_ref": str(object_observation_path),
         })
         call.update({

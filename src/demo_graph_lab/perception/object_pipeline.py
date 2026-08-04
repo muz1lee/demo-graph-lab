@@ -24,7 +24,7 @@ from .operators import OperatorError, fit_plane, intersect_ray_plane
 MASK_SCHEMA = "demo_graph_lab.object_mask.v1"
 OBJECT_ASSIGNMENT_SCHEMA = "demo_graph_lab.object_assignment.v1"
 OBJECT_POINT_CLOUD_SCHEMA = "demo_graph_lab.object_point_cloud.v1"
-RACK_HOLE_GEOMETRY_SCHEMA = "demo_graph_lab.rack_hole_geometry.v1"
+OPENING_GEOMETRY_SCHEMA = "demo_graph_lab.opening_geometry.v2"
 
 _MASK_KEYS = {
     "schema",
@@ -459,8 +459,8 @@ class GeometryStatus(str, Enum):
 
 
 @dataclass(frozen=True)
-class RackHoleGeometry:
-    """Conservative RGB-D estimate of one rack opening in the camera frame."""
+class PlanarOpeningGeometry:
+    """Conservative RGB-D estimate of one planar opening in the camera frame."""
 
     status: GeometryStatus
     reason: str
@@ -496,7 +496,7 @@ class RackHoleGeometry:
 
     def to_record(self) -> dict[str, Any]:
         return {
-            "schema": RACK_HOLE_GEOMETRY_SCHEMA,
+            "schema": OPENING_GEOMETRY_SCHEMA,
             "status": self.status.value,
             "reason": self.reason,
             "observation_id": self.observation_id,
@@ -564,12 +564,12 @@ def _dilate(mask, iterations: int):
 _OPERATOR_REASONS = {
     "plane_fit_failed": "plane_fit_failed",
     "plane_points_are_degenerate": "ring_geometry_is_degenerate",
-    "ray_parallel_to_plane": "hole_ray_parallel_to_rack_plane",
-    "plane_intersection_behind_camera": "rack_plane_intersection_behind_camera",
+    "ray_parallel_to_plane": "ray_parallel_to_support_plane",
+    "plane_intersection_behind_camera": "plane_intersection_behind_camera",
 }
 
 
-def estimate_rack_hole_geometry(
+def estimate_planar_opening_geometry(
     rgb,
     depth_m,
     roi_mask,
@@ -587,15 +587,16 @@ def estimate_rack_hole_geometry(
     min_depth_contrast_m: float = 0.005,
     min_rgb_contrast: float = 10.0,
     max_plane_rmse_m: float = 0.003,
-) -> RackHoleGeometry:
-    """Estimate a hole center/axis from an ROI plus local RGB-D evidence.
+) -> PlanarOpeningGeometry:
+    """Estimate an opening center/axis from an ROI plus local RGB-D evidence.
 
     The ROI supplies only a 2-D opening hypothesis.  The center is recomputed as
-    the ROI-centroid ray intersected with a plane fitted to the surrounding rack
-    surface; the axis is that plane normal.  The estimate is ``UNKNOWN`` unless
-    the ROI is a single interior component, the surrounding depth is planar, and
-    both RGB and depth contrast support an actual opening.  No model pose is an
-    input to this function.
+    the ROI-centroid ray intersected with a plane fitted to the surrounding
+    support surface; the axis is that plane normal.  The estimate is ``UNKNOWN``
+    unless the ROI is a single interior component, the surrounding depth is
+    planar, and both RGB and depth contrast support an actual opening.  Nothing
+    here assumes the opening is round or belongs to a particular fixture, and no
+    model pose is an input to this function.
     """
 
     np, values = _rgbd_arrays(depth_m, roi_mask, intrinsics)
@@ -610,7 +611,7 @@ def estimate_rack_hole_geometry(
         expected_observation_id=observation_id,
     )
     if roi_meta["image_ref"] != rgb_ref:
-        raise ValueError("rack-hole ROI does not belong to the supplied RGB image")
+        raise ValueError("opening ROI does not belong to the supplied RGB image")
     evidence_refs = (
         rgb_ref,
         depth_ref,
@@ -642,8 +643,8 @@ def estimate_rack_hole_geometry(
     hole_pixels = int(np.count_nonzero(roi_mask))
     metrics: dict[str, Any] = {"hole_pixels": hole_pixels}
 
-    def unknown(reason: str) -> RackHoleGeometry:
-        return RackHoleGeometry(
+    def unknown(reason: str) -> PlanarOpeningGeometry:
+        return PlanarOpeningGeometry(
             GeometryStatus.UNKNOWN,
             reason,
             observation_id,
@@ -708,7 +709,7 @@ def estimate_rack_hole_geometry(
         return unknown(_OPERATOR_REASONS[error.reason])
     metrics["plane_rmse_m"] = plane_rmse
     if plane_rmse > max_plane_rmse_m:
-        return unknown("rack_surface_not_planar")
+        return unknown("support_surface_not_planar")
 
     center_row = float(rows.mean())
     center_column = float(columns.mean())
@@ -730,9 +731,9 @@ def estimate_rack_hole_geometry(
         "roi_center_row": center_row,
         "roi_center_column": center_column,
     })
-    return RackHoleGeometry(
+    return PlanarOpeningGeometry(
         status=GeometryStatus.PASS,
-        reason="estimated_from_rgbd_roi_and_local_rack_plane",
+        reason="estimated_from_rgbd_roi_and_local_support_plane",
         observation_id=observation_id,
         frame=frame,
         calibration_ref=calibration_ref,

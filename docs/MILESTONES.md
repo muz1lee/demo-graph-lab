@@ -49,7 +49,7 @@
 - graph 几何 hole 使用闭集 resolver、结构化 anchor 和 `robot_base` 发布 frame，reviewed fixture 固定三根 tube 与 center/right/left hole 的对应关系；
 - Qwen 只发布单框 proposal，SAM3 只发布二值 mask；graph identity 不来自模型回复；
 - 本地代码先 mask depth，再保存 object cloud、逐点 pixel lineage、`MODEL_PROPOSED` binding、完整 manifest 与 derived observation；part geometry 不伪装成 whole-object observation；
-- `part_center/part_axis` 使用 RGB-D contrast 与 rack ring plane，证据不足保存 `UNKNOWN`；
+- `part_center/part_axis` 使用 RGB-D contrast 与开口周围 ring 的局部支撑面，证据不足保存 `UNKNOWN`；
 - 只有 `grasp_candidate` 可把 object cloud 交给 GraspNet；raw detector ID 原样保留（当前 baseline 为 `-1`），不生成 candidate；
 - 先前 5090 的 20 个 raw proposal 来自错误的 `stand_up_bottle` scene，只是旧 infra smoke，不是这条逐对象链的效果验证。
 
@@ -66,7 +66,7 @@
 - typed-hole binding 与 StageProgram required-hole 接线；
 - synthetic demo/no-demo replay 和 CLI。
 - graph resolver/anchor 校验和逐对象只读 record CLI；
-- Qwen/SAM3 evidence、`MODEL_PROPOSED` anchor binding、masked cloud/pixel lineage 与 conservative rack-hole geometry。
+- Qwen/SAM3 evidence、`MODEL_PROPOSED` anchor binding、masked cloud/pixel lineage 与 conservative opening geometry。
 
 验收条件：
 

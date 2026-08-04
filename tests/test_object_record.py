@@ -552,7 +552,7 @@ def test_full_object_record_chain_stops_at_validated_raw_grasps(tmp_path) -> Non
     assert len(projection_result["principal_axis"]) == 3
     assert projection_result["extent"]["min"][2] == pytest.approx(1.0)
     # 本次没有请求几何,status 保持 ACCEPTED。
-    assert projection_result["hole_geometry_status"] is None
+    assert projection_result["opening_geometry_status"] is None
     assert projection_result["status"] == "ACCEPTED"
 
     manifest = predict_record(
@@ -675,7 +675,7 @@ def test_predict_rejects_non_grasp_resolver_before_transport(tmp_path) -> None:
     assert FakeSources.calls == calls_before
 
 
-def test_part_center_records_conservative_hole_geometry(tmp_path) -> None:
+def test_part_center_records_conservative_opening_geometry(tmp_path) -> None:
     root, mask = _record(
         tmp_path,
         resolver="part_center",
@@ -698,16 +698,18 @@ def test_part_center_records_conservative_hole_geometry(tmp_path) -> None:
     segment_record(root, allow_model_read=True, source_module=FakeSources)
     manifest = project_record(root)
 
-    geometry = json.loads((root / "object/hole_geometry.json").read_text())
+    geometry = json.loads((root / "object/opening_geometry.json").read_text())
     result = json.loads((root / "object/result.json").read_text())
     object_observation = json.loads((root / "object/observation.json").read_text())
     assert manifest["status"] == "OBJECT_CLOUD_RECORDED"
-    assert manifest["artifacts"]["rack_hole_geometry"] == "object/hole_geometry.json"
+    assert manifest["artifacts"]["opening_geometry"] == (
+        "object/opening_geometry.json"
+    )
     assert geometry["status"] == "UNKNOWN"
     assert geometry["reason"] == "insufficient_depth_contrast"
     assert geometry["center"] is None
     assert geometry["axis"] is None
-    assert result["hole_geometry_status"] == "UNKNOWN"
+    assert result["opening_geometry_status"] == "UNKNOWN"
     # 几何估不出来时 result 不得自称 ACCEPTED;记录本身仍然发生,所以 manifest
     # 状态与退出码不变(project_record 正常返回,没有抛异常)。
     assert result["status"] == "GEOMETRY_UNKNOWN"
@@ -727,7 +729,7 @@ def test_part_center_accepts_recorded_pass_geometry(tmp_path) -> None:
             "selection": None,
         },
     )
-    # 让 ROI 在 RGB-D 上真的像一个开口:比周围 rack 面更远、更亮,越过估计器的
+    # 让 ROI 在 RGB-D 上真的像一个开口:比周围支撑面更远、更亮,越过估计器的
     # 深度/亮度对比度门槛,从而走到 PASS 分支。
     depth_path = root / "sensor/head_depth_m.npy"
     depth = np.load(depth_path, allow_pickle=False)
@@ -748,12 +750,12 @@ def test_part_center_accepts_recorded_pass_geometry(tmp_path) -> None:
     segment_record(root, allow_model_read=True, source_module=FakeSources)
     manifest = project_record(root)
 
-    geometry = json.loads((root / "object/hole_geometry.json").read_text())
+    geometry = json.loads((root / "object/opening_geometry.json").read_text())
     result = json.loads((root / "object/result.json").read_text())
     assert manifest["status"] == "OBJECT_CLOUD_RECORDED"
     assert geometry["status"] == "PASS"
     assert geometry["center"] is not None and geometry["axis"] is not None
-    assert result["hole_geometry_status"] == "PASS"
+    assert result["opening_geometry_status"] == "PASS"
     assert result["status"] == "ACCEPTED"
 
 

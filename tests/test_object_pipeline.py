@@ -1,4 +1,4 @@
-"""Pure-local contracts for mask assignment, object clouds, and rack holes."""
+"""Pure-local contracts for mask assignment, object clouds, and openings."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from demo_graph_lab.perception.object_pipeline import (
     MASK_SCHEMA,
     OBJECT_POINT_CLOUD_SCHEMA,
     build_object_point_cloud,
-    estimate_rack_hole_geometry,
+    estimate_planar_opening_geometry,
     make_object_assignment_record,
     project_masked_depth,
     validate_mask_record,
@@ -277,11 +277,11 @@ def _estimate(rgb, depth, roi, intrinsics, **kwargs):
     roi_record = _mask_record(roi)
     roi_record.update({
         "image_ref": "sensor/rgb.npy",
-        "grounding_ref": "grounding/rack-hole.json",
-        "proposal_id": "rack-hole-0",
-        "mask_ref": "masks/rack-hole.npy",
+        "grounding_ref": "grounding/opening.json",
+        "proposal_id": "opening-0",
+        "mask_ref": "masks/opening.npy",
     })
-    return estimate_rack_hole_geometry(
+    return estimate_planar_opening_geometry(
         rgb,
         depth,
         roi,
@@ -296,7 +296,7 @@ def _estimate(rgb, depth, roi, intrinsics, **kwargs):
     )
 
 
-def test_rack_hole_geometry_is_recomputed_from_rgbd_roi_and_rack_plane() -> None:
+def test_opening_geometry_is_recomputed_from_rgbd_roi_and_support_plane() -> None:
     np = _np()
     rgb, depth, roi, intrinsics = _hole_scene()
 
@@ -311,7 +311,7 @@ def test_rack_hole_geometry_is_recomputed_from_rgbd_roi_and_rack_plane() -> None
     assert record["metrics"]["depth_contrast_m"] > 0.04
 
 
-def test_rack_hole_geometry_fails_closed_without_depth_evidence() -> None:
+def test_opening_geometry_fails_closed_without_depth_evidence() -> None:
     rgb, depth, roi, intrinsics = _hole_scene(depth_contrast=0.0)
 
     result = _estimate(rgb, depth, roi, intrinsics)
@@ -323,7 +323,7 @@ def test_rack_hole_geometry_fails_closed_without_depth_evidence() -> None:
     assert result.to_record()["center"] is None
 
 
-def test_rack_hole_geometry_rejects_model_pose_and_malformed_rgb() -> None:
+def test_opening_geometry_rejects_model_pose_and_malformed_rgb() -> None:
     np = _np()
     rgb, depth, roi, intrinsics = _hole_scene()
 
