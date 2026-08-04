@@ -10,6 +10,7 @@
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
+  dgl planning-record --record-dir <dir> [--step plan|capture|predict]
 """
 
 import argparse
@@ -49,6 +50,25 @@ def main(argv=None):
     replay.add_argument("--graph", required=True)
     replay.add_argument("--replay", required=True)
     replay.add_argument("--output", required=True)
+    record = sub.add_parser(
+        "planning-record",
+        help="freeze a read-only head observation and raw GraspNet reply",
+    )
+    record.add_argument("--record-dir", required=True)
+    record.add_argument(
+        "--step",
+        choices=("plan", "capture", "predict"),
+        default="plan",
+    )
+    record.add_argument("--graph")
+    record.add_argument("--stage", type=int, default=0)
+    record.add_argument("--intrinsics")
+    record.add_argument("--pipeline-url", default="http://127.0.0.1:8000")
+    record.add_argument("--graspnet-url", default="http://127.0.0.1:8092")
+    record.add_argument("--camera-socket", default="/tmp/knowin_sim_camera.sock")
+    record.add_argument("--timeout", type=float, default=10.0)
+    record.add_argument("--max-grasps", type=int, default=20)
+    record.add_argument("--allow-live-read", action="store_true")
     args = parser.parse_args(argv)
 
     if args.cmd == "planning-replay":
@@ -56,6 +76,41 @@ def main(argv=None):
 
         result = run_replay(args.graph, args.replay)
         artifacts.write_json(Path(args.output), result)
+        return 0
+
+    if args.cmd == "planning-record":
+        from .execution.planning_record import (
+            capture_record,
+            plan_record,
+            predict_record,
+        )
+
+        if args.step == "plan":
+            if not args.graph or not args.intrinsics:
+                parser.error(
+                    "planning-record --step plan requires --graph and --intrinsics"
+                )
+            plan_record(
+                graph_path=args.graph,
+                stage_index=args.stage,
+                record_dir=args.record_dir,
+                intrinsics_path=args.intrinsics,
+                pipeline_url=args.pipeline_url,
+                graspnet_url=args.graspnet_url,
+                camera_socket=args.camera_socket,
+                timeout_s=args.timeout,
+                max_grasps=args.max_grasps,
+            )
+        elif args.step == "capture":
+            capture_record(
+                args.record_dir,
+                allow_live_read=args.allow_live_read,
+            )
+        else:
+            predict_record(
+                args.record_dir,
+                allow_live_read=args.allow_live_read,
+            )
         return 0
 
     artifacts.load_env()

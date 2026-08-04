@@ -1,8 +1,7 @@
-"""Offline tests for strict observation and candidate record adapters."""
+"""Offline tests for strict observation, candidate, and raw GraspNet records."""
 
 from __future__ import annotations
 
-import math
 import os
 from pathlib import Path
 import subprocess
@@ -15,10 +14,11 @@ from demo_graph_lab.perception import (
     ObservationPacket,
     Proprioception,
 )
+from demo_graph_lab.perception import adapters
 from demo_graph_lab.perception.adapters import (
     candidate_from_record,
-    graspnet_candidates_from_response,
     observation_from_record,
+    validate_graspnet_response_record,
 )
 
 
@@ -33,7 +33,6 @@ def _observation_record() -> dict:
             "depth/head-0001.npy",
             "pointcloud/head-0001.npz",
             "pointcloud/head-0001.manifest.json",
-            "transforms/graspnet-to-runtime-ee.json",
         ],
         "robot_state": {
             "joint_positions": [0.0] * 14,
@@ -45,19 +44,17 @@ def _observation_record() -> dict:
             },
             "evidence_ref": "proprio/head-0001.json",
         },
-        "objects": [
-            {
-                "object_id": "tube_left",
-                "frame": "camera_head",
-                "pose": [0.1, 0.2, 0.5, 0.0, 0.0, 0.0, 1.0],
-                "axis": [0.0, 0.0, 1.0],
-                "extent": {
-                    "min": [0.09, 0.19, 0.45],
-                    "max": [0.11, 0.21, 0.55],
-                },
-                "evidence_refs": ["objects/tube-left.json"],
-            }
-        ],
+        "objects": [{
+            "object_id": "tube_left",
+            "frame": "camera_head",
+            "pose": [0.1, 0.2, 0.5, 0.0, 0.0, 0.0, 1.0],
+            "axis": [0.0, 0.0, 1.0],
+            "extent": {
+                "min": [0.09, 0.19, 0.45],
+                "max": [0.11, 0.21, 0.55],
+            },
+            "evidence_refs": ["objects/tube-left.json"],
+        }],
     }
 
 
@@ -67,7 +64,7 @@ def _observation() -> ObservationPacket:
 
 def _candidate_record() -> dict:
     return {
-        "candidate_id": "graspnet:0",
+        "candidate_id": "recorded:candidate-0",
         "observation_id": "obs-head-0001",
         "hole_values": {
             "tube_grasp_pose": {
@@ -79,11 +76,11 @@ def _candidate_record() -> dict:
         },
         "features": {"score": 0.9, "width": 0.03},
         "provenance": {},
-        "evidence_refs": ["graspnet/raw-0001.json"],
+        "evidence_refs": ["candidates/candidate-0.json"],
     }
 
 
-def _graspnet_response(rotation=None) -> dict:
+def _graspnet_response(rotation=None, *, object_id=7) -> dict:
     rotation = rotation or [
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
@@ -98,7 +95,7 @@ def _graspnet_response(rotation=None) -> dict:
         0.1,
         0.2,
         0.5,
-        7.0,
+        float(object_id),
     ]
     return {
         "ok": True,
@@ -107,20 +104,18 @@ def _graspnet_response(rotation=None) -> dict:
         "checkpoint_path": "weights/checkpoint.tar",
         "checkpoint_epoch": 10,
         "coordinate_frame": "camera_head",
-        "grasps": [
-            {
-                "raw_index": 3,
-                "score": 0.91,
-                "width": 0.032,
-                "height": 0.02,
-                "depth": 0.04,
-                "rotation_matrix": rotation,
-                "translation": [0.1, 0.2, 0.5],
-                "object_id": 7,
-                "coordinate_frame": "camera_head",
-                "raw_grasp_array": raw_grasp_array,
-            }
-        ],
+        "grasps": [{
+            "raw_index": 3,
+            "score": 0.91,
+            "width": 0.032,
+            "height": 0.02,
+            "depth": 0.04,
+            "rotation_matrix": rotation,
+            "translation": [0.1, 0.2, 0.5],
+            "object_id": object_id,
+            "coordinate_frame": "camera_head",
+            "raw_grasp_array": raw_grasp_array,
+        }],
         "input_reference": {
             "image_path": None,
             "depth_path": None,
@@ -145,39 +140,11 @@ def _point_cloud_manifest() -> dict:
     }
 
 
-def _grasp_to_runtime_ee(
-    value=None,
-    evidence_ref="transforms/graspnet-to-runtime-ee.json",
-) -> dict:
-    return {
-        "value": value or [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-        "parent_frame": "graspnet_parallel_jaw",
-        "child_frame": "runtime_ee",
-        "calibration_ref": "calibration/head.json",
-        "evidence_ref": evidence_ref,
-        "translation_unit": "meter",
-        "quaternion_convention": "xyzw",
-    }
-
-
-def _convert_grasps(
-    response,
-    *,
-    object_id_mapping=None,
-    pose_hole_name="tube_grasp_pose",
-    observation=None,
-    evidence_ref="graspnet/raw-0001.json",
-    point_cloud_manifest=None,
-    grasp_to_runtime_ee=None,
-):
-    return graspnet_candidates_from_response(
+def _validate(response, *, observation=None, point_cloud_manifest=None):
+    return validate_graspnet_response_record(
         response,
-        object_id_mapping=object_id_mapping or {7: "tube_left"},
-        pose_hole_name=pose_hole_name,
         observation=observation or _observation(),
         point_cloud_manifest=point_cloud_manifest or _point_cloud_manifest(),
-        grasp_to_runtime_ee=grasp_to_runtime_ee or _grasp_to_runtime_ee(),
-        evidence_ref=evidence_ref,
     )
 
 
@@ -197,27 +164,19 @@ def test_observation_from_record_builds_typed_immutable_values() -> None:
 @pytest.mark.parametrize(
     "statement",
     [
-        (
-            "import demo_graph_lab.selection.candidates; "
-            "import demo_graph_lab.perception.adapters"
-        ),
-        (
-            "import demo_graph_lab.perception.adapters; "
-            "import demo_graph_lab.selection.candidates"
-        ),
+        "import demo_graph_lab.selection.candidates; import demo_graph_lab.perception.adapters",
+        "import demo_graph_lab.perception.adapters; import demo_graph_lab.selection.candidates",
     ],
 )
 def test_candidate_and_adapter_modules_import_in_either_order(statement) -> None:
     source_root = Path(__file__).resolve().parents[1] / "src"
-    env = {**os.environ, "PYTHONPATH": str(source_root)}
     result = subprocess.run(
         [sys.executable, "-c", statement],
-        env=env,
+        env={**os.environ, "PYTHONPATH": str(source_root)},
         capture_output=True,
         text=True,
         check=False,
     )
-
     assert result.returncode == 0, result.stderr
 
 
@@ -307,110 +266,14 @@ def test_candidate_record_is_strict_and_rejects_unsafe_values() -> None:
         candidate_from_record(empty_ref)
 
 
-def test_graspnet_response_builds_strict_pose_envelope_without_claims() -> None:
-    candidates = _convert_grasps(
-        _graspnet_response(),
-        object_id_mapping={7: "tube_left"},
-        pose_hole_name="tube_grasp_pose",
-        observation=_observation(),
-        evidence_ref="graspnet/raw-0001.json",
-    )
+@pytest.mark.parametrize("object_id", [-1, 7])
+def test_raw_graspnet_validation_never_assigns_graph_objects(object_id) -> None:
+    summary = _validate(_graspnet_response(object_id=object_id))
 
-    assert len(candidates) == 1
-    candidate = candidates[0]
-    assert candidate.candidate_id == "graspnet:3"
-    assert candidate.observation_id == "obs-head-0001"
-    assert candidate.to_record()["hole_values"] == {
-        "tube_grasp_pose": {
-            "value": [0.1, 0.2, 0.5, 0.0, 0.0, 0.0, 1.0],
-            "frame": "camera_head",
-            "calibration_ref": "calibration/head.json",
-            "object_id": "tube_left",
-        }
-    }
-    assert candidate.to_record()["features"] == {
-        "score": 0.91,
-        "width": 0.032,
-        "height": 0.02,
-        "depth": 0.04,
-        "pose_convention": "runtime_ee_xyzw",
-    }
-    assert candidate.to_record()["provenance"] == {
-        "grasp_to_runtime_ee": {
-            "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-            "parent_frame": "graspnet_parallel_jaw",
-            "child_frame": "runtime_ee",
-            "translation_unit": "meter",
-            "quaternion_convention": "xyzw",
-            "calibration_ref": "calibration/head.json",
-            "evidence_ref": "transforms/graspnet-to-runtime-ee.json",
-        }
-    }
-    assert "approach_dir" not in candidate.features
-    assert "height_fraction" not in candidate.features
-    assert "collision_free" not in candidate.features
-    assert candidate.evidence_refs == (
-        "graspnet/raw-0001.json",
-        "pointcloud/head-0001.manifest.json",
-        "transforms/graspnet-to-runtime-ee.json",
-        "calibration/head.json",
-    )
-
-
-def test_graspnet_rotation_is_converted_to_xyzw() -> None:
-    rotation_z_90 = [
-        [0.0, -1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ]
-    candidate = _convert_grasps(
-        _graspnet_response(rotation_z_90),
-        object_id_mapping={"7": "tube_left"},
-        pose_hole_name="tube_grasp_pose",
-        observation=_observation(),
-        evidence_ref="graspnet/raw-0001.json",
-    )[0]
-
-    quaternion = candidate.to_record()["hole_values"]["tube_grasp_pose"]["value"][3:]
-    assert quaternion == pytest.approx([0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5)])
-
-
-def test_graspnet_applies_recorded_grasp_to_runtime_ee_transform() -> None:
-    candidate = _convert_grasps(
-        _graspnet_response(),
-        grasp_to_runtime_ee=_grasp_to_runtime_ee([
-            0.1, 0.0, 0.0,
-            0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5),
-        ]),
-    )[0]
-
-    pose = candidate.to_record()["hole_values"]["tube_grasp_pose"]["value"]
-    assert pose[:3] == pytest.approx([0.2, 0.2, 0.5])
-    assert pose[3:] == pytest.approx([
-        0.0, 0.0, math.sqrt(0.5), math.sqrt(0.5),
-    ])
-
-
-def test_transform_value_is_preserved_even_when_evidence_ref_is_reused() -> None:
-    observation = _observation()
-    identity = _convert_grasps(
-        _graspnet_response(),
-        observation=observation,
-    )[0]
-    shifted = _convert_grasps(
-        _graspnet_response(),
-        observation=observation,
-        grasp_to_runtime_ee=_grasp_to_runtime_ee(
-            [0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-        ),
-    )[0]
-
-    assert identity.hole_values != shifted.hole_values
-    assert identity.evidence_refs == shifted.evidence_refs
-    assert identity.provenance != shifted.provenance
-    assert shifted.provenance["grasp_to_runtime_ee"]["value"] == (
-        0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    )
+    assert summary["grasp_count"] == 1
+    assert summary["object_ids"] == [object_id]
+    assert summary["requires_object_assignment"] is True
+    assert not hasattr(adapters, "graspnet_candidates_from_response")
 
 
 @pytest.mark.parametrize(
@@ -420,40 +283,14 @@ def test_transform_value_is_preserved_even_when_evidence_ref_is_reused() -> None
         ("frame", "robot_base", "frame"),
         ("calibration_ref", "calibration/other.json", "calibration_ref"),
         ("artifact_ref", "pointcloud/other.npz", "artifact_ref"),
+        ("evidence_ref", "pointcloud/other.manifest.json", "observation"),
     ],
 )
-def test_graspnet_requires_meter_point_cloud_manifest(field, value, message) -> None:
+def test_raw_graspnet_requires_bound_meter_point_cloud(field, value, message) -> None:
     manifest = _point_cloud_manifest()
     manifest[field] = value
-
     with pytest.raises(ValueError, match=message):
-        _convert_grasps(
-            _graspnet_response(),
-            point_cloud_manifest=manifest,
-        )
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("parent_frame", "unknown", "parent_frame"),
-        ("child_frame", "tool", "child_frame"),
-        ("calibration_ref", "calibration/other.json", "calibration_ref"),
-        ("value", [0.0] * 7, "unit length"),
-        ("evidence_ref", "transforms/unrecorded.json", "belong to observation"),
-        ("translation_unit", "millimeter", "translation_unit"),
-        ("quaternion_convention", "wxyz", "quaternion_convention"),
-    ],
-)
-def test_graspnet_requires_explicit_runtime_ee_transform(field, value, message) -> None:
-    transform = _grasp_to_runtime_ee()
-    transform[field] = value
-
-    with pytest.raises(ValueError, match=message):
-        _convert_grasps(
-            _graspnet_response(),
-            grasp_to_runtime_ee=transform,
-        )
+        _validate(_graspnet_response(), point_cloud_manifest=manifest)
 
 
 @pytest.mark.parametrize(
@@ -462,64 +299,21 @@ def test_graspnet_requires_explicit_runtime_ee_transform(field, value, message) 
         ("schema", "another.schema", "schema"),
         ("backend", "fixture", "backend"),
         ("coordinate_frame", "unknown", "coordinate_frame"),
+        ("ok", False, "successful"),
     ],
 )
-def test_graspnet_rejects_unknown_response_identity(field: str, value, message: str) -> None:
+def test_raw_graspnet_rejects_response_identity_drift(field, value, message) -> None:
     response = _graspnet_response()
     response[field] = value
     with pytest.raises(ValueError, match=message):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(response)
 
 
-def test_graspnet_rejects_frame_and_object_mapping_mismatches() -> None:
-    response = _graspnet_response()
-    response["grasps"][0]["coordinate_frame"] = "robot_base"
-    with pytest.raises(ValueError, match="response frame"):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
-
-    unknown_object = _graspnet_response()
-    unknown_object["grasps"][0]["object_id"] = -1
-    unknown_object["grasps"][0]["raw_grasp_array"][-1] = -1.0
-    with pytest.raises((TypeError, ValueError), match="object_id|non-negative"):
-        _convert_grasps(
-            unknown_object,
-            object_id_mapping={-1: "tube_left"},
-        )
-
-    with pytest.raises(ValueError, match="no graph object mapping"):
-        _convert_grasps(
-            _graspnet_response(),
-            object_id_mapping={8: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
-
-
-def test_graspnet_rejects_reply_from_another_observation() -> None:
+def test_raw_graspnet_rejects_reply_from_another_observation() -> None:
     response = _graspnet_response()
     response["input_reference"]["point_cloud_path"] = "pointcloud/stale.npz"
-
     with pytest.raises(ValueError, match="current observation"):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(response)
 
 
 @pytest.mark.parametrize(
@@ -529,18 +323,12 @@ def test_graspnet_rejects_reply_from_another_observation() -> None:
         ("coordinate_frame", "robot_base", "input coordinate_frame"),
     ],
 )
-def test_graspnet_rejects_mismatched_input_identity(field, value, message) -> None:
+def test_raw_graspnet_rejects_mismatched_input_identity(field, value, message) -> None:
     response = _graspnet_response()
     response["input_reference"][field] = value
-
     with pytest.raises(ValueError, match=message):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(response)
+
 
 @pytest.mark.parametrize(
     "rotation",
@@ -551,48 +339,18 @@ def test_graspnet_rejects_mismatched_input_identity(field, value, message) -> No
         [[True, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
     ],
 )
-def test_graspnet_rejects_invalid_rotation_matrices(rotation) -> None:
+def test_raw_graspnet_rejects_invalid_rotation_matrices(rotation) -> None:
     with pytest.raises((TypeError, ValueError)):
-        _convert_grasps(
-            _graspnet_response(rotation),
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(_graspnet_response(rotation))
 
 
-def test_graspnet_rejects_bool_numeric_and_empty_evidence() -> None:
+def test_raw_graspnet_rejects_numeric_bool_and_raw_disagreement() -> None:
     response = _graspnet_response()
     response["grasps"][0]["score"] = True
     with pytest.raises(TypeError, match="number"):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(response)
 
-    with pytest.raises(ValueError, match="non-empty"):
-        _convert_grasps(
-            _graspnet_response(),
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref=" ",
-        )
-
-
-def test_graspnet_rejects_structured_and_raw_field_disagreement() -> None:
     response = _graspnet_response()
     response["grasps"][0]["width"] = 0.05
-
     with pytest.raises(ValueError, match="disagrees"):
-        _convert_grasps(
-            response,
-            object_id_mapping={7: "tube_left"},
-            pose_hole_name="tube_grasp_pose",
-            observation=_observation(),
-            evidence_ref="graspnet/raw-0001.json",
-        )
+        _validate(response)

@@ -46,6 +46,8 @@ Backend 只能生成 `StageProgram` JSON；Python policy 必须由确定性 comp
 - candidate provider 不填写 scalar 或 runtime condition；这两类值只来自单独的可信 resolver。
 - 每阶段 required holes 来自已校验 `StageProgram` 的 hole wiring；没有 program 时必须要求该 stage 的全部几何 holes。
 - synthetic replay、recorded real replay 和 live adapter 结果必须分开标注，不能把合约 fixture 写成真实效果。
+- `planning-record` 默认 `plan` 必须零网络；`capture/predict` 必须分别显式授权，不能增加绕过检查点的一键入口。
+- GraspNet raw detector ID 无论正负都只作为原始证据；没有可信 object mask/assignment 时不得映射到 graph object 或生成 candidate。
 - cone 排序只接受重力相对的 `approach_tilt_deg`；GraspNet grasp center 未经带独立 evidence artifact 的显式 tool transform 不能冒充 runtime EEF/TCP pose，变换值、frame、单位和四元数约定必须保存在 candidate provenance。
 
 `execution/oracle_runtime.py` 是明确的特权调试实现。它可以读取 simulator `/state` 来填洞和验收，但结果不能报告为主方法性能。非特权 runtime 必须是独立实现，只读取相机、点云、感知结果、机器人状态和力反馈。

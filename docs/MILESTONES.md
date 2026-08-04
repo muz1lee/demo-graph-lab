@@ -30,7 +30,7 @@
 
 - `ObservationPacket` 和 `Proprioception` 不接受任意 robot-state 字段；
 - recorded observation/candidate adapter 使用闭合 schema，candidate data 是 immutable、finite、JSON-safe；
-- recorded GraspNet `/predict` reply 只有在米制 point-cloud manifest 和带独立 evidence artifact 的 grasp-frame→runtime-EEF 变换存在时才转换为 pose envelope；candidate provenance 保留变换数值、frame、单位和四元数约定，不会发请求或猜排序/碰撞结论；
+- raw GraspNet reply 只做 schema、17D array、observation 和 point-cloud binding 校验；在 object assignment 与 tool 标定完成前不发布 graph candidate converter；
 - candidate 必须绑定同一次 observation，并通过 hole type、shape、frame、calibration 和 graph object 校验；
 - typed binding 失败时物理 checker 不运行，`solve()` 还会再次校验；
 - reachability / collision / width 缺失、异常或 `UNKNOWN` 均 fail-closed；
@@ -39,18 +39,32 @@
 - synthetic fixed replay 只过滤一次，并让 demo/no-demo 共用 accepted set；
 - opaque handle 不暴露数值，所有控制原语抛 `ExecutionDisabled`。
 
-注意：这只是合约与 synthetic replay 脚手架，当前没有 live sensor adapter、真实 hard checker 或合格的真实 replay。
+注意：这部分仍只是合约与 synthetic replay；只读 raw record 已单列验收，但真实 hard checker 和真实 replay 尚未完成。
+
+## 只读真实记录链
+
+状态：完成首个 head observation → raw GraspNet 闭环。
+
+- `planning-record` 明确分为 `plan / capture / predict`；默认 plan 零网络，两个 live step 分别要求显式授权；
+- capture 只请求一次 head stereo snapshot，并固定读取两臂 `get_qpos/get_xquat`；同步 render、cache 更新和 frame-id 增量写入调用记录；
+- 保存左右 BGR、float32 米制 depth、OpenCV optical-frame 点云、内参、本体状态和严格 observation；
+- GraspNet 只绑定 loopback，health 与 predict 同时检查 HTTP 和 JSON 语义；`ok=false` 会保留原文但不推进状态；
+- raw validator 保留 detector ID；任何 raw ID 都仍需要 object assignment，当前没有 GraspNet→graph candidate converter；
+- 第一份 5090 record 达到 `RAW_GRASPNET_RECORDED`，20 个 proposal 全部保留，未生成 candidate、replay、planner 或 control 产物。
+
+注意：这个里程碑只证明真实采集和感知调用可追溯，不证明 proposal 属于 graph object，也不证明 pose 可执行。
 
 ## 真实候选链
 
-状态：合约已完成，真实数据链未完成。
+状态：raw 数据链已完成，candidate normalization 未完成。
 
 已完成：
 
 - 严格 observation/candidate record schema；
-- 实际 GraspNet raw response 的无网络 normalization adapter；
+- 实际 GraspNet raw response 的严格无网络 validator；
 - typed-hole binding 与 StageProgram required-hole 接线；
 - synthetic demo/no-demo replay 和 CLI。
+- head observation 与 raw GraspNet response 的只读 record CLI。
 
 验收条件：
 

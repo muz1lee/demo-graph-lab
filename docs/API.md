@@ -44,11 +44,14 @@ Backend 输出始终是不可信 proposal。stage、registry、constraint sample
 
 ### 当前建议的在线顺序
 
-第一条非特权 baseline 不调用 backend model。当前已经实现 planning-only 部分：
+第一条非特权 baseline 不调用 backend model。当前实现分成“真实原始记录”和“冻结候选 replay”两段：
 
 ```text
-recorded RGB-D refs / robot state
-  → strict observation and candidate adapters
+head RGB-D + fixed info reads
+  → frozen optical-frame observation
+  → raw GraspNet response
+  → [trusted object assignment + frame calibration 尚未完成]
+  → strict candidate adapter
   → observation-bound typed-hole validation
   → reachability / collision / width hard filter
   → deterministic region / cone ranking
@@ -63,7 +66,9 @@ recorded RGB-D refs / robot state
 
 `StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
 
-当前只有纯离线 record adapter：它能把保存的 observation、candidate record 和实际 GraspNet `/predict` raw schema 规范化，但不会发起服务调用。GraspNet reply 只有同时提供米制 point-cloud manifest，以及经过记录的 `graspnet_parallel_jaw → runtime_ee` 刚体变换，才会变成可绑定的 runtime pose；变换必须带属于当前 observation 的独立 `evidence_ref`，其数值、parent/child frame、米制单位和 XYZW 约定全部保存在 candidate provenance，矩阵转 quaternion 本身不算 TCP 标定。模型 `object_id` 还必须由调用方显式映射到 graph registry ID。adapter 不猜 `approach_tilt_deg`、`height_fraction` 或碰撞状态。
+`planning-record` 提供三个显式步骤。默认 `plan` 只写本地产物；`capture --allow-live-read` 只请求一次 head stereo snapshot，并通过固定白名单读取两臂 `get_qpos/get_xquat`；`predict --allow-live-read` 只对冻结点云调用 GraspNet `/health` 和 `/predict`。它不加载 backend model，不提供通用 pipeline action，也不调用 planner/control。capture 会触发一次同步 render、更新 camera cache 并增加 capture frame ID，这些传感副作用会写入 `sensor/call.json`。
+
+真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。raw response validator 保存原始 detector ID，但仓库当前不发布 GraspNet→graph candidate converter；非负 detector ID 也不等于 graph registry ID。只有可信 object mask 生成独立 object point cloud，并由 assignment artifact 绑定 observation、graph object、frame、calibration 和证据后，才能实现 normalization。之后仍需补齐 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 变换。
 
 在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`；缺少某项排序特征时，对应 preference meta 是 `UNCHECKABLE`，只有部分候选有特征时为 `PARTIAL`，不能把 ID tie-break 误写成 demo ranking。固定 synthetic replay 已经验证一次 hard filter 后共享 accepted set 的 demo/no-demo 对照；这不是 live 感知或物理 checker 结果。当前 replay loader 只接受 `synthetic_contract_fixture`，在真实 provenance/manifest contract 完成前会拒绝任何 `recorded_real` 标签。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
 
@@ -144,20 +149,22 @@ typed-hole 校验、硬过滤、排序和 fixed replay 已经存在，但真实�
 
 Oracle 的 `scalar` 和 `runtime_condition` 可以返回延迟描述子；非特权 planning runtime 尚未实现对应 resolver，因此当前会 fail-closed，而不是让 candidate 或 VLM 猜值。插入阶段由 deterministic enrich 补 `purpose=lower_stop` 的控制洞；StageProgram validator 只允许这类洞接到 `lower_until`。它目前只声明应读取非特权 contact/motion-plateau 信号，不生成阈值；明确的停止信号路由仍是执行前 TODO。
 
-### 已确认但尚未接入的真实接口
+### 只读真实记录接口
 
-5090 的只读静态盘点确认了 head RGB-D、点云、GraspNet `/predict` 和纯 IK 的代码路径，但还不能把它们报告为完整候选链：
+head RGB-D、点云和 GraspNet `/predict` 已有独立的 read-only record 入口，但还不能报告为完整候选链：
 
-- live depth 已经是米，旧 point-cloud helper 必须显式使用 `depth_scale=1.0`；
-- 旧 adapter 调 `/propose`，与实际 `/predict` 文件路径契约不兼容；
-- GraspNet 不做碰撞过滤，也不直接给 graph object ID、`approach_tilt_deg` 或 `height_fraction`；
+- snapshot 的 depth 是 float32 米制左目 render depth；反投影后只保留 finite 且 `z>0` 的 optical-frame 点；
+- GraspNet 实际只消费 `point_cloud_path` 与 `extra.max_grasps`；RGB、depth、mask 和 `object_hint` 当前只是回显，不能作为 object assignment 证据；
+- baseline 的 `pred_decode()` 把所有 `object_id` 固定为 `-1`，raw 记录可以成功，candidate normalization 必须 fail-closed；
+- head camera 挂在可升降 link 上；静态 extrinsics 没有实时 lift 修正，不能把 optical cloud 改标签成 robot base；
 - recorded reply 的 point-cloud ref、frame ID 和 coordinate frame 必须与当前 observation 精确一致，structured grasp fields 还要与原始 17D array 一致；
-- point-cloud manifest 必须显式声明米、frame 和 calibration；grasp center 必须经带独立 evidence artifact 的 grasp-frame→runtime-EEF transform，不能直接当 TCP pose；
+- point-cloud binding manifest 与完整 projection manifest 分开保存；grasp center 不能直接当 TCP pose；
+- GraspNet 不做碰撞过滤，也不直接给 `approach_tilt_deg` 或 `height_fraction`；
 - 现有 IK 会先 clip 越界目标，reachability checker 必须检查原目标和最终残差；
 - 当前 motion-planning wrapper 丢失 planner success，不能签发可信 `PASS`；
 - candidate width 是米，而 K1 只有 motor angle，未做 opening-width 标定前 width checker 必须返回 `UNKNOWN`。
 
-因此 v1 先消费冻结文件，再单独采集第一份真实 replay；不能用接口“存在”替代 certificate 语义正确。
+因此当前状态 `RAW_GRASPNET_RECORDED` 只证明 observation、请求和 raw reply 可追溯；不能用接口“被调用”替代 candidate 或 certificate 语义正确。
 
 ### 执行前门槛
 

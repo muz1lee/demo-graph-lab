@@ -92,15 +92,6 @@ _POINT_CLOUD_MANIFEST_KEYS = {
     "calibration_ref",
     "evidence_ref",
 }
-_GRASP_TO_EE_KEYS = {
-    "value",
-    "parent_frame",
-    "child_frame",
-    "calibration_ref",
-    "evidence_ref",
-    "translation_unit",
-    "quaternion_convention",
-}
 _ROTATION_TOLERANCE = 1e-4
 
 
@@ -310,33 +301,6 @@ def candidate_from_record(record: Mapping[str, Any]) -> CandidateBundle:
     )
 
 
-def _graph_object_map(value: Any) -> dict[str, str]:
-    if not isinstance(value, Mapping):
-        raise TypeError("object_id_mapping must be an object")
-    mapping = value
-    if not mapping:
-        raise ValueError("object_id_mapping must not be empty")
-    normalized: dict[str, str] = {}
-    for raw_id, graph_id in mapping.items():
-        if not isinstance(raw_id, (str, int)) or isinstance(raw_id, bool):
-            raise TypeError("object_id_mapping keys must be integer IDs or their string form")
-        key = str(raw_id)
-        try:
-            parsed_id = int(key)
-        except ValueError as error:
-            raise ValueError(
-                "object_id_mapping keys must be non-negative integer IDs"
-            ) from error
-        if parsed_id < 0 or key != str(parsed_id):
-            raise ValueError(
-                "object_id_mapping keys must be canonical non-negative integer IDs"
-            )
-        if key in normalized:
-            raise ValueError(f"object_id_mapping contains ambiguous ID {key!r}")
-        normalized[key] = _required_string(graph_id, f"object_id_mapping[{key!r}]")
-    return normalized
-
-
 def _rotation_matrix(value: Any, path: str) -> tuple[tuple[float, ...], ...]:
     if not isinstance(value, list) or len(value) != 3:
         raise ValueError(f"{path} must be a 3x3 JSON array")
@@ -361,100 +325,6 @@ def _rotation_matrix(value: Any, path: str) -> tuple[tuple[float, ...], ...]:
     return rows
 
 
-def _matrix_to_xyzw(matrix: tuple[tuple[float, ...], ...]) -> list[float]:
-    """Convert a validated right-handed rotation matrix to canonical XYZW."""
-
-    m00, m01, m02 = matrix[0]
-    m10, m11, m12 = matrix[1]
-    m20, m21, m22 = matrix[2]
-    trace = m00 + m11 + m22
-    if trace > 0.0:
-        scale = math.sqrt(trace + 1.0) * 2.0
-        qx = (m21 - m12) / scale
-        qy = (m02 - m20) / scale
-        qz = (m10 - m01) / scale
-        qw = 0.25 * scale
-    elif m00 > m11 and m00 > m22:
-        scale = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
-        qx = 0.25 * scale
-        qy = (m01 + m10) / scale
-        qz = (m02 + m20) / scale
-        qw = (m21 - m12) / scale
-    elif m11 > m22:
-        scale = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
-        qx = (m01 + m10) / scale
-        qy = 0.25 * scale
-        qz = (m12 + m21) / scale
-        qw = (m02 - m20) / scale
-    else:
-        scale = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
-        qx = (m02 + m20) / scale
-        qy = (m12 + m21) / scale
-        qz = 0.25 * scale
-        qw = (m10 - m01) / scale
-
-    quaternion = [qx, qy, qz, qw]
-    norm = math.sqrt(sum(item * item for item in quaternion))
-    quaternion = [item / norm for item in quaternion]
-    if quaternion[3] < 0.0:
-        quaternion = [-item for item in quaternion]
-    return quaternion
-
-
-def _xyzw_to_matrix(value: Any, path: str) -> tuple[tuple[float, ...], ...]:
-    quaternion = _number_list(value, path, length=4)
-    norm = math.sqrt(sum(item * item for item in quaternion))
-    if not math.isclose(norm, 1.0, rel_tol=0.0, abs_tol=1e-3):
-        raise ValueError(f"{path} must be unit length")
-    x, y, z, w = (item / norm for item in quaternion)
-    return (
-        (
-            1.0 - 2.0 * (y * y + z * z),
-            2.0 * (x * y - z * w),
-            2.0 * (x * z + y * w),
-        ),
-        (
-            2.0 * (x * y + z * w),
-            1.0 - 2.0 * (x * x + z * z),
-            2.0 * (y * z - x * w),
-        ),
-        (
-            2.0 * (x * z - y * w),
-            2.0 * (y * z + x * w),
-            1.0 - 2.0 * (x * x + y * y),
-        ),
-    )
-
-
-def _compose_pose(
-    parent_translation: tuple[float, ...],
-    parent_rotation: tuple[tuple[float, ...], ...],
-    child_transform: tuple[float, ...],
-) -> tuple[list[float], tuple[tuple[float, ...], ...]]:
-    child_translation = child_transform[:3]
-    child_rotation = _xyzw_to_matrix(
-        list(child_transform[3:]), "grasp_to_runtime_ee.value.quaternion_xyzw"
-    )
-    rotated_translation = [
-        sum(parent_rotation[row][column] * child_translation[column]
-            for column in range(3))
-        for row in range(3)
-    ]
-    translation = [
-        parent_translation[index] + rotated_translation[index]
-        for index in range(3)
-    ]
-    rotation = tuple(
-        tuple(
-            sum(parent_rotation[row][k] * child_rotation[k][column]
-                for k in range(3))
-            for column in range(3)
-        )
-        for row in range(3)
-    )
-    return translation, rotation
-
-
 def _validate_point_cloud_manifest(
     manifest: Mapping[str, Any],
     observation: ObservationPacket,
@@ -465,6 +335,10 @@ def _validate_point_cloud_manifest(
     )
     if value["artifact_ref"] != point_cloud_ref:
         raise ValueError("point_cloud_manifest artifact_ref does not match request")
+    if point_cloud_ref not in observation.sensor_refs:
+        raise ValueError(
+            "point_cloud_manifest artifact_ref does not belong to observation"
+        )
     if value["unit"] != "meter":
         raise ValueError("point_cloud_manifest unit must be meter")
     if value["frame"] != observation.frame:
@@ -483,65 +357,50 @@ def _validate_point_cloud_manifest(
     return evidence_ref
 
 
-def _validate_grasp_to_runtime_ee(
-    transform: Mapping[str, Any],
-    observation: ObservationPacket,
-) -> tuple[tuple[float, ...], str]:
-    value = _exact_object(
-        transform, _GRASP_TO_EE_KEYS, "grasp_to_runtime_ee"
-    )
-    if value["parent_frame"] != "graspnet_parallel_jaw":
-        raise ValueError(
-            "grasp_to_runtime_ee.parent_frame must be graspnet_parallel_jaw"
-        )
-    if value["child_frame"] != "runtime_ee":
-        raise ValueError("grasp_to_runtime_ee.child_frame must be runtime_ee")
-    if value["calibration_ref"] != observation.calibration_ref:
-        raise ValueError(
-            "grasp_to_runtime_ee calibration_ref does not match observation"
-        )
-    if value["translation_unit"] != "meter":
-        raise ValueError("grasp_to_runtime_ee translation_unit must be meter")
-    if value["quaternion_convention"] != "xyzw":
-        raise ValueError("grasp_to_runtime_ee quaternion_convention must be xyzw")
-    pose = _number_list(value["value"], "grasp_to_runtime_ee.value", length=7)
-    _xyzw_to_matrix(list(pose[3:]), "grasp_to_runtime_ee.value.quaternion_xyzw")
-    evidence_ref = _required_string(
-        value["evidence_ref"], "grasp_to_runtime_ee.evidence_ref"
-    )
-    if evidence_ref not in observation.sensor_refs:
-        raise ValueError(
-            "grasp_to_runtime_ee evidence_ref does not belong to observation"
-        )
-    return pose, evidence_ref
-
-
-def graspnet_candidates_from_response(
-    response: Mapping[str, Any],
+def validate_point_cloud_manifest_record(
+    manifest: Mapping[str, Any],
     *,
-    object_id_mapping: Mapping[int | str, str],
-    pose_hole_name: str,
+    observation: ObservationPacket,
+) -> dict[str, str]:
+    """Validate a frozen point-cloud binding before any live model call."""
+
+    if not isinstance(observation, ObservationPacket):
+        raise TypeError("observation must be an ObservationPacket")
+    value = _exact_object(
+        manifest, _POINT_CLOUD_MANIFEST_KEYS, "point_cloud_manifest"
+    )
+    point_cloud_ref = _required_string(
+        value["artifact_ref"], "point_cloud_manifest.artifact_ref"
+    )
+    evidence_ref = _validate_point_cloud_manifest(
+        value,
+        observation,
+        point_cloud_ref,
+    )
+    return {
+        "artifact_ref": point_cloud_ref,
+        "unit": "meter",
+        "frame": observation.frame,
+        "calibration_ref": observation.calibration_ref,
+        "evidence_ref": evidence_ref,
+    }
+
+
+def _validated_graspnet_response(
+    response: Mapping[str, Any],
     observation: ObservationPacket,
     point_cloud_manifest: Mapping[str, Any],
-    grasp_to_runtime_ee: Mapping[str, Any],
-    evidence_ref: str,
-) -> tuple[CandidateBundle, ...]:
-    """Convert one recorded real GraspNet ``/predict`` response to candidates.
+) -> tuple[str, str, tuple[dict[str, Any], ...]]:
+    """Validate one frozen raw response without assigning graph objects.
 
-    This performs only the explicit, recorded grasp-frame → runtime-EEF
-    transform.  It does not rank candidates, assert collision freedom, or call
-    a service.  The response and point-cloud manifest must match the observation.
+    The upstream baseline currently emits ``object_id=-1`` for every proposal.
+    That value is valid raw evidence, but it is not a graph-object assignment.
+    Graph-object assignment and candidate conversion are intentionally outside
+    this raw-record module until a reviewed assignment artifact exists.
     """
 
     if not isinstance(observation, ObservationPacket):
         raise TypeError("observation must be an ObservationPacket")
-    hole_name = _required_string(pose_hole_name, "pose_hole_name")
-    source_ref = _required_string(evidence_ref, "evidence_ref")
-    graph_objects = _graph_object_map(object_id_mapping)
-    runtime_ee_transform, runtime_ee_transform_evidence = _validate_grasp_to_runtime_ee(
-        grasp_to_runtime_ee, observation
-    )
-
     root = _object(response, "graspnet_response")
     actual_keys = set(root)
     missing = sorted(_GRASPNET_RESPONSE_REQUIRED - actual_keys)
@@ -559,7 +418,9 @@ def graspnet_candidates_from_response(
         raise ValueError(f"unknown graspnet response schema: {root['schema']!r}")
     if root["backend"] != "graspnet_baseline":
         raise ValueError(f"unsupported graspnet backend: {root['backend']!r}")
-    frame = _required_string(root["coordinate_frame"], "graspnet_response.coordinate_frame")
+    frame = _required_string(
+        root["coordinate_frame"], "graspnet_response.coordinate_frame"
+    )
     if frame.lower() == "unknown":
         raise ValueError("graspnet response coordinate_frame must be known")
     if frame != observation.frame:
@@ -603,7 +464,7 @@ def graspnet_candidates_from_response(
     rows = root["grasps"]
     if not isinstance(rows, list):
         raise TypeError("graspnet_response.grasps must be a JSON array")
-    candidates = []
+    parsed_rows = []
     seen_indexes: set[int] = set()
     for index, value in enumerate(rows):
         path = f"graspnet_response.grasps[{index}]"
@@ -613,31 +474,31 @@ def graspnet_candidates_from_response(
             raise ValueError(f"duplicate grasp raw_index: {raw_index}")
         seen_indexes.add(raw_index)
 
-        candidate_frame = _required_string(row["coordinate_frame"], f"{path}.coordinate_frame")
+        candidate_frame = _required_string(
+            row["coordinate_frame"], f"{path}.coordinate_frame"
+        )
         if candidate_frame.lower() == "unknown" or candidate_frame != frame:
-            raise ValueError(f"{path}.coordinate_frame does not match the response frame")
+            raise ValueError(
+                f"{path}.coordinate_frame does not match the response frame"
+            )
         raw_object_id = _integer(
-            row["object_id"], f"{path}.object_id", minimum=0
+            row["object_id"], f"{path}.object_id", minimum=-1
         )
-        graph_object_id = graph_objects.get(str(raw_object_id))
-        if graph_object_id is None:
-            raise ValueError(f"no graph object mapping for GraspNet object_id {raw_object_id}")
-
-        translation = _number_list(row["translation"], f"{path}.translation", length=3)
-        rotation = _rotation_matrix(row["rotation_matrix"], f"{path}.rotation_matrix")
-        runtime_translation, runtime_rotation = _compose_pose(
-            translation,
-            rotation,
-            runtime_ee_transform,
+        translation = _number_list(
+            row["translation"], f"{path}.translation", length=3
         )
-        quaternion = _matrix_to_xyzw(runtime_rotation)
+        rotation = _rotation_matrix(
+            row["rotation_matrix"], f"{path}.rotation_matrix"
+        )
         score = _finite_number(row["score"], f"{path}.score")
         dimensions = {
             name: _finite_number(row[name], f"{path}.{name}")
             for name in ("width", "height", "depth")
         }
         if any(number < 0.0 for number in dimensions.values()):
-            raise ValueError(f"{path} width, height, and depth must be non-negative")
+            raise ValueError(
+                f"{path} width, height, and depth must be non-negative"
+            )
         raw_array = _number_list(
             row["raw_grasp_array"], f"{path}.raw_grasp_array", length=17
         )
@@ -657,41 +518,36 @@ def graspnet_candidates_from_response(
             raise ValueError(
                 f"{path}.raw_grasp_array disagrees with structured grasp fields"
             )
+        parsed_rows.append({
+            "raw_index": raw_index,
+            "object_id": raw_object_id,
+            "translation": translation,
+            "rotation": rotation,
+            "score": score,
+            "dimensions": dimensions,
+        })
+    return frame, point_cloud_evidence, tuple(parsed_rows)
 
-        candidates.append(
-            CandidateBundle(
-                candidate_id=f"graspnet:{raw_index}",
-                observation_id=observation.observation_id,
-                hole_values={
-                    hole_name: {
-                        "value": [*runtime_translation, *quaternion],
-                        "frame": frame,
-                        "calibration_ref": observation.calibration_ref,
-                        "object_id": graph_object_id,
-                    }
-                },
-                features={
-                    "score": score,
-                    **dimensions,
-                    "pose_convention": "runtime_ee_xyzw",
-                },
-                provenance={
-                    "grasp_to_runtime_ee": {
-                        "value": list(runtime_ee_transform),
-                        "parent_frame": "graspnet_parallel_jaw",
-                        "child_frame": "runtime_ee",
-                        "translation_unit": "meter",
-                        "quaternion_convention": "xyzw",
-                        "calibration_ref": observation.calibration_ref,
-                        "evidence_ref": runtime_ee_transform_evidence,
-                    }
-                },
-                evidence_refs=tuple(dict.fromkeys((
-                    source_ref,
-                    point_cloud_evidence,
-                    runtime_ee_transform_evidence,
-                    observation.calibration_ref,
-                ))),
-            )
-        )
-    return tuple(candidates)
+
+def validate_graspnet_response_record(
+    response: Mapping[str, Any],
+    *,
+    observation: ObservationPacket,
+    point_cloud_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate and summarize raw GraspNet evidence without making candidates."""
+
+    frame, _, rows = _validated_graspnet_response(
+        response,
+        observation,
+        point_cloud_manifest,
+    )
+    return {
+        "schema": _GRASPNET_SCHEMA,
+        "backend": "graspnet_baseline",
+        "frame": frame,
+        "grasp_count": len(rows),
+        "raw_indices": [row["raw_index"] for row in rows],
+        "object_ids": [row["object_id"] for row in rows],
+        "requires_object_assignment": bool(rows),
+    }

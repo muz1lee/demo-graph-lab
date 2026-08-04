@@ -4,9 +4,9 @@
 
 ## 当前顺序
 
-1. 只读采集一份 head RGB-D、米制 depth、点云、本体状态和标定，保存为完整 observation record。
-2. 离线调用 GraspNet 后保存原始 `/predict` 回复；显式建立模型 object ID 到 graph registry ID 的映射，并从受检的 rotation/object extent 派生排序特征。
-3. 接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定并记录 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
+1. 在任务匹配的只读 observation 上得到可信 object mask；为每个 graph object 生成独立点云和 `object_assignment.json`，禁止把 raw `object_id=-1` 直接改成 registry ID。
+2. 记录 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 标定；当前 graph hole 是 `world`，未有完整变换前不生成 candidate。
+3. 从受检 object extent 和 grasp rotation 派生排序特征，再接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
 4. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
 5. 审查一个非特权 stage 的 gate 输入与 abort 行为，然后停下评审；得到明确允许后才连接控制。
 
@@ -23,8 +23,8 @@
 
 ## Perception 与候选
 
-- 实现 head camera 的 live-to-record adapter；hand camera 在实时 EEF frame transform 明确前不接。
-- 接入真实 grasp proposals，并为每个 candidate 保存原始回复、观测证据、frame、object mapping 和 hole values。
+- hand camera 在实时 EEF frame transform 明确前不接。
+- 为 raw grasp proposals 增加可信的单对象 mask/point-cloud assignment；assignment 必须绑定 observation、registry object、frame、calibration 和 evidence。
 - 给 `height_fraction` 与重力相对的 `approach_tilt_deg` 写独立、可检查的派生逻辑；禁止把 camera-frame 裸 `approach_dir` 直接用于 cone 排序。
 - 采集真实 point-cloud manifest 与 K1 grasp-center→runtime-EEF/TCP 标定 artifact；变换值、frame 约定和独立 evidence ref 必须一起保存，只有矩阵转 quaternion 不算完成 pose 语义转换。
 - 为 graph hole 增加结构化 object anchor，并让 validator/StageProgram 检查；完成前多对象 stage 的 candidate binding 保持 `UNKNOWN`。

@@ -16,7 +16,8 @@ pipeline = [
     "openai>=1.0",
     "opencv-python>=4.8",
 ]
-dev = ["pytest>=8"]
+live = ["numpy>=1.26"]
+dev = ["pytest>=8", "numpy>=1.26"]
 
 [project.scripts]
 dgl = "demo_graph_lab.cli:main"

@@ -22,7 +22,9 @@
 - `OracleRuntime` 读取仿真精确状态，只用于调试；不得把 Oracle episode 写成主方法成功。
 - candidate 必须绑定同一次 observation；typed-hole 校验必须早于所有物理 checker，几何值不做隐式 frame alias。
 - scalar/runtime condition 不由 candidate provider 填写；每阶段 required holes 以已校验 StageProgram 的 wiring 为准。
-- record adapter 不等于 live adapter 已接通；synthetic replay、真实 replay、live 感知、compat 和 recovery 的状态必须如实区分。
+- `planning-record` 的 raw live 记录不等于真实 candidate/replay 已接通；synthetic replay、raw record、真实 replay、compat 和 recovery 的状态必须如实区分。
+- `planning-record` 默认 `plan` 必须零网络；`capture/predict` 必须分别显式授权，不能增加绕过检查点的一键入口。
+- GraspNet raw detector ID 无论正负都不能直接映射到 graph object；必须先有可信 object mask/assignment。
 - cone 排序不接 frame-less `approach_dir`；GraspNet grasp pose 未经带独立 evidence artifact 的显式 tool transform 不能当 runtime EEF/TCP pose，变换数值语义必须保存在 candidate provenance。
 
 ## 改动方式
