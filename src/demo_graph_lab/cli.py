@@ -10,7 +10,8 @@
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
-  dgl planning-record --record-dir <dir> [--step plan|capture|ground|segment|project|predict]
+  dgl planning-record --record-dir <dir> \\
+      [--step plan|capture|ground|segment|project|predict|programs]
 """
 
 import argparse
@@ -58,11 +59,16 @@ def main(argv=None):
     record.add_argument("--record-dir", required=True)
     record.add_argument(
         "--step",
-        choices=("plan", "capture", "ground", "segment", "project", "predict"),
+        choices=("plan", "capture", "ground", "segment", "project", "predict",
+                 "programs"),
         default="plan",
     )
     record.add_argument("--graph")
     record.add_argument("--objects")
+    record.add_argument(
+        "--perception-program",
+        help="published perception_program.json; required by --step programs",
+    )
     record.add_argument("--stage", type=int, default=0)
     record.add_argument("--hole")
     record.add_argument("--intrinsics")
@@ -103,6 +109,7 @@ def main(argv=None):
             project_record,
             segment_record,
         )
+        from .execution.program_record import programs_record
 
         if args.step == "plan":
             if not all((
@@ -151,6 +158,16 @@ def main(argv=None):
             )
         elif args.step == "project":
             project_record(args.record_dir)
+        elif args.step == "programs":
+            if not args.perception_program:
+                parser.error(
+                    "planning-record --step programs requires --perception-program"
+                )
+            programs_record(
+                args.record_dir,
+                perception_program_path=args.perception_program,
+                allow_model_read=args.allow_model_read,
+            )
         else:
             predict_record(
                 args.record_dir,
