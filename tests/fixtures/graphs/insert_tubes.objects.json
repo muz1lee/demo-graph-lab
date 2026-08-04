@@ -1,0 +1,59 @@
+[
+  {
+    "id": "tube_left",
+    "category": "tube",
+    "distinguishers": "lower-left tube initially; later inserted into left hole",
+    "trace_aliases": [
+      "third tube",
+      "lower-left tube"
+    ],
+    "first_seen_frame": 0
+  },
+  {
+    "id": "tube_mid",
+    "category": "tube",
+    "distinguishers": "upper-left tube initially; later inserted into center hole",
+    "trace_aliases": [
+      "first tube",
+      "upper-left tube"
+    ],
+    "first_seen_frame": 0
+  },
+  {
+    "id": "tube_right",
+    "category": "tube",
+    "distinguishers": "rightmost tube initially; later inserted into right hole",
+    "trace_aliases": [
+      "second tube",
+      "right tube"
+    ],
+    "first_seen_frame": 0
+  },
+  {
+    "id": "rack",
+    "category": "rack",
+    "distinguishers": "three-hole rack on right side of initial workspace",
+    "trace_aliases": [
+      "tube rack"
+    ],
+    "first_seen_frame": 0
+  },
+  {
+    "id": "table",
+    "category": "support_surface",
+    "distinguishers": "support surface beneath the tubes and rack",
+    "trace_aliases": [
+      "work surface"
+    ],
+    "first_seen_frame": 0
+  },
+  {
+    "id": "gripper",
+    "category": "robot_end_effector",
+    "distinguishers": "robot gripper operating above the workspace",
+    "trace_aliases": [
+      "end effector"
+    ],
+    "first_seen_frame": 0
+  }
+]

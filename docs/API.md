@@ -44,13 +44,21 @@ Backend 输出始终是不可信 proposal。stage、registry、constraint sample
 
 ### 当前建议的在线顺序
 
-第一条非特权 baseline 不调用 backend model。当前实现分成“真实原始记录”和“冻结候选 replay”两段：
+第一条非特权 baseline 不调用离线 backend model。Qwen 与 SAM3 只作为在线感知 proposal source，不能确认 graph identity、写三维几何或控制。当前有两条彼此独立的验证路径；它们尚未连接成完整 stage solve：
 
 ```text
-head RGB-D + fixed info reads
+单 anchor component record：
+graph resolver + anchor + head RGB-D + fixed info reads
   → frozen optical-frame observation
-  → raw GraspNet response
-  → [trusted object assignment + frame calibration 尚未完成]
+  → Qwen single-box proposal → SAM3 binary mask
+  → validated anchor request + MODEL_PROPOSED binding + mask-first cloud/lineage
+  ├─ grasp_candidate → object-only raw GraspNet response
+  ├─ principal_axis → local PCA
+  └─ part_center / part_axis → local rack-plane geometry PASS / UNKNOWN
+  → STOP：尚无 frame transform、candidate 或 solve() 接线
+
+独立 synthetic contract replay：
+synthetic fixture candidates
   → strict candidate adapter
   → observation-bound typed-hole validation
   → reachability / collision / width hard filter
@@ -62,13 +70,15 @@ head RGB-D + fixed info reads
 
 `ObservationPacket` 只接受 sensor artifact 引用、对象观测和显式 `Proprioception`；不接受任意 `robot_state` mapping。EEF pose 另带 `end_effector_frame`，不能默认继承 camera frame。record adapter 拒绝 schema 漂移、非有限数值、数值位置的 bool 和空证据。Candidate 必须携带同一次 `observation_id`，并把会改变数值语义的规范化步骤写入结构化 `provenance`；几何 hole value 使用精确的 `{value, frame, calibration_ref, object_id}` envelope，pose 顺序固定为 `[x,y,z,qx,qy,qz,qw]`。frame 必须同时等于 observation、object observation 和 graph hole 的 frame；V1 没有隐式 transform/alias resolver。标定、对象、shape 或单位向量检查不通过时，不会调用 IK、碰撞或宽度 checker。
 
-当前 graph hole 还没有结构化 object anchor。只有 stage 中恰好一个对象时，runtime 才能证明 candidate 的 `object_id` 绑定正确；manipulated 与 target 同时存在时不能从 hole 名或 `solver_hint` 猜，必须返回 `UNKNOWN`。正式多对象 replay 前要先补 graph/program 可校验的 hole→object 接线。
+几何 graph hole 现在可以声明闭集 `resolver` 和结构化 `anchor={object_id, part, instance?, selection?}`。live contract 要求 anchor 引用 registry 对象、frame 为 `robot_base`，resolver 与 hole type 匹配。`StageProgram` 只保存 primitive 使用的 hole name；可信 helper 再用这些名字从 graph 查询 resolver/anchor contract。在线感知仍在 optical frame，因此这些字段只表达请求的语义归属，既不是已观测的实例身份，也不能代替相机外参或把 optical 数值直接改标签为 `robot_base`。
 
 `StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
 
-`planning-record` 提供三个显式步骤。默认 `plan` 只写本地产物；`capture --allow-live-read` 只请求一次 head stereo snapshot，并通过固定白名单读取两臂 `get_qpos/get_xquat`；`predict --allow-live-read` 只对冻结点云调用 GraspNet `/health` 和 `/predict`。它不加载 backend model，不提供通用 pipeline action，也不调用 planner/control。capture 会触发一次同步 render、更新 camera cache 并增加 capture frame ID，这些传感副作用会写入 `sensor/call.json`。
+`planning-record` 提供六个显式步骤：`plan / capture / ground / segment / project / predict`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment` 分别要求 `--allow-model-read`；`project` 只做本地计算。没有一键入口。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。
 
-真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。raw response validator 保存原始 detector ID，但仓库当前不发布 GraspNet→graph candidate converter；非负 detector ID 也不等于 graph registry ID。只有可信 object mask 生成独立 object point cloud，并由 assignment artifact 绑定 observation、graph object、frame、calibration 和证据后，才能实现 normalization。之后仍需补齐 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 变换。
+V1 record 一次只处理一个 graph anchor。它不能在同一个 observation 下同时组装 tube grasp/axis 与 rack-hole center/axis，因此还没有接到 `PlanningOnlyRuntime.solve()`。后续结构必须以 capture 为父 observation、以 anchor 为子任务，并让同一 tube cloud 和同一 hole geometry 分别复用；在此之前只报告 component artifact，不报告完整 stage candidate。
+
+真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。可信代码先在 mask 上筛 depth，再同步生成 `Nx3` object cloud 与 `Nx2 (row,col)` lineage；`object_assignment.json` 记录 observation、被请求的 graph anchor、frame、calibration 和 Qwen/SAM3 evidence，但 identity 状态固定为 `MODEL_PROPOSED`。rack-hole center/axis 由局部 RGB-D 对比与 rack ring plane 重新计算，证据不足返回 `UNKNOWN`，不采用模型 pose。GraspNet 只消费 object cloud，raw detector ID 原值保留；仓库仍不发布 GraspNet→graph candidate converter。之后必须补 identity 接受、lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 变换。
 
 在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`；缺少某项排序特征时，对应 preference meta 是 `UNCHECKABLE`，只有部分候选有特征时为 `PARTIAL`，不能把 ID tie-break 误写成 demo ranking。固定 synthetic replay 已经验证一次 hard filter 后共享 accepted set 的 demo/no-demo 对照；这不是 live 感知或物理 checker 结果。当前 replay loader 只接受 `synthetic_contract_fixture`，在真实 provenance/manifest contract 完成前会拒绝任何 `recorded_real` 标签。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
 
@@ -111,6 +121,15 @@ Handle 只允许传给后续高层动作。生成 policy 不能读取其中的�
 
 编译检查会拒绝 handle 下标、属性读取以及 `rt` 的非公开属性。例如 `handle["xyz"]`、`handle.xyz` 和 `rt.pipe` 都不合法。这个检查用于约束本项目生成的代码，不是执行任意不可信 Python 的安全沙箱。
 
+graph 为未来的可信 resolver 层固定以下映射，生成 policy 不直接选择或调用这些模型。当前 component recorder 已能生成表中的局部 artifact，但尚未接入 `PlanningOnlyRuntime.solve()`；多 anchor assembly、identity 接受、frame transform 和 candidate normalization 完成后才能形成真正的 solve 路径：
+
+| Graph resolver | 可信层数据路径 | 当前状态 |
+|---|---|---|
+| `grasp_candidate` | Qwen box → SAM3 mask → object cloud → GraspNet | raw proposal 已接，candidate conversion 未接 |
+| `principal_axis` | mask-first object cloud → local PCA | record artifact 已接，robot-base transform 未接 |
+| `part_center` / `part_axis` | hole ROI + local RGB-D contrast + rack-plane fit | `PASS/UNKNOWN` artifact 已接，robot-base transform 未接 |
+| `motion_derived` | 当前 EEF、持握状态和受检运动结果 | 未实现；不能退回视觉模型猜测 |
+
 ### 高层动作
 
 | 方法 | 含义 |
@@ -151,20 +170,21 @@ Oracle 的 `scalar` 和 `runtime_condition` 可以返回延迟描述子；非特
 
 ### 只读真实记录接口
 
-head RGB-D、点云和 GraspNet `/predict` 已有独立的 read-only record 入口，但还不能报告为完整候选链：
+head RGB-D、Qwen/SAM3、object cloud、rack-hole geometry 和 GraspNet `/predict` 已有同一条显式 read-only record 入口，但还不能报告为完整候选链：
 
 - snapshot 的 depth 是 float32 米制左目 render depth；反投影后只保留 finite 且 `z>0` 的 optical-frame 点；
-- GraspNet 实际只消费 `point_cloud_path` 与 `extra.max_grasps`；RGB、depth、mask 和 `object_hint` 当前只是回显，不能作为 object assignment 证据；
+- Qwen 必须只返回一个合法 box，SAM3 必须返回与冻结图像同尺寸的非空二值 mask；零框、多框、全帧 mask 和 schema 漂移都 fail-closed；
+- graph identity 只来自已校验 anchor，模型回复只作为 evidence；assignment 与 object cloud 由本地代码发布，GraspNet 实际只消费该 object-only `point_cloud_path` 与 `extra.max_grasps`；
 - baseline 的 `pred_decode()` 把所有 `object_id` 固定为 `-1`，raw 记录可以成功，candidate normalization 必须 fail-closed；
 - head camera 挂在可升降 link 上；静态 extrinsics 没有实时 lift 修正，不能把 optical cloud 改标签成 robot base；
 - recorded reply 的 point-cloud ref、frame ID 和 coordinate frame 必须与当前 observation 精确一致，structured grasp fields 还要与原始 17D array 一致；
-- point-cloud binding manifest 与完整 projection manifest 分开保存；grasp center 不能直接当 TCP pose；
+- point-cloud binding manifest、完整 projection manifest、pixel lineage 和 assignment 分开保存；grasp center 不能直接当 TCP pose；
 - GraspNet 不做碰撞过滤，也不直接给 `approach_tilt_deg` 或 `height_fraction`；
 - 现有 IK 会先 clip 越界目标，reachability checker 必须检查原目标和最终残差；
 - 当前 motion-planning wrapper 丢失 planner success，不能签发可信 `PASS`；
 - candidate width 是米，而 K1 只有 motor angle，未做 opening-width 标定前 width checker 必须返回 `UNKNOWN`。
 
-因此当前状态 `RAW_GRASPNET_RECORDED` 只证明 observation、请求和 raw reply 可追溯；不能用接口“被调用”替代 candidate 或 certificate 语义正确。
+因此当前状态 `OBJECT_CLOUD_RECORDED` 或 `OBJECT_RAW_GRASPNET_RECORDED` 只证明逐对象 evidence 可追溯；它还没有 camera/tool frame transform、graph candidate 或 hard-check certificate。不能用模型“被调用”或 geometry `PASS` 替代 grasp 可执行和任务成功。
 
 ### 执行前门槛
 

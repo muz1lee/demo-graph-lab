@@ -2,7 +2,7 @@
 
 从一段机器人示范中提取阶段和定性约束，再把它们编译成可执行、可独立检查的操作策略。
 
-这个仓库是研究原型。离线的 demo 理解、约束图、结构化 `StageProgram` 和确定性 policy 编译已经接通。在线主方法目前只到 read-only planning：record adapter、head RGB-D 记录入口、raw GraspNet 记录入口、typed-hole 校验、候选硬过滤、确定性排序、决策日志和 synthetic replay 可用；真实 object assignment、三个 hard checker 和控制仍未接入。`OracleRuntime` 只用于调试和上界，不代表主方法已经完成。
+这个仓库是研究原型。离线的 demo 理解、约束图、结构化 `StageProgram` 和确定性 policy 编译已经接通。在线主方法目前只到 read-only component perception：一次记录一个 graph anchor，并按它的 resolver 分支生成 tube 的 PCA / object-only GraspNet raw proposal，或 rack-hole 的保守几何；这些不是同一 anchor 的串行产物。graph anchor 只是被请求的语义标签，Qwen/SAM3 结果仍标为 `MODEL_PROPOSED`，不代表实例身份已经确认。多 anchor stage assembly、identity 接受、candidate normalization、两个 frame 标定、三个 hard checker 和控制仍未接入。`OracleRuntime` 只用于调试和上界，不代表主方法已经完成。
 
 ## 代码架构
 
@@ -12,11 +12,13 @@ video / trace → demo → graph → StageProgram JSON → deterministic compile
                     ↑              ↑
               backend VLM    backend LLM 只提议动作序列与接线
 
-在线方法路径（当前 read-only planning）
-head RGB-D + typed proprioception → frozen observation → raw GraspNet reply
-    → [object assignment / frame transform 尚未完成]
-    → candidates → typed-hole validation → hard filter → ranking
-    → opaque handles → ExecutionDisabled
+在线方法路径（当前 read-only perception）
+graph hole anchor + head RGB-D
+    → Qwen box → SAM3 mask → MODEL_PROPOSED binding + masked optical cloud
+    ├─ grasp_candidate → object-only GraspNet raw proposals
+    └─ part_center / part_axis → conservative rack-hole geometry (PASS / UNKNOWN)
+    → [frame transform / candidate normalization 尚未完成]
+    → typed-hole validation → hard filter → ranking → ExecutionDisabled
 
 独立评测路径
 动作前后观测 → predicates / gates → PASS / FAIL / UNKNOWN
@@ -29,7 +31,7 @@ head RGB-D + typed proprioception → frozen observation → raw GraspNet reply
 | `demo/` | 视频、动作 trace | stages、keyframes、objects | 整理示范证据 |
 | `graph/` | stages 与关键帧 | `graph.json`、报告、指标 | 提取和校验约束图 |
 | `policy/` | graph 与高层 API | `stage_program.json`、`policy.py` | 校验接线、确定性编译、fake dry-run |
-| `perception/` | sensor artifact、本体状态、recorded GraspNet reply | typed observation 与 raw/candidate records | 严格 adapter 与窄只读 transport；不做控制 |
+| `perception/` | sensor artifact、graph anchor、模型回复 | typed observation、mask、object cloud、hole geometry | 窄只读 transport 与可信本地几何；不做控制 |
 | `selection/` | graph holes、观测与候选 | binding/物理证书、排序 | fail-closed 校验和确定性偏好 |
 | `execution/` | stage handlers、handles | 决策或动作日志 | planning-only runtime、runner 与受信任控制 |
 | `evaluation/` | 动作前后观测、阶段约束 | `PASS / FAIL / UNKNOWN` | 独立检查阶段结果 |
@@ -79,7 +81,7 @@ approach → grasp_at → lift → transport → align → lower_until → relea
 
 它必须绑定到同一次 observation、同一标定和 graph 声明的精确 frame；V1 不做隐式 frame alias。`scalar` 和 `runtime_condition` 不能由 candidate provider 填写。校验失败或无法确认时，物理 checker 不运行，候选直接 fail-closed。
 
-Cone 排序只读重力相对的 `approach_tilt_deg`，不接受没有 frame 的裸 `approach_dir`。未来的 GraspNet candidate normalization 必须同时验证米制 point-cloud manifest、可信 object assignment 和 grasp-frame→runtime-EEF 标定，并在 provenance 中保存变换数值、frame、单位、XYZW 约定和独立证据。当前仓库只发布 raw validator，没有 GraspNet→graph candidate converter；baseline 的 `object_id=-1` 只作为原始证据留存。
+Cone 排序只读重力相对的 `approach_tilt_deg`，不接受没有 frame 的裸 `approach_dir`。未来的 GraspNet candidate normalization 必须同时验证米制 point-cloud manifest、独立 identity 接受记录和 grasp-frame→runtime-EEF 标定，并在 provenance 中保存变换数值、frame、单位、XYZW 约定和独立证据。当前 binding 只记录“这个 mask 是为哪个 anchor 请求的”，不证明模型找对了实例，也不篡改 GraspNet detector ID；当前仓库仍不发布 GraspNet→graph candidate converter。
 
 当前 backend model 只在离线流程中参与：无 trace 时提议阶段切分、建立全视频对象 registry、逐阶段提取约束，以及提议结构化 `StageProgram`。Python policy 由可信代码确定性生成；在线候选选择、运动执行和 gate 都不调用 backend。这里的 backend model 指通过 `common/llm.py` 调用的生成式 VLM/LLM；抓取检测器等感知模型属于非特权感知层，不在这个定义中。
 
@@ -127,21 +129,38 @@ python3 -m pip install -e ".[dev,live]"
 dgl planning-record \
   --record-dir /path/to/record \
   --graph /path/to/graph.json \
+  --objects /path/to/objects.json \
   --stage 0 \
-  --intrinsics /path/to/intrinsics.json
+  --intrinsics /path/to/intrinsics.json \
+  --qwen-url https://qwen.example/v1/chat/completions \
+  --qwen-model qwen-vl \
+  --sam3-url https://sam3.example/segment
 
 dgl planning-record --record-dir /path/to/record \
   --step capture --allow-live-read
 
 dgl planning-record --record-dir /path/to/record \
+  --step ground --allow-model-read
+
+dgl planning-record --record-dir /path/to/record \
+  --step segment --allow-model-read
+
+dgl planning-record --record-dir /path/to/record \
+  --step project
+
+dgl planning-record --record-dir /path/to/record \
   --step predict --allow-live-read
 ```
 
-默认 `plan` 只写本地调用计划，不加载 backend 环境，也不访问相机或网络。`capture` 只允许一次 head snapshot 和固定的 `get_qpos/get_xquat` 查询；`predict` 只读取已经冻结的点云并调用 GraspNet health/predict。两步都必须显式给 `--allow-live-read`，没有一键跨阶段命令。最终状态 `RAW_GRASPNET_RECORDED` 仍然停在 object assignment、候选选择、运动规划和控制之前。
+`plan` 校验 graph 的 resolver/anchor 和 objects registry，只写本地调用计划；token 不进入 `plan.json`。`capture` 冻结一次 head snapshot 与固定的 `get_qpos/get_xquat`；`ground` 和 `segment` 分别调用 Qwen 与 SAM3；`project` 在本地做 mask-first 反投影、anchor binding 和几何估计；只有 `resolver=grasp_candidate` 才允许 `predict` 调用 GraspNet。5090 现有的 `QWEN_BASE_URL / QWEN_DEFAULT_MODEL / QWEN_AUTH_TOKEN / SAM3_SERVER_URL` 可直接作为默认配置，SAM3 使用其 `/segment`；命令行参数优先，Qwen 也兼容 `QWEN_API_KEY`，SAM3 如需认证则读取 `SAM3_API_KEY`。
+
+每一步有独立授权和状态，没有一键跨阶段命令。Qwen/SAM3 在这里属于非特权感知模型，不是负责离线 graph/program 的 backend model。hole 几何证据不足时保存 `UNKNOWN`；GraspNet 完成后状态为 `OBJECT_RAW_GRASPNET_RECORDED`，仍停在 candidate normalization、运动规划和控制之前。
+
+当前一个 `record-dir` 只处理一个 `--hole`/anchor；省略 `--hole` 时只允许 stage 恰好有一个 `grasp_candidate`。它是 component record，不是完整 stage solve。不能把多个不同 capture 的单-anchor record 拼成“同一 observation”的 candidate bundle；多 anchor 复用列在 TODO 的下一步。
 
 `predict` 要求 GraspNet 已由实验环境单独启动，并且只接受 loopback URL。仓库里的 client 不负责安装模型、启动常驻服务或接收局域网请求。
 
-第一版 record 使用绝对 artifact 路径，采集后不要移动目录；point-cloud binding 与当前 `record-dir` 不一致时，会在任何模型调用前失败。
+第一版 record 使用绝对 artifact 路径，采集后不要移动目录；image、mask、point cloud、assignment 或 calibration 与当前 `record-dir` 不一致时会 fail-closed。
 
 编译入口会再次校验当前 graph；只有 program、静态检查和两条 fake dry-run 都通过才发布 `policy.py`。编译报告保存它实际 dry-run 的完整 StageProgram；Oracle 加载时还会比对 graph、objects、StageProgram 与确定性生成的 policy，任何产物被改动都会拒绝执行。episode 中任一 stage 失败时命令返回非零。
 
@@ -158,7 +177,7 @@ dgl-oracle episode \
 
 ## 当前研究重点
 
-下一条真实主线是：从只读 record 中得到可信 object mask → 为每个 graph object 生成独立 optical point cloud 和 assignment artifact → 补齐 lift-aware camera→robot-base 与 grasp→runtime-EEF 标定 → 实现可达、碰撞和夹爪宽度证书 → 建立第一份真实固定 replay。现有 raw record 只证明感知调用可追溯，synthetic replay 只证明契约和对照逻辑可重放。完成真实 replay 和单 stage gate/abort 审查之前不连接控制；完整 episode 稳定后才加入跨阶段 `compat` 和向后检查。
+下一条真实主线是：在正确的 `insert_tubes` scene 上运行这条逐对象链 → 复核 tube mask 与 center/right/left hole 的 `PASS/UNKNOWN` 证据 → 补齐 lift-aware camera→robot-base 与 grasp→runtime-EEF 标定 → 实现可达、碰撞和夹爪宽度证书 → 建立第一份真实固定 replay。当前实现与离线测试只证明接口和证据链可追溯，不证明 Qwen/SAM3 识别准确，也不证明 grasp 可执行。完成真实 replay 和单 stage gate/abort 审查之前不连接控制；完整 episode 稳定后才加入跨阶段 `compat` 和向后检查。
 
 详细内容：
 

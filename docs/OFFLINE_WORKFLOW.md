@@ -176,7 +176,7 @@ dgl extract --task <task> --k 5
 - `stage_objects`：当前 manipulated object 和 target；
 - `constraints`：动作期间或结束时必须保持的关系；
 - `acceptance`：阶段结果的可检查条件；
-- `holes`：运行时需要从新场景求解的数值缺口。
+- `holes`：运行时需要从新场景求解的数值缺口；几何 hole 还可声明闭集 `resolver` 和结构化 object/part `anchor`。
 
 原始样本产物：
 
@@ -203,7 +203,7 @@ graph.json
 - 多数票保留的 constraints、acceptance 和 holes；
 - `confidence`、`evidence_frames`、`provenance`；
 - `throughout` 或 `at_end` 的时间语义；
-- hole 的 name、type、frame、solver hint 和可选 purpose。
+- hole 的 name、type、frame、solver hint、可选 purpose，以及几何 hole 的 resolver/anchor。
 
 无效回复不参加投票，但多数票分母仍使用请求次数 `k`。因此不能通过丢弃失败回复降低通过门槛。
 
@@ -261,7 +261,7 @@ metrics.json         # 只有运行 metrics 时生成
 - constraint、acceptance 和 hole 使用闭集词表；
 - object 参数引用 registry；
 - evidence frame 位于视频内；
-- hole name、type、frame 和 purpose 合法；
+- hole name、type、frame、purpose、resolver 和 anchor 合法；
 - graph 中不包含世界坐标、距离、角度等度量字面量。
 
 验证失败时 CLI 返回非零，并删除可能误导下游的旧 program、policy 和编译报告。

@@ -23,6 +23,19 @@ APPROACH_CONES = ["top_down", "side", "oblique"]
 
 HOLE_TYPES = ["pose_se3", "axis_3d", "point_3d", "scalar", "runtime_condition"]
 
+GEOMETRIC_HOLE_TYPES = frozenset({"pose_se3", "axis_3d", "point_3d"})
+
+# Runtime geometry resolvers are deliberately narrower than solver_hint prose.
+# The value declares how a provider obtains the geometry; anchor identifies the
+# object part whose geometry is being published.
+HOLE_RESOLVER_TYPES = {
+    "grasp_candidate": frozenset({"pose_se3"}),
+    "principal_axis": frozenset({"axis_3d"}),
+    "part_center": frozenset({"point_3d"}),
+    "part_axis": frozenset({"axis_3d"}),
+    "motion_derived": GEOMETRIC_HOLE_TYPES,
+}
+
 # 阶段词表(关键事件切分的目标类别)
 STAGE_VOCAB = [
     "approach", "grasp", "lift", "reorient", "transport",

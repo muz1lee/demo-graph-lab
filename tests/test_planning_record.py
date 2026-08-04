@@ -15,7 +15,6 @@ from demo_graph_lab.common import artifacts
 from demo_graph_lab.execution.planning_record import (
     capture_record,
     plan_record,
-    predict_record,
 )
 
 
@@ -34,11 +33,23 @@ def _graph(path: Path) -> Path:
             "holes": [{
                 "name": "tube_grasp_pose",
                 "type": "pose_se3",
-                "frame": "world",
+                "frame": "robot_base",
                 "solver_hint": "candidate grasp pose",
+                "resolver": "grasp_candidate",
+                "anchor": {"object_id": "tube_left", "part": "whole"},
             }],
         }],
     })
+
+
+def _objects(path: Path) -> Path:
+    return _write(path, [{
+        "id": "tube_left",
+        "category": "test tube",
+        "distinguishers": "white tube with orange cap on the left",
+        "trace_aliases": ["left tube"],
+        "first_seen_frame": 0,
+    }])
 
 
 def _intrinsics(path: Path) -> Path:
@@ -57,11 +68,16 @@ def _plan(tmp_path: Path) -> Path:
     record_dir = tmp_path / "record"
     plan_record(
         graph_path=_graph(tmp_path / "graph.json"),
+        objects_path=_objects(tmp_path / "objects.json"),
         stage_index=0,
         record_dir=record_dir,
         intrinsics_path=_intrinsics(tmp_path / "intrinsics.json"),
+        hole_name=None,
         pipeline_url="http://127.0.0.1:8000",
         graspnet_url="http://127.0.0.1:8092",
+        qwen_url="https://qwen.example/v1/chat/completions",
+        qwen_model="qwen-vl",
+        sam3_url="https://sam3.example/segment",
         camera_socket="/tmp/fake-camera.sock",
         timeout_s=2.0,
         max_grasps=4,
@@ -119,58 +135,9 @@ class FakeSources:
                 "calls": calls,
             }
 
-    class GraspNetReadClient:
-        def __init__(self, base_url, timeout_s):
-            FakeSources.calls.append(("graspnet_client", base_url, timeout_s))
-
-        def health(self):
-            FakeSources.calls.append(("health",))
-            return {
-                "ok": True,
-                "schema": "kw_independent.graspnet.health.v1",
-                "backend": "graspnet_baseline",
-                "backend_ready": True,
-                "backend_error": None,
-            }
-
-        def predict(self, request):
-            FakeSources.calls.append(("predict", request))
-            rotation = [
-                [1.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-            ]
-            return {
-                "ok": True,
-                "schema": "kw_independent.graspnet.raw_response.v1",
-                "backend": "graspnet_baseline",
-                "checkpoint_path": "weights/checkpoint.tar",
-                "checkpoint_epoch": 10,
-                "coordinate_frame": request["coordinate_frame"],
-                "grasps": [{
-                    "raw_index": 0,
-                    "score": 0.9,
-                    "width": 0.03,
-                    "height": 0.02,
-                    "depth": 0.04,
-                    "rotation_matrix": rotation,
-                    "translation": [0.1, 0.2, 0.5],
-                    "object_id": -1,
-                    "coordinate_frame": request["coordinate_frame"],
-                    "raw_grasp_array": [
-                        0.9, 0.03, 0.02, 0.04,
-                        1.0, 0.0, 0.0,
-                        0.0, 1.0, 0.0,
-                        0.0, 0.0, 1.0,
-                        0.1, 0.2, 0.5, -1.0,
-                    ],
-                }],
-                "input_reference": dict(request),
-            }
-
-
 def test_plan_is_local_only_and_records_stop_boundary(tmp_path, monkeypatch) -> None:
     graph = _graph(tmp_path / "graph.json")
+    objects = _objects(tmp_path / "objects.json")
     intrinsics = _intrinsics(tmp_path / "intrinsics.json")
     record_dir = tmp_path / "record"
 
@@ -182,7 +149,11 @@ def test_plan_is_local_only_and_records_stop_boundary(tmp_path, monkeypatch) -> 
         "planning-record",
         "--record-dir", str(record_dir),
         "--graph", str(graph),
+        "--objects", str(objects),
         "--intrinsics", str(intrinsics),
+        "--qwen-url", "https://qwen.example/v1/chat/completions",
+        "--qwen-model", "qwen-vl",
+        "--sam3-url", "https://sam3.example/segment",
     ]) == 0
 
     manifest = json.loads((record_dir / "manifest.json").read_text())
@@ -190,11 +161,18 @@ def test_plan_is_local_only_and_records_stop_boundary(tmp_path, monkeypatch) -> 
     assert manifest["status"] == "PLANNED"
     assert manifest["backend_model_enabled"] is False
     assert manifest["execution_enabled"] is False
-    assert plan["stage"]["holes"][0]["frame"] == "world"
+    assert plan["stage"]["holes"][0]["frame"] == "robot_base"
+    assert plan["perception_request"]["anchor"] == {
+        "object_id": "tube_left",
+        "part": "whole",
+        "instance": None,
+        "selection": None,
+    }
+    assert plan["perception_request"]["resolver"] == "grasp_candidate"
     assert "robot control" in plan["stops_before"]
     assert {item["code"] for item in manifest["normalization_blockers"]} >= {
-        "trusted_object_assignment_missing",
         "camera_to_requested_frame_missing",
+        "object_identity_unverified",
         "physical_hard_checks_missing",
     }
 
@@ -206,8 +184,26 @@ def test_live_steps_fail_before_loading_transport_without_opt_in(tmp_path) -> No
 
     with pytest.raises(PermissionError, match="allow-live-read"):
         capture_record(tmp_path / "missing", source_module=Poison())
-    with pytest.raises(PermissionError, match="allow-live-read"):
-        predict_record(tmp_path / "missing", source_module=Poison())
+
+
+def test_capture_revalidates_plan_before_live_read(tmp_path) -> None:
+    record_dir = _plan(tmp_path)
+    plan = json.loads((record_dir / "plan.json").read_text())
+    plan["perception_request"]["prompt"] = "drifted prompt"
+    _write(record_dir / "plan.json", plan)
+    FakeSources.calls = []
+
+    with pytest.raises(ValueError, match="no longer matches"):
+        capture_record(
+            record_dir,
+            allow_live_read=True,
+            source_module=FakeSources,
+        )
+
+    manifest = json.loads((record_dir / "manifest.json").read_text())
+    assert manifest["status"] == "PLANNED"
+    assert FakeSources.calls == []
+    assert not (record_dir / "observation.json").exists()
 
 
 def test_capture_freezes_optical_observation_without_object_claims(tmp_path) -> None:
@@ -242,100 +238,34 @@ def test_capture_freezes_optical_observation_without_object_claims(tmp_path) -> 
     assert not (record_dir / "candidates.json").exists()
 
 
-def test_predict_accepts_raw_minus_one_but_creates_no_candidate(tmp_path) -> None:
-    FakeSources.calls = []
-    record_dir = _plan(tmp_path)
-    capture_record(record_dir, allow_live_read=True, source_module=FakeSources)
-    manifest = predict_record(
-        record_dir,
-        allow_live_read=True,
-        source_module=FakeSources,
-    )
+def test_capture_preserves_structured_source_error(tmp_path) -> None:
+    class CaptureFailure(RuntimeError):
+        status_code = 503
+        payload = {"ok": False, "error": "camera unavailable"}
 
-    result = json.loads((record_dir / "graspnet/result.json").read_text())
-    raw = json.loads((record_dir / "graspnet/raw_response.json").read_text())
-    assert manifest["status"] == "RAW_GRASPNET_RECORDED"
-    assert result["summary"]["object_ids"] == [-1]
-    assert result["summary"]["requires_object_assignment"] is True
-    assert result["candidate_artifact_created"] is False
-    assert raw["grasps"][0]["object_id"] == -1
-    assert not (record_dir / "candidates.json").exists()
-    assert not (record_dir / "recorded_replay.json").exists()
-
-
-def test_predict_ok_false_is_preserved_and_does_not_publish_status(tmp_path) -> None:
-    class FakeError(RuntimeError):
-        def __init__(self, payload):
-            super().__init__("prediction returned ok=false")
-            self.payload = payload
-            self.status_code = 200
-
-    class FailedSources(FakeSources):
-        class GraspNetReadClient(FakeSources.GraspNetReadClient):
-            def predict(self, request):
-                raise FakeError({
-                    "ok": False,
-                    "schema": "kw_independent.graspnet.raw_response.v1",
-                    "backend": "graspnet_baseline",
-                    "error": "backend failed",
-                    "input_reference": dict(request),
-                })
+    class FailingSources(FakeSources):
+        @staticmethod
+        def capture_head(*, socket_path, timeout_s):
+            raise CaptureFailure("capture failed")
 
     record_dir = _plan(tmp_path)
-    capture_record(record_dir, allow_live_read=True, source_module=FakeSources)
-    with pytest.raises(FakeError):
-        predict_record(
+    with pytest.raises(CaptureFailure, match="capture failed"):
+        capture_record(
             record_dir,
             allow_live_read=True,
-            source_module=FailedSources,
+            source_module=FailingSources,
         )
 
     manifest = json.loads((record_dir / "manifest.json").read_text())
-    raw = json.loads((record_dir / "graspnet/raw_response.json").read_text())
-    call = json.loads((record_dir / "graspnet/call.json").read_text())
-    assert manifest["status"] == "OBSERVATION_RECORDED"
-    assert manifest["last_error"]["step"] == "predict"
-    assert manifest["artifacts"]["graspnet_health"] == "graspnet/health.json"
-    assert manifest["artifacts"]["graspnet_raw_response"] == "graspnet/raw_response.json"
-    assert raw["ok"] is False
-    assert call["status"] == "error"
-    assert not (record_dir / "graspnet/result.json").exists()
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "message"),
-    [
-        ("artifact_ref", "/tmp/unrelated-pointcloud.npz", "observation"),
-        ("unit", "millimeter", "unit"),
-        ("frame", "robot_base", "frame"),
-        ("calibration_ref", "/tmp/other-calibration.json", "calibration_ref"),
-        ("evidence_ref", "/tmp/other-projection.json", "observation"),
-    ],
-)
-def test_predict_validates_point_cloud_binding_before_live_call(
-    tmp_path,
-    field,
-    value,
-    message,
-) -> None:
-    FakeSources.calls = []
-    record_dir = _plan(tmp_path)
-    capture_record(record_dir, allow_live_read=True, source_module=FakeSources)
-    FakeSources.calls = []
-    manifest_path = record_dir / "sensor/pointcloud_manifest.json"
-    point_manifest = json.loads(manifest_path.read_text())
-    point_manifest[field] = value
-    manifest_path.write_text(json.dumps(point_manifest))
-
-    with pytest.raises(ValueError, match=message):
-        predict_record(
-            record_dir,
-            allow_live_read=True,
-            source_module=FakeSources,
-        )
-
-    assert FakeSources.calls == []
-    assert not (record_dir / "graspnet").exists()
+    call = json.loads((record_dir / "sensor/call.json").read_text())
+    payload = json.loads((record_dir / "sensor/error_payload.json").read_text())
+    assert manifest["status"] == "PLANNED"
+    assert manifest["last_error"]["step"] == "capture"
+    assert manifest["artifacts"]["capture_error_payload"] == (
+        "sensor/error_payload.json"
+    )
+    assert call["error"]["http_status"] == 503
+    assert payload["error"] == "camera unavailable"
 
 
 def test_planning_record_has_no_control_or_backend_imports() -> None:

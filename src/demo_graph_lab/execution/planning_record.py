@@ -1,9 +1,8 @@
-"""Freeze one read-only real observation and its raw GraspNet reply.
+"""Freeze one read-only real observation for object-level perception.
 
 The workflow is deliberately split into explicit steps.  Planning performs no
-I/O outside the local artifact directory.  Capture and prediction require an
-opt-in flag and stop before object assignment, candidate selection, planning,
-or robot control.
+I/O outside the local artifact directory.  Live sensor/model reads require an
+explicit opt-in and the workflow stops before planning or robot control.
 """
 
 from __future__ import annotations
@@ -16,11 +15,8 @@ from pathlib import Path
 import time
 from typing import Any
 
-from ..perception.adapters import (
-    observation_from_record,
-    validate_graspnet_response_record,
-    validate_point_cloud_manifest_record,
-)
+from ..perception.adapters import observation_from_record
+from ..graph.validate import validate_live_hole_contract
 
 
 _MANIFEST_SCHEMA = "demo_graph_lab.planning_record_manifest.v1"
@@ -111,14 +107,19 @@ def _one_stage(graph: Mapping[str, Any], stage_index: int) -> dict[str, Any]:
     for index, hole in enumerate(holes):
         if not isinstance(hole, Mapping):
             raise ValueError(f"graph stage hole {index} must be an object")
-        normalized_holes.append({
+        normalized = {
             "name": _required_string(hole.get("name"), f"stage.holes[{index}].name"),
             "type": _required_string(hole.get("type"), f"stage.holes[{index}].type"),
             "frame": _required_string(hole.get("frame"), f"stage.holes[{index}].frame"),
             "solver_hint": _required_string(
                 hole.get("solver_hint"), f"stage.holes[{index}].solver_hint"
             ),
-        })
+        }
+        if "resolver" in hole:
+            normalized["resolver"] = hole["resolver"]
+        if "anchor" in hole:
+            normalized["anchor"] = dict(hole["anchor"])
+        normalized_holes.append(normalized)
     stage_objects = stage.get("stage_objects")
     if not isinstance(stage_objects, Mapping):
         raise ValueError(f"graph stage {name!r} stage_objects must be an object")
@@ -130,35 +131,212 @@ def _one_stage(graph: Mapping[str, Any], stage_index: int) -> dict[str, Any]:
     }
 
 
+def _registry_objects(value: Any) -> dict[str, dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError("objects registry must be a non-empty array")
+    result: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"objects[{index}] must be an object")
+        object_id = _required_string(item.get("id"), f"objects[{index}].id")
+        if object_id in result:
+            raise ValueError(f"duplicate registry object id: {object_id!r}")
+        result[object_id] = dict(item)
+    return result
+
+
+def _normalized_anchor(value: Any, path: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{path} must be an object")
+    allowed = {"object_id", "part", "instance", "selection"}
+    extra = sorted(set(value) - allowed)
+    if extra:
+        raise ValueError(f"{path} has unknown fields: {extra}")
+    object_id = _required_string(value.get("object_id"), f"{path}.object_id")
+    part = _required_string(value.get("part"), f"{path}.part")
+    anchor = {
+        "object_id": object_id,
+        "part": part,
+        "instance": value.get("instance"),
+        "selection": value.get("selection"),
+    }
+    for field in ("instance", "selection"):
+        if anchor[field] is not None:
+            anchor[field] = _required_string(anchor[field], f"{path}.{field}")
+    return anchor
+
+
+def _perception_request(
+    stage: Mapping[str, Any],
+    registry: Mapping[str, Mapping[str, Any]],
+    hole_name: str | None,
+) -> dict[str, Any]:
+    geometric = [
+        hole for hole in stage["holes"]
+        if hole.get("type") in {"pose_se3", "axis_3d", "point_3d"}
+    ]
+    if hole_name is None:
+        grasp_holes = [
+            hole for hole in geometric
+            if hole.get("resolver") == "grasp_candidate"
+        ]
+        if len(grasp_holes) != 1:
+            raise ValueError(
+                "--hole is required unless the stage has exactly one "
+                "grasp_candidate hole"
+            )
+        hole = grasp_holes[0]
+    else:
+        requested = _required_string(hole_name, "hole_name")
+        matches = [hole for hole in geometric if hole.get("name") == requested]
+        if len(matches) != 1:
+            raise ValueError(f"stage has no unique geometric hole {requested!r}")
+        hole = matches[0]
+
+    resolver = _required_string(hole.get("resolver"), "hole.resolver")
+    if resolver == "motion_derived":
+        raise ValueError(
+            f"hole {hole['name']!r} is derived from execution state, not perception"
+        )
+    anchor = _normalized_anchor(hole.get("anchor"), "hole.anchor")
+    object_spec = registry.get(anchor["object_id"])
+    if object_spec is None:
+        raise ValueError(
+            f"hole anchor object {anchor['object_id']!r} is absent from registry"
+        )
+    category = _required_string(
+        object_spec.get("category"), f"objects[{anchor['object_id']}].category"
+    )
+    distinguishers = _required_string(
+        object_spec.get("distinguishers"),
+        f"objects[{anchor['object_id']}].distinguishers",
+    )
+    if anchor["part"] == "whole":
+        target = f"the complete visible {category} instance"
+    elif anchor["selection"] is not None:
+        target = (
+            f"the {anchor['selection'].replace('_', ' ')} of the {category}"
+        )
+    else:
+        qualifier = (
+            f"{anchor['instance'].replace('_', ' ')} "
+            if anchor["instance"] is not None else ""
+        )
+        target = f"the {qualifier}{anchor['part'].replace('_', ' ')} of the {category}"
+    prompt = (
+        "Return strict JSON for exactly the visible region matching this graph "
+        f"anchor: {target}. Distinguishing evidence: {distinguishers}. "
+        "Use {\"references\":[{\"bbox\":[x1,y1,x2,y2]}]} with coordinates "
+        "normalized to 0..1000. Return an empty references array when absent; "
+        "return every plausible box when ambiguous."
+    )
+    return {
+        "hole_name": hole["name"],
+        "resolver": resolver,
+        "anchor": anchor,
+        "prompt": prompt,
+    }
+
+
+def _revalidate_record_plan(
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, Any], Mapping[str, Any]]:
+    """Rebuild the selected stage/request from current graph and registry files."""
+
+    plan = _read_json(root / "plan.json")
+    if not isinstance(plan, dict) or plan.get("schema") != _PLAN_SCHEMA:
+        raise ValueError("record plan is invalid")
+    graph_ref = Path(
+        _required_string(plan.get("graph_ref"), "plan.graph_ref")
+    ).resolve()
+    objects_ref = Path(
+        _required_string(plan.get("objects_ref"), "plan.objects_ref")
+    ).resolve()
+    if not graph_ref.is_file() or not objects_ref.is_file():
+        raise FileNotFoundError("plan graph_ref or objects_ref no longer exists")
+    graph = _read_json(graph_ref)
+    if not isinstance(graph, Mapping):
+        raise ValueError("plan graph_ref must contain an object")
+    registry = _registry_objects(_read_json(objects_ref))
+    live_errors = validate_live_hole_contract(graph, set(registry))
+    if live_errors:
+        raise ValueError(
+            "plan graph is no longer live-ready: " + "; ".join(live_errors[:5])
+        )
+
+    embedded_stage = plan.get("stage")
+    if not isinstance(embedded_stage, Mapping):
+        raise ValueError("plan.stage must be an object")
+    stage = _one_stage(graph, embedded_stage.get("index"))
+    if dict(embedded_stage) != stage:
+        raise ValueError("plan.stage no longer matches graph_ref")
+    if plan.get("graph_task") != graph.get("task"):
+        raise ValueError("plan.graph_task no longer matches graph_ref")
+
+    request = plan.get("perception_request")
+    if not isinstance(request, Mapping):
+        raise ValueError("plan.perception_request must be an object")
+    hole_name = _required_string(
+        request.get("hole_name"), "plan.perception_request.hole_name"
+    )
+    expected_request = _perception_request(stage, registry, hole_name)
+    if dict(request) != expected_request:
+        raise ValueError("plan.perception_request no longer matches graph/objects")
+    config = plan.get("config")
+    if not isinstance(config, Mapping):
+        raise ValueError("plan.config must be an object")
+    return plan, expected_request, config
+
+
 def plan_record(
     *,
     graph_path: str | Path,
+    objects_path: str | Path,
     stage_index: int,
     record_dir: str | Path,
     intrinsics_path: str | Path,
+    hole_name: str | None,
     pipeline_url: str,
     graspnet_url: str,
+    qwen_url: str,
+    qwen_model: str,
+    sam3_url: str,
     camera_socket: str | Path,
     timeout_s: float = 10.0,
     max_grasps: int = 20,
+    min_object_points: int = 64,
 ) -> dict[str, Any]:
     """Create a local-only plan.  This function imports no live transport."""
 
     graph_ref = Path(graph_path).resolve()
+    objects_ref = Path(objects_path).resolve()
     intrinsics_ref = Path(intrinsics_path).resolve()
     socket_ref = Path(camera_socket)
     if not graph_ref.is_file():
         raise FileNotFoundError(f"graph does not exist: {graph_ref}")
+    if not objects_ref.is_file():
+        raise FileNotFoundError(f"objects registry does not exist: {objects_ref}")
     if not intrinsics_ref.is_file():
         raise FileNotFoundError(f"intrinsics do not exist: {intrinsics_ref}")
     graph = _read_json(graph_ref)
     if not isinstance(graph, Mapping):
         raise ValueError("graph root must be an object")
+    registry = _registry_objects(_read_json(objects_ref))
+    live_errors = validate_live_hole_contract(graph, set(registry))
+    if live_errors:
+        raise ValueError(
+            "graph is not ready for live perception: " + "; ".join(live_errors[:5])
+        )
     stage = _one_stage(graph, stage_index)
+    perception_request = _perception_request(stage, registry, hole_name)
     timeout = _positive_number(timeout_s, "timeout_s")
     count = _positive_integer(max_grasps, "max_grasps")
+    minimum_points = _positive_integer(min_object_points, "min_object_points")
     pipeline = _required_string(pipeline_url, "pipeline_url").rstrip("/")
     graspnet = _required_string(graspnet_url, "graspnet_url").rstrip("/")
+    qwen = _required_string(qwen_url, "qwen_url")
+    qwen_model = _required_string(qwen_model, "qwen_model")
+    sam3 = _required_string(sam3_url, "sam3_url")
     camera = _required_string(str(socket_ref), "camera_socket")
 
     root = Path(record_dir).resolve()
@@ -176,18 +354,19 @@ def plan_record(
             ),
         },
         {
-            "code": "trusted_object_assignment_missing",
-            "detail": (
-                "No reviewed object mask and object-specific point cloud bind a "
-                "raw proposal to the graph registry."
-            ),
-        },
-        {
             "code": "camera_to_requested_frame_missing",
             "detail": (
                 f"Raw geometry is {_OPTICAL_FRAME}; requested hole frames are "
                 f"{requested_frames or ['none']}. A measured lift-aware transform "
                 "has not been recorded."
+            ),
+        },
+        {
+            "code": "object_identity_unverified",
+            "detail": (
+                "Qwen/SAM3 can propose a region for the requested graph anchor, "
+                "but this one-anchor record does not independently verify instance "
+                "identity. The assignment remains MODEL_PROPOSED."
             ),
         },
         {
@@ -205,15 +384,21 @@ def plan_record(
     plan = {
         "schema": _PLAN_SCHEMA,
         "graph_ref": str(graph_ref),
+        "objects_ref": str(objects_ref),
         "graph_task": graph.get("task"),
         "stage": stage,
+        "perception_request": perception_request,
         "config": {
             "intrinsics_path": str(intrinsics_ref),
             "pipeline_url": pipeline,
             "graspnet_url": graspnet,
+            "qwen_url": qwen,
+            "qwen_model": qwen_model,
+            "sam3_url": sam3,
             "camera_socket": camera,
             "timeout_s": timeout,
             "max_grasps": count,
+            "min_object_points": minimum_points,
             "capture_namespace": "head",
             "output_frame": _OPTICAL_FRAME,
         },
@@ -233,13 +418,28 @@ def plan_record(
                 ],
             },
             {
+                "name": "ground",
+                "requires_allow_model_read": True,
+                "calls": ["Qwen grounding POST"],
+            },
+            {
+                "name": "segment",
+                "requires_allow_model_read": True,
+                "calls": ["SAM3 segmentation POST"],
+            },
+            {
+                "name": "project",
+                "requires_allow_live_read": False,
+                "calls": [],
+            },
+            {
                 "name": "predict",
+                "condition": "resolver == grasp_candidate",
                 "requires_allow_live_read": True,
                 "calls": ["GraspNet GET /health", "GraspNet POST /predict"],
             },
         ],
         "stops_before": [
-            "object assignment",
             "candidate normalization",
             "candidate selection",
             "motion planning",
@@ -296,10 +496,7 @@ def capture_record(
         raise ValueError("capture requires manifest status PLANNED")
     if (root / "sensor").exists() or (root / "proprioception.json").exists():
         raise FileExistsError("capture artifacts already exist; use a new record dir")
-    plan = _read_json(root / "plan.json")
-    if not isinstance(plan, dict) or plan.get("schema") != _PLAN_SCHEMA:
-        raise ValueError("record plan is invalid")
-    config = plan["config"]
+    _, _, config = _revalidate_record_plan(root)
 
     if source_module is None:
         from ..perception import live_sources as source_module
@@ -487,144 +684,20 @@ def capture_record(
         call_record["error"] = {
             "type": type(error).__name__,
             "message": str(error),
+            "http_status": getattr(error, "status_code", None),
         }
         if sensor_dir.is_dir():
+            payload = getattr(error, "payload", None)
+            if isinstance(payload, Mapping):
+                _write_json(sensor_dir / "error_payload.json", payload)
+                manifest["artifacts"]["capture_error_payload"] = (
+                    "sensor/error_payload.json"
+                )
+            raw_body = getattr(error, "raw_body", None)
+            if isinstance(raw_body, bytes):
+                (sensor_dir / "error_raw.bin").write_bytes(raw_body)
+                manifest["artifacts"]["capture_error_raw"] = "sensor/error_raw.bin"
             _write_json(sensor_dir / "call.json", call_record)
             manifest["artifacts"]["capture_call"] = "sensor/call.json"
         _record_error(root, manifest, step="capture", error=error)
-        raise
-
-
-def predict_record(
-    record_dir: str | Path,
-    *,
-    allow_live_read: bool = False,
-    source_module=None,
-) -> dict[str, Any]:
-    """Call GraspNet once and freeze only its validated raw response."""
-
-    if allow_live_read is not True:
-        raise PermissionError("predict requires --allow-live-read")
-    root, manifest = _load_manifest(record_dir)
-    if manifest.get("status") != "OBSERVATION_RECORDED":
-        raise ValueError("predict requires manifest status OBSERVATION_RECORDED")
-    grasp_dir = root / "graspnet"
-    if grasp_dir.exists():
-        raise FileExistsError("GraspNet artifacts already exist; use a new record dir")
-    plan = _read_json(root / "plan.json")
-    observation_record = _read_json(root / "observation.json")
-    observation = observation_from_record(observation_record)
-    point_cloud_manifest = _read_json(root / "sensor/pointcloud_manifest.json")
-    if not isinstance(point_cloud_manifest, Mapping):
-        raise ValueError("point_cloud_manifest must be an object")
-    point_cloud_manifest = validate_point_cloud_manifest_record(
-        point_cloud_manifest,
-        observation=observation,
-    )
-    expected_point_cloud = (root / "sensor/head_pointcloud_camera.npz").resolve()
-    recorded_point_cloud = Path(
-        _required_string(
-            point_cloud_manifest.get("artifact_ref"),
-            "point_cloud_manifest.artifact_ref",
-        )
-    ).resolve()
-    if recorded_point_cloud != expected_point_cloud:
-        raise ValueError(
-            "point_cloud_manifest must reference this record's frozen point cloud"
-        )
-    if not recorded_point_cloud.is_file():
-        raise FileNotFoundError(
-            f"recorded point cloud does not exist: {recorded_point_cloud}"
-        )
-    config = plan["config"]
-    request = {
-        "image_path": str((root / "sensor/head_left_bgr.npy").resolve()),
-        "depth_path": str((root / "sensor/head_depth_m.npy").resolve()),
-        "mask_path": None,
-        "point_cloud_path": point_cloud_manifest["artifact_ref"],
-        "object_hint": None,
-        "frame_id": observation.observation_id,
-        "coordinate_frame": observation.frame,
-        "camera_intrinsics": _read_json(root / "calibration/bundle.json")["intrinsics"],
-        "extra": {"max_grasps": config["max_grasps"]},
-    }
-    if source_module is None:
-        from ..perception import live_sources as source_module
-
-    started = time.monotonic()
-    call = {
-        "step": "predict",
-        "started_at": _utc_now(),
-        "allow_live_read": True,
-        "service_url": config["graspnet_url"],
-        "status": "running",
-    }
-    try:
-        grasp_dir.mkdir()
-        _write_json(grasp_dir / "request.json", request)
-        client = source_module.GraspNetReadClient(
-            config["graspnet_url"],
-            timeout_s=config["timeout_s"],
-        )
-        health = client.health()
-        _write_json(grasp_dir / "health.json", health)
-        response = client.predict(request)
-        _write_json(grasp_dir / "raw_response.json", response)
-        validation = validate_graspnet_response_record(
-            response,
-            observation=observation,
-            point_cloud_manifest=point_cloud_manifest,
-        )
-        _write_json(grasp_dir / "result.json", {
-            "status": "valid_raw_response",
-            "summary": validation,
-            "candidate_artifact_created": False,
-            "reason": (
-                "Raw proposals are preserved before graph-object assignment, "
-                "frame conversion, runtime-EE calibration, or hard checks."
-            ),
-        })
-        call["status"] = "ok"
-        call["duration_s"] = time.monotonic() - started
-        _write_json(grasp_dir / "call.json", call)
-        manifest["status"] = "RAW_GRASPNET_RECORDED"
-        manifest["updated_at"] = _utc_now()
-        manifest["last_error"] = None
-        manifest["artifacts"].update({
-            "graspnet_health": "graspnet/health.json",
-            "graspnet_request": "graspnet/request.json",
-            "graspnet_raw_response": "graspnet/raw_response.json",
-            "graspnet_validation": "graspnet/result.json",
-            "graspnet_call": "graspnet/call.json",
-        })
-        _write_json(root / "manifest.json", manifest)
-        return manifest
-    except Exception as error:
-        call["status"] = "error"
-        call["duration_s"] = time.monotonic() - started
-        call["error"] = {
-            "type": type(error).__name__,
-            "message": str(error),
-            "http_status": getattr(error, "status_code", None),
-        }
-        if grasp_dir.is_dir():
-            payload = getattr(error, "payload", None)
-            if payload is not None:
-                name = (
-                    "health.json"
-                    if not (grasp_dir / "health.json").exists()
-                    else "raw_response.json"
-                )
-                _write_json(grasp_dir / name, payload)
-            _write_json(grasp_dir / "call.json", call)
-            for key, relative in {
-                "graspnet_request": "graspnet/request.json",
-                "graspnet_health": "graspnet/health.json",
-                "graspnet_raw_response": "graspnet/raw_response.json",
-                "graspnet_validation": "graspnet/result.json",
-                "graspnet_call": "graspnet/call.json",
-            }.items():
-                if (root / relative).is_file():
-                    manifest["artifacts"][key] = relative
-        _record_error(root, manifest, step="predict", error=error)
         raise

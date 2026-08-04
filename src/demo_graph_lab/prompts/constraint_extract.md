@@ -23,6 +23,29 @@ Extract THREE things for this stage, as strict JSON:
    Hole `name` MUST be plain snake_case with underscores and no dots. Prefix an object
    id with `_`, for example `tube_left_grasp_pose`, never `tube_left.grasp_pose`.
 
+   Every GEOMETRIC hole (`pose_se3`, `axis_3d`, `point_3d`) must also contain:
+   `"resolver": <closed resolver>` and
+   `"anchor": {"object_id": <registry id>, "part": <snake_case part>,
+                "instance": <optional non-empty string>,
+                "selection": <optional non-empty string>}`.
+   Resolver/type compatibility is closed:
+   - `grasp_candidate` -> `pose_se3`
+   - `principal_axis` -> `axis_3d`
+   - `part_center` -> `point_3d`
+   - `part_axis` -> `axis_3d`
+   - `motion_derived` -> `pose_se3`, `point_3d`, or `axis_3d`
+   `anchor.object_id` must be one of the non-null `stage_objects` ids. Use `instance`
+   for a known part instance (for example center/right/left rack hole), and `selection`
+   for a runtime part choice (for example an empty hole). A `grasp_candidate` must anchor
+   the whole manipulated object; express upper-body/top/middle grasp preference with the
+   `region_grasp` constraint, not by asking segmentation to crop the object. Principal-axis
+   holes for that object should reuse the same whole-object anchor. Center and axis holes
+   for the same physical part MUST use the same anchor fields.
+
+   All geometric holes publish in `"frame": "robot_base"`. A camera/source frame and
+   its transform lineage belong in perception artifacts, not in the graph. Scalar and
+   runtime-condition holes do not use `resolver` or `anchor`.
+
 HARD RULES:
 - NEVER output numeric values for positions, offsets, sizes, angles-as-targets, or coordinates.
   Every metric quantity is a hole. If you are tempted to write a number, it is a hole.

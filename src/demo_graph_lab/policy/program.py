@@ -7,6 +7,7 @@ runtime when the generated handler runs.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import inspect
 import re
 
@@ -337,6 +338,27 @@ def wired_holes_by_stage(program: dict) -> dict[int, tuple[str, ...]]:
                     names.append(value["hole"])
         result[stage["index"]] = tuple(names)
     return result
+
+
+def wired_hole_contracts_by_stage(
+    program: dict,
+    graph: dict,
+) -> dict[int, tuple[dict, ...]]:
+    """Return full graph hole contracts in deterministic first-use order."""
+    violations = validate_program(program, graph)
+    if violations:
+        raise ValueError(f"StageProgram validation failed: {violations[:3]}")
+
+    graph_stages = {stage["index"]: stage for stage in graph["stages"]}
+    contracts: dict[int, tuple[dict, ...]] = {}
+    for index, names in wired_holes_by_stage(program).items():
+        holes = {
+            hole["name"]: hole
+            for hole in graph_stages[index].get("holes", [])
+            if isinstance(hole, dict) and isinstance(hole.get("name"), str)
+        }
+        contracts[index] = tuple(deepcopy(holes[name]) for name in names)
+    return contracts
 
 
 def unwired_holes(program: dict, graph: dict) -> list[dict]:

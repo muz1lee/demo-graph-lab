@@ -131,10 +131,29 @@ def _validate_geometry_value(
         reasons.append(f"{name}:object_not_in_stage:{object_id}")
         status = CheckStatus.FAIL
     else:
-        if len(stage_object_ids) > 1:
-            reasons.append(f"{name}:hole_object_anchor_ambiguous")
-            if status is CheckStatus.PASS:
-                status = CheckStatus.UNKNOWN
+        anchor = hole.get("anchor")
+        if anchor is None:
+            if len(stage_object_ids) > 1:
+                reasons.append(f"{name}:hole_object_anchor_ambiguous")
+                if status is CheckStatus.PASS:
+                    status = CheckStatus.UNKNOWN
+        elif not isinstance(anchor, Mapping):
+            reasons.append(f"{name}:hole_object_anchor_invalid")
+            status = CheckStatus.FAIL
+        else:
+            anchor_object_id = anchor.get("object_id")
+            if not isinstance(anchor_object_id, str) or not anchor_object_id:
+                reasons.append(f"{name}:hole_object_anchor_invalid")
+                status = CheckStatus.FAIL
+            elif anchor_object_id not in stage_object_ids:
+                reasons.append(
+                    f"{name}:hole_object_anchor_not_in_stage:{anchor_object_id}")
+                status = CheckStatus.FAIL
+            elif object_id != anchor_object_id:
+                reasons.append(
+                    f"{name}:object_anchor_mismatch:"
+                    f"{object_id}!={anchor_object_id}")
+                status = CheckStatus.FAIL
         observed = next(
             (item for item in observation.objects if item.object_id == object_id),
             None,
@@ -169,6 +188,8 @@ def validate_candidate_bindings(
     Pose values are ``[x, y, z, qx, qy, qz, qw]``.  V1 does not perform
     implicit frame aliases or transforms.  Scalar and runtime-condition holes
     must come from a separate trusted resolver, never from a candidate provider.
+    In a multi-object stage, ``hole.anchor.object_id`` selects the object whose
+    candidate geometry may fill that hole.
     """
 
     if candidate.observation_id != observation.observation_id:

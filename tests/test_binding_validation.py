@@ -58,13 +58,39 @@ def _candidate(value, *, observation_id: str = "obs-1") -> CandidateBundle:
     )
 
 
-def _pose(*, frame: str = "robot_base", calibration: str = "calibration/head.json"):
+def _pose(
+    *,
+    frame: str = "robot_base",
+    calibration: str = "calibration/head.json",
+    object_id: str = "tube",
+):
     return {
         "value": [0.4, 0.0, 0.8, 0.0, 0.0, 0.0, 1.0],
         "frame": frame,
         "calibration_ref": calibration,
-        "object_id": "tube",
+        "object_id": object_id,
     }
+
+
+def _multi_object_observation() -> ObservationPacket:
+    observation = _observation()
+    return ObservationPacket(
+        observation_id=observation.observation_id,
+        captured_at_s=observation.captured_at_s,
+        frame=observation.frame,
+        calibration_ref=observation.calibration_ref,
+        sensor_refs=observation.sensor_refs,
+        robot_state=observation.robot_state,
+        objects=(
+            *observation.objects,
+            ObjectObservation(
+                object_id="rack",
+                frame="robot_base",
+                pose=(0.6, 0.0, 0.7, 0.0, 0.0, 0.0, 1.0),
+                evidence_refs=("objects/rack.json",),
+            ),
+        ),
+    )
 
 
 def test_geometry_requires_exact_frame_calibration_object_and_shape() -> None:
@@ -105,34 +131,47 @@ def test_unobserved_stage_object_is_unknown() -> None:
 def test_multi_object_stage_needs_structured_hole_anchor() -> None:
     stage = _stage()
     stage["stage_objects"]["target"] = "rack"
-    observation = _observation()
-    observation = ObservationPacket(
-        observation_id=observation.observation_id,
-        captured_at_s=observation.captured_at_s,
-        frame=observation.frame,
-        calibration_ref=observation.calibration_ref,
-        sensor_refs=observation.sensor_refs,
-        robot_state=observation.robot_state,
-        objects=(
-            *observation.objects,
-            ObjectObservation(
-                object_id="rack",
-                frame="robot_base",
-                pose=(0.6, 0.0, 0.7, 0.0, 0.0, 0.0, 1.0),
-                evidence_refs=("objects/rack.json",),
-            ),
-        ),
-    )
 
     result = validate_candidate_bindings(
         _candidate(_pose()),
         stage,
-        observation,
+        _multi_object_observation(),
         required_holes=("grasp_pose",),
     )
 
     assert result.status is CheckStatus.UNKNOWN
     assert any("hole_object_anchor_ambiguous" in reason for reason in result.reasons)
+
+
+def test_multi_object_stage_uses_anchor_object_for_candidate_binding() -> None:
+    stage = _stage()
+    stage["stage_objects"]["target"] = "rack"
+    stage["holes"][0].update({
+        "resolver": "grasp_candidate",
+        "anchor": {"object_id": "tube", "part": "body"},
+    })
+    observation = _multi_object_observation()
+
+    valid = validate_candidate_bindings(
+        _candidate(_pose()), stage, observation, required_holes=("grasp_pose",))
+    wrong_object = validate_candidate_bindings(
+        _candidate(_pose(object_id="rack")),
+        stage,
+        observation,
+        required_holes=("grasp_pose",),
+    )
+
+    assert valid.status is CheckStatus.PASS
+    assert wrong_object.status is CheckStatus.FAIL
+    assert any("object_anchor_mismatch:rack!=tube" in reason
+               for reason in wrong_object.reasons)
+
+    stage["holes"][0]["anchor"] = {}
+    malformed = validate_candidate_bindings(
+        _candidate(_pose()), stage, observation, required_holes=("grasp_pose",))
+    assert malformed.status is CheckStatus.FAIL
+    assert any("hole_object_anchor_invalid" in reason
+               for reason in malformed.reasons)
 
 
 def test_invalid_binding_skips_every_physical_checker() -> None:

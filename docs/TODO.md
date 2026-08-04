@@ -4,18 +4,19 @@
 
 ## 当前顺序
 
-1. 在任务匹配的只读 observation 上得到可信 object mask；为每个 graph object 生成独立点云和 `object_assignment.json`，禁止把 raw `object_id=-1` 直接改成 registry ID。
-2. 记录 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 标定；当前 graph hole 是 `world`，未有完整变换前不生成 candidate。
-3. 从受检 object extent 和 grasp rotation 派生排序特征，再接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
-4. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
-5. 审查一个非特权 stage 的 gate 输入与 abort 行为，然后停下评审；得到明确允许后才连接控制。
+1. 在正确的 `insert_tubes` scene 上运行逐对象记录链，人工复核三根 tube 的 Qwen box、SAM3 mask，以及 center/right/left hole geometry 的 `PASS/UNKNOWN` 原因。
+2. 把当前单 anchor record 改成“一次 capture、多个 anchor 子任务”：tube cloud 复用给 grasp/axis，同一 hole geometry 复用给 center/axis，并在同一 observation 下组装 stage required holes；增加人工或独立 identity 接受记录，`MODEL_PROPOSED` 不能直接升级为 candidate。
+3. 记录 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 标定；live graph hole 要求 `robot_base`，未有完整变换前不生成 candidate。
+4. 从受检 object extent 和 grasp rotation 派生排序特征，再接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
+5. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
+6. 审查一个非特权 stage 的 gate 输入与 abort 行为，然后停下评审；得到明确允许后才连接控制。
 
 完整 episode 稳定前，不实现 runtime backend ranking、跨阶段 `compat`、向后传播或训练。
 
 ## 离线语义质量
 
 - 增加镜头切换和无交互片段检查，避免关键帧跨场景。
-- 修复同类多对象的跨阶段 coreference，并人工复核 `insert_tubes` registry。
+- 用真实视频重新生成并人工复核同类多对象 coreference；reviewed fixture 已固定 `tube_mid/right/left` 的初始身份，不把 fixture 当自动抽取效果。
 - 审阅 `compile_report.json` 的 unwired holes：删除不需要的洞，或给真正的控制参数增加明确 API；不能静默忽略。
 - 人工抽查 goldset，分别报告 constraint precision/recall、object identity 和 stage boundary，不只报 schema pass。
 
@@ -24,12 +25,13 @@
 ## Perception 与候选
 
 - hand camera 在实时 EEF frame transform 明确前不接。
-- 为 raw grasp proposals 增加可信的单对象 mask/point-cloud assignment；assignment 必须绑定 observation、registry object、frame、calibration 和 evidence。
+- 在正确 scene 上验证 Qwen 单框、SAM3 二值 mask、mask-first cloud、pixel lineage 和 assignment 的完整 artifact 链；错误或歧义样例必须 fail-closed。
 - 给 `height_fraction` 与重力相对的 `approach_tilt_deg` 写独立、可检查的派生逻辑；禁止把 camera-frame 裸 `approach_dir` 直接用于 cone 排序。
 - 采集真实 point-cloud manifest 与 K1 grasp-center→runtime-EEF/TCP 标定 artifact；变换值、frame 约定和独立 evidence ref 必须一起保存，只有矩阵转 quaternion 不算完成 pose 语义转换。
-- 为 graph hole 增加结构化 object anchor，并让 validator/StageProgram 检查；完成前多对象 stage 的 candidate binding 保持 `UNKNOWN`。
+- 让同一 rack-hole anchor 的 `part_center` 与 `part_axis` 复用一次受检几何记录，避免重复模型调用；先保持显式分步，不增加一键入口。
 - 实现完整 frame transform，包括旋转；不允许只做平移或把 simulator world pose 混入。
 - 对 live adapter 做最终依赖审查，确认没有 `/state`、官方 probe 或 control side effect；记录同步 render 这一只读传感副作用。
+- 把失败重试改成 append-only attempt；成功前不发布 canonical assignment，失败 payload 必须进入 manifest，不能由残留目录永久锁死同一冻结 observation。
 
 完成定义：只读主方法输入能产生多个可追溯候选，代码路径不含特权状态。
 
@@ -43,7 +45,7 @@
 
 ## Execution
 
-- 保持 `PlanningOnlyRuntime` 的控制原语全部 `ExecutionDisabled`，直到当前顺序 1–4 验收。
+- 保持 `PlanningOnlyRuntime` 的控制原语全部 `ExecutionDisabled`，直到当前顺序 1–6 验收。
 - 获得允许后，先接单个 stage 的非特权 runtime；无候选、hole 不合法、gate `UNKNOWN` 都 abort。
 - 解决抬升时物体滑脱，并删除剩余固定 sleep，统一用状态回读判断动作结束。
 - `lower_stop` 的 runtime descriptor 要明确路由到非特权 contact / motion plateau，而不是自由文本猜测。

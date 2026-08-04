@@ -30,7 +30,7 @@
 
 - `ObservationPacket` 和 `Proprioception` 不接受任意 robot-state 字段；
 - recorded observation/candidate adapter 使用闭合 schema，candidate data 是 immutable、finite、JSON-safe；
-- raw GraspNet reply 只做 schema、17D array、observation 和 point-cloud binding 校验；在 object assignment 与 tool 标定完成前不发布 graph candidate converter；
+- raw GraspNet reply 只做 schema、17D array、observation 和 point-cloud lineage 校验；在 identity 接受与 tool 标定完成前不发布 graph candidate converter；
 - candidate 必须绑定同一次 observation，并通过 hole type、shape、frame、calibration 和 graph object 校验；
 - typed binding 失败时物理 checker 不运行，`solve()` 还会再次校验；
 - reachability / collision / width 缺失、异常或 `UNKNOWN` 均 fail-closed；
@@ -41,22 +41,23 @@
 
 注意：这部分仍只是合约与 synthetic replay；只读 raw record 已单列验收，但真实 hard checker 和真实 replay 尚未完成。
 
-## 只读真实记录链
+## 只读逐对象记录链
 
-状态：完成首个 head observation → raw GraspNet 闭环。
+状态：接口与离线合约完成；正确 `insert_tubes` scene 的 live 验证未开始。
 
-- `planning-record` 明确分为 `plan / capture / predict`；默认 plan 零网络，两个 live step 分别要求显式授权；
-- capture 只请求一次 head stereo snapshot，并固定读取两臂 `get_qpos/get_xquat`；同步 render、cache 更新和 frame-id 增量写入调用记录；
-- 保存左右 BGR、float32 米制 depth、OpenCV optical-frame 点云、内参、本体状态和严格 observation；
-- GraspNet 只绑定 loopback，health 与 predict 同时检查 HTTP 和 JSON 语义；`ok=false` 会保留原文但不推进状态；
-- raw validator 保留 detector ID；任何 raw ID 都仍需要 object assignment，当前没有 GraspNet→graph candidate converter；
-- 第一份 5090 record 达到 `RAW_GRASPNET_RECORDED`，20 个 proposal 全部保留，未生成 candidate、replay、planner 或 control 产物。
+- `planning-record` 明确分为 `plan / capture / ground / segment / project / predict`，每个网络步骤单独授权，没有一键入口；
+- graph 几何 hole 使用闭集 resolver、结构化 anchor 和 `robot_base` 发布 frame，reviewed fixture 固定三根 tube 与 center/right/left hole 的对应关系；
+- Qwen 只发布单框 proposal，SAM3 只发布二值 mask；graph identity 不来自模型回复；
+- 本地代码先 mask depth，再保存 object cloud、逐点 pixel lineage、`MODEL_PROPOSED` binding、完整 manifest 与 derived observation；part geometry 不伪装成 whole-object observation；
+- `part_center/part_axis` 使用 RGB-D contrast 与 rack ring plane，证据不足保存 `UNKNOWN`；
+- 只有 `grasp_candidate` 可把 object cloud 交给 GraspNet；raw detector ID 原样保留（当前 baseline 为 `-1`），不生成 candidate；
+- 先前 5090 的 20 个 raw proposal 来自错误的 `stand_up_bottle` scene，只是旧 infra smoke，不是这条逐对象链的效果验证。
 
-注意：这个里程碑只证明真实采集和感知调用可追溯，不证明 proposal 属于 graph object，也不证明 pose 可执行。
+注意：这个里程碑只证明接口边界和离线 artifact contract。Qwen/SAM3 的真实识别质量、frame transform、grasp 可行性和任务效果仍待验证。
 
 ## 真实候选链
 
-状态：raw 数据链已完成，candidate normalization 未完成。
+状态：单 anchor recorder 接口与离线 artifact contract 已完成；正确 `insert_tubes` scene 的 live raw 记录和 candidate normalization 均未完成。
 
 已完成：
 
@@ -64,7 +65,8 @@
 - 实际 GraspNet raw response 的严格无网络 validator；
 - typed-hole binding 与 StageProgram required-hole 接线；
 - synthetic demo/no-demo replay 和 CLI。
-- head observation 与 raw GraspNet response 的只读 record CLI。
+- graph resolver/anchor 校验和逐对象只读 record CLI；
+- Qwen/SAM3 evidence、`MODEL_PROPOSED` anchor binding、masked cloud/pixel lineage 与 conservative rack-hole geometry。
 
 验收条件：
 

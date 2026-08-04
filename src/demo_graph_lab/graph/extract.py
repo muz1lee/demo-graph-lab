@@ -43,9 +43,15 @@ def _stable_tuple(values: tuple) -> tuple[str, ...]:
 
 
 def _hole_canon(hole: dict) -> tuple:
-    return tuple(hole.get(field) for field in (
-        "name", "type", "frame", "purpose", "solver_hint",
-    ))
+    return (
+        hole.get("name"),
+        hole.get("type"),
+        hole.get("frame"),
+        hole.get("purpose"),
+        hole.get("resolver"),
+        json.dumps(hole.get("anchor"), sort_keys=True, ensure_ascii=False),
+        hole.get("solver_hint"),
+    )
 
 
 def merge_samples(samples: list[dict], key_fields=("constraints", "acceptance"),

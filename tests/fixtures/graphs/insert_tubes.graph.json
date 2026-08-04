@@ -12,16 +12,17 @@
       "end_sec": 1.5,
       "role": "core",
       "stage_objects": {
-        "manipulated": "tube_left",
+        "manipulated": "tube_mid",
         "target": null
       },
       "constraints": [
         {
           "name": "region_grasp",
           "args": {
-            "obj": "tube_left",
+            "obj": "tube_mid",
             "region": "upper_body"
           },
+          "holds": "at_end",
           "confidence": 0.72,
           "evidence_frames": [
             19,
@@ -34,9 +35,10 @@
         {
           "name": "clearance",
           "args": {
-            "obj_a": "tube_left",
+            "obj_a": "tube_mid",
             "obj_b": "table"
           },
+          "holds": "at_end",
           "confidence": 0.7,
           "evidence_frames": [
             28,
@@ -49,8 +51,9 @@
           "name": "approach_direction",
           "args": {
             "cone": "top_down",
-            "target": "tube_left"
+            "target": "tube_mid"
           },
+          "holds": "at_end",
           "confidence": 0.6,
           "evidence_frames": [
             9,
@@ -63,8 +66,9 @@
         {
           "name": "axis_vertical",
           "args": {
-            "axis": "tube_left.long_axis"
+            "axis": "tube_mid.long_axis"
           },
+          "holds": "at_end",
           "confidence": 0.6,
           "evidence_frames": [
             28,
@@ -77,8 +81,9 @@
           "name": "approach_direction",
           "args": {
             "cone": "side",
-            "target": "tube_left"
+            "target": "tube_mid"
           },
+          "holds": "at_end",
           "provenance": "derived",
           "confidence": 0.4,
           "votes": "derived",
@@ -92,6 +97,7 @@
           "args": {
             "stage_sequence": "s0:pick<s1:insertion<s2:pick<s3:insertion<s4:transport<s5:insertion"
           },
+          "holds": "throughout",
           "provenance": "derived",
           "confidence": 0.5,
           "votes": "derived",
@@ -102,7 +108,7 @@
         {
           "name": "clearance",
           "args": {
-            "obj_a": "tube_left",
+            "obj_a": "tube_mid",
             "obj_b": "table"
           },
           "holds": "at_end",
@@ -116,7 +122,7 @@
         {
           "name": "region_grasp",
           "args": {
-            "obj": "tube_left",
+            "obj": "tube_mid",
             "region": "upper_body"
           },
           "holds": "at_end",
@@ -131,7 +137,7 @@
         {
           "name": "axis_vertical",
           "args": {
-            "axis": "tube_left.long_axis"
+            "axis": "tube_mid.long_axis"
           },
           "holds": "at_end",
           "confidence": 0.56,
@@ -151,23 +157,33 @@
           "votes": "3/5"
         },
         {
-          "name": "tube_left_grasp_pose",
+          "name": "tube_mid_grasp_pose",
           "type": "pose_se3",
-          "solver_hint": "grasp region on tube_left upper body from segmentation",
-          "frame": "world",
+          "solver_hint": "GraspNet candidates on the full tube; prefer upper-body grasps later",
+          "frame": "robot_base",
+          "resolver": "grasp_candidate",
+          "anchor": {
+            "object_id": "tube_mid",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
-          "name": "tube_left_long_axis",
+          "name": "tube_mid_long_axis",
           "type": "axis_3d",
-          "solver_hint": "principal axis of tube_left point cloud",
-          "frame": "world",
+          "solver_hint": "principal axis of tube_mid point cloud",
+          "frame": "robot_base",
+          "resolver": "principal_axis",
+          "anchor": {
+            "object_id": "tube_mid",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
           "name": "grasp_closed_condition",
           "type": "runtime_condition",
-          "solver_hint": "gripper closure / contact force on tube_left",
+          "solver_hint": "gripper closure / contact force on tube_mid",
           "frame": "gripper",
           "votes": "3/5"
         }
@@ -183,14 +199,14 @@
       "end_sec": 4.0,
       "role": "core",
       "stage_objects": {
-        "manipulated": "tube_left",
+        "manipulated": "tube_mid",
         "target": "rack"
       },
       "constraints": [
         {
           "name": "axis_vertical",
           "args": {
-            "axis": "tube_left.long_axis"
+            "axis": "tube_mid.long_axis"
           },
           "confidence": 0.83,
           "evidence_frames": [
@@ -205,8 +221,8 @@
         {
           "name": "axis_parallel",
           "args": {
-            "axis_a": "tube_left.long_axis",
-            "axis_b": "rack.hole_axis"
+            "axis_a": "tube_mid.long_axis",
+            "axis_b": "rack.center_hole_axis"
           },
           "confidence": 0.808,
           "evidence_frames": [
@@ -220,8 +236,8 @@
         {
           "name": "inside",
           "args": {
-            "obj_a": "tube_left",
-            "obj_b": "rack"
+            "obj_a": "tube_mid",
+            "obj_b": "rack.center_hole"
           },
           "confidence": 0.79,
           "evidence_frames": [
@@ -234,8 +250,8 @@
         {
           "name": "center_align",
           "args": {
-            "obj_a": "tube_left.center",
-            "obj_b": "rack.hole_center"
+            "obj_a": "tube_mid.center",
+            "obj_b": "rack.center_hole_center"
           },
           "confidence": 0.47,
           "evidence_frames": [
@@ -250,8 +266,9 @@
           "name": "approach_direction",
           "args": {
             "cone": "top_down",
-            "target": "rack"
+            "target": "rack.center_hole"
           },
+          "holds": "at_end",
           "provenance": "derived",
           "confidence": 0.4,
           "votes": "derived",
@@ -266,8 +283,8 @@
         {
           "name": "inside",
           "args": {
-            "obj_a": "tube_left",
-            "obj_b": "rack"
+            "obj_a": "tube_mid",
+            "obj_b": "rack.center_hole"
           },
           "confidence": 0.83,
           "evidence_frames": [
@@ -280,7 +297,7 @@
         {
           "name": "axis_vertical",
           "args": {
-            "axis": "tube_left.long_axis"
+            "axis": "tube_mid.long_axis"
           },
           "confidence": 0.804,
           "evidence_frames": [
@@ -293,8 +310,8 @@
         {
           "name": "center_align",
           "args": {
-            "obj_a": "tube_left.center",
-            "obj_b": "rack.hole_center"
+            "obj_a": "tube_mid.center",
+            "obj_b": "rack.center_hole_center"
           },
           "confidence": 0.466,
           "evidence_frames": [
@@ -307,17 +324,29 @@
       ],
       "holes": [
         {
-          "name": "tube_left_grasp_pose",
-          "type": "pose_se3",
-          "solver_hint": "gripper pose holding tube from prior grasp",
-          "frame": "world",
-          "votes": "4/5"
+          "name": "rack_center_hole_center",
+          "type": "point_3d",
+          "solver_hint": "center of the rack center-hole opening",
+          "frame": "robot_base",
+          "resolver": "part_center",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "center"
+          },
+          "votes": "reviewed"
         },
         {
-          "name": "rack_hole_axis",
+          "name": "rack_center_hole_axis",
           "type": "axis_3d",
-          "solver_hint": "rack hole bore direction (surface normal)",
-          "frame": "rack",
+          "solver_hint": "bore direction of the rack center hole",
+          "frame": "robot_base",
+          "resolver": "part_axis",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "center"
+          },
           "votes": "4/5"
         },
         {
@@ -328,10 +357,15 @@
           "votes": "4/5"
         },
         {
-          "name": "tube_left_long_axis",
+          "name": "tube_mid_long_axis",
           "type": "axis_3d",
-          "solver_hint": "tube_left principal axis from segmentation",
-          "frame": "world",
+          "solver_hint": "tube_mid principal axis from segmentation",
+          "frame": "robot_base",
+          "resolver": "principal_axis",
+          "anchor": {
+            "object_id": "tube_mid",
+            "part": "whole"
+          },
           "votes": "3/5"
         }
       ],
@@ -356,6 +390,7 @@
             "obj_a": "tube_right",
             "obj_b": "table"
           },
+          "holds": "at_end",
           "confidence": 0.84,
           "evidence_frames": [
             129,
@@ -371,6 +406,7 @@
             "obj": "tube_right",
             "region": "upper_body"
           },
+          "holds": "at_end",
           "confidence": 0.77,
           "evidence_frames": [
             121,
@@ -385,6 +421,7 @@
           "args": {
             "axis": "tube_right.long_axis"
           },
+          "holds": "at_end",
           "confidence": 0.72,
           "evidence_frames": [
             129,
@@ -400,6 +437,7 @@
             "cone": "side",
             "target": "tube_right"
           },
+          "holds": "at_end",
           "confidence": 0.37,
           "evidence_frames": [
             112,
@@ -414,6 +452,7 @@
             "cone": "top_down",
             "target": "tube_right"
           },
+          "holds": "at_end",
           "provenance": "derived",
           "confidence": 0.4,
           "votes": "derived",
@@ -472,17 +511,27 @@
       ],
       "holes": [
         {
-          "name": "tube_right.grasp_pose",
+          "name": "tube_right_grasp_pose",
           "type": "pose_se3",
-          "solver_hint": "tube pose from segmentation at grasp region (upper body)",
-          "frame": "world",
+          "solver_hint": "GraspNet candidates on the full tube; prefer upper-body grasps later",
+          "frame": "robot_base",
+          "resolver": "grasp_candidate",
+          "anchor": {
+            "object_id": "tube_right",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
-          "name": "tube_right.long_axis",
+          "name": "tube_right_long_axis",
           "type": "axis_3d",
           "solver_hint": "principal axis of tube point cloud",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "principal_axis",
+          "anchor": {
+            "object_id": "tube_right",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
@@ -512,8 +561,9 @@
           "name": "inside",
           "args": {
             "obj_a": "tube_right",
-            "obj_b": "rack"
+            "obj_b": "rack.right_hole"
           },
+          "holds": "at_end",
           "confidence": 0.84,
           "evidence_frames": [
             186,
@@ -527,6 +577,7 @@
           "args": {
             "axis": "tube_right.long_axis"
           },
+          "holds": "at_end",
           "confidence": 0.836,
           "evidence_frames": [
             172,
@@ -540,8 +591,9 @@
           "name": "above",
           "args": {
             "obj_a": "tube_right",
-            "obj_b": "rack"
+            "obj_b": "rack.right_hole"
           },
+          "holds": "at_end",
           "confidence": 0.49,
           "evidence_frames": [
             159,
@@ -555,7 +607,7 @@
           "name": "axis_parallel",
           "args": {
             "axis_a": "tube_right.long_axis",
-            "axis_b": "rack.hole_axis"
+            "axis_b": "rack.right_hole_axis"
           },
           "confidence": 0.484,
           "evidence_frames": [
@@ -571,8 +623,9 @@
           "name": "approach_direction",
           "args": {
             "cone": "top_down",
-            "target": "rack"
+            "target": "rack.right_hole"
           },
+          "holds": "throughout",
           "confidence": 0.476,
           "evidence_frames": [
             172,
@@ -588,6 +641,7 @@
             "obj": "tube_right",
             "region": "upper_body"
           },
+          "holds": "throughout",
           "confidence": 0.424,
           "evidence_frames": [
             145,
@@ -601,8 +655,9 @@
           "name": "center_align",
           "args": {
             "obj_a": "tube_right.center",
-            "obj_b": "rack.hole_center"
+            "obj_b": "rack.right_hole_center"
           },
+          "holds": "at_end",
           "provenance": "derived",
           "confidence": 0.4,
           "votes": "derived",
@@ -618,7 +673,7 @@
           "name": "inside",
           "args": {
             "obj_a": "tube_right",
-            "obj_b": "rack"
+            "obj_b": "rack.right_hole"
           },
           "holds": "at_end",
           "confidence": 0.85,
@@ -647,21 +702,37 @@
           "name": "tube_right_grasp_pose",
           "type": "pose_se3",
           "solver_hint": "grasp pose on tube_right upper body from segmentation",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "motion_derived",
+          "anchor": {
+            "object_id": "tube_right",
+            "part": "whole"
+          },
           "votes": "5/5"
         },
         {
           "name": "tube_right_long_axis",
           "type": "axis_3d",
           "solver_hint": "principal axis of tube_right",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "principal_axis",
+          "anchor": {
+            "object_id": "tube_right",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
-          "name": "target_hole_center",
+          "name": "rack_right_hole_center",
           "type": "point_3d",
-          "solver_hint": "center of chosen empty rack hole opening",
-          "frame": "rack",
+          "solver_hint": "center of the rack right-hole opening",
+          "frame": "robot_base",
+          "resolver": "part_center",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "right"
+          },
           "votes": "3/5"
         },
         {
@@ -672,10 +743,16 @@
           "votes": "5/5"
         },
         {
-          "name": "rack_hole_axis",
+          "name": "rack_right_hole_axis",
           "type": "axis_3d",
-          "solver_hint": "rack hole bore direction from rack pose",
-          "frame": "world",
+          "solver_hint": "bore direction of the rack right hole",
+          "frame": "robot_base",
+          "resolver": "part_axis",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "right"
+          },
           "votes": "3/5"
         },
         {
@@ -815,7 +892,7 @@
           "name": "above",
           "args": {
             "obj_a": "tube_left",
-            "obj_b": "rack"
+            "obj_b": "rack.left_hole"
           },
           "confidence": 0.524,
           "evidence_frames": [
@@ -831,14 +908,24 @@
           "name": "tube_left_grasp_pose",
           "type": "pose_se3",
           "solver_hint": "gripper pose holding tube during transport",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "motion_derived",
+          "anchor": {
+            "object_id": "tube_left",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
           "name": "tube_left_long_axis",
           "type": "axis_3d",
           "solver_hint": "tube principal axis from segmentation",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "principal_axis",
+          "anchor": {
+            "object_id": "tube_left",
+            "part": "whole"
+          },
           "votes": "4/5"
         },
         {
@@ -849,10 +936,16 @@
           "votes": "5/5"
         },
         {
-          "name": "rack_center",
+          "name": "rack_left_hole_center",
           "type": "point_3d",
-          "solver_hint": "rack top opening region center from perception",
-          "frame": "world",
+          "solver_hint": "center of the rack left-hole opening",
+          "frame": "robot_base",
+          "resolver": "part_center",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "left"
+          },
           "votes": "3/5"
         }
       ],
@@ -875,7 +968,7 @@
           "name": "inside",
           "args": {
             "obj_a": "tube_left",
-            "obj_b": "rack"
+            "obj_b": "rack.left_hole"
           },
           "confidence": 0.866,
           "evidence_frames": [
@@ -906,7 +999,7 @@
           "name": "axis_parallel",
           "args": {
             "axis_a": "tube_left.long_axis",
-            "axis_b": "rack.hole_axis"
+            "axis_b": "rack.left_hole_axis"
           },
           "confidence": 0.81,
           "evidence_frames": [
@@ -921,7 +1014,7 @@
           "name": "center_align",
           "args": {
             "obj_a": "tube_left.center",
-            "obj_b": "rack.hole_center"
+            "obj_b": "rack.left_hole_center"
           },
           "confidence": 0.782,
           "evidence_frames": [
@@ -937,7 +1030,7 @@
           "name": "approach_direction",
           "args": {
             "cone": "top_down",
-            "target": "rack"
+            "target": "rack.left_hole"
           },
           "confidence": 0.654,
           "evidence_frames": [
@@ -969,7 +1062,7 @@
           "name": "inside",
           "args": {
             "obj_a": "tube_left",
-            "obj_b": "rack"
+            "obj_b": "rack.left_hole"
           },
           "confidence": 0.866,
           "evidence_frames": [
@@ -1011,17 +1104,29 @@
       ],
       "holes": [
         {
-          "name": "rack_hole_center",
+          "name": "rack_left_hole_center",
           "type": "point_3d",
-          "solver_hint": "empty rack hole detection from perception",
-          "frame": "rack",
+          "solver_hint": "center of the rack left-hole opening",
+          "frame": "robot_base",
+          "resolver": "part_center",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "left"
+          },
           "votes": "3/5"
         },
         {
-          "name": "rack_hole_axis",
+          "name": "rack_left_hole_axis",
           "type": "axis_3d",
-          "solver_hint": "rack perforation orientation, near-vertical",
-          "frame": "rack",
+          "solver_hint": "bore direction of the rack left hole",
+          "frame": "robot_base",
+          "resolver": "part_axis",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "left"
+          },
           "votes": "5/5"
         },
         {
@@ -1039,17 +1144,28 @@
           "votes": "4/5"
         },
         {
-          "name": "tube_long_axis",
+          "name": "tube_left_long_axis",
           "type": "axis_3d",
           "solver_hint": "tube principal axis from grasped pose",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "motion_derived",
+          "anchor": {
+            "object_id": "tube_left",
+            "part": "whole"
+          },
           "votes": "3/5"
         },
         {
           "name": "retract_pose",
           "type": "pose_se3",
           "solver_hint": "post-release safe pose clear of rack",
-          "frame": "world",
+          "frame": "robot_base",
+          "resolver": "motion_derived",
+          "anchor": {
+            "object_id": "rack",
+            "part": "hole",
+            "instance": "left"
+          },
           "votes": "3/5"
         }
       ],

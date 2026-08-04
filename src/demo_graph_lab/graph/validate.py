@@ -137,11 +137,138 @@ def _evidence_errors(item: dict, prefix: str, required: bool = True,
     return errors
 
 
-def _hole_errors(hole, prefix: str, *, allow_votes: bool = True) -> list[str]:
+def _geometry_contract_errors(
+    hole: dict,
+    prefix: str,
+    *,
+    require: bool,
+    registry_ids: set[str] | None,
+    stage_object_ids: set[str] | None,
+    execution_frame: str | None,
+) -> list[str]:
+    """Validate optional geometry provenance, or require it for live execution."""
+    errors: list[str] = []
+    hole_type = hole.get("type")
+    has_contract = "resolver" in hole or "anchor" in hole
+
+    if hole_type not in vocab.GEOMETRIC_HOLE_TYPES:
+        if has_contract:
+            errors.append(
+                f"{prefix}.resolver/anchor are only valid for geometric holes")
+        return errors
+    if not require and not has_contract:
+        return errors
+
+    if "resolver" not in hole:
+        errors.append(f"{prefix} missing live field 'resolver'")
+    if "anchor" not in hole:
+        errors.append(f"{prefix} missing live field 'anchor'")
+
+    if "resolver" in hole:
+        resolver = hole["resolver"]
+        compatible_types = (
+            vocab.HOLE_RESOLVER_TYPES.get(resolver)
+            if isinstance(resolver, str) else None
+        )
+        if compatible_types is None:
+            errors.append(f"{prefix}.resolver is outside the closed vocabulary")
+        elif hole_type not in compatible_types:
+            errors.append(
+                f"{prefix}.resolver {resolver!r} is incompatible with type "
+                f"{hole_type!r}")
+
+    anchor = hole.get("anchor")
+    if "anchor" in hole and not isinstance(anchor, dict):
+        errors.append(f"{prefix}.anchor must be an object")
+    elif isinstance(anchor, dict):
+        required = {"object_id", "part"}
+        allowed = required | {"instance", "selection"}
+        missing = sorted(required - set(anchor))
+        extra = sorted(set(anchor) - allowed, key=repr)
+        if missing:
+            errors.append(f"{prefix}.anchor missing fields {missing}")
+        if extra:
+            errors.append(f"{prefix}.anchor has unknown fields {extra}")
+
+        object_id = anchor.get("object_id")
+        if not isinstance(object_id, str) or not object_id:
+            errors.append(f"{prefix}.anchor.object_id must be a non-empty string")
+        else:
+            if registry_ids is not None and object_id not in registry_ids:
+                errors.append(
+                    f"{prefix}.anchor.object_id is not a registry id: {object_id!r}")
+            if stage_object_ids is not None and object_id not in stage_object_ids:
+                errors.append(
+                    f"{prefix}.anchor.object_id is not a stage object: {object_id!r}")
+
+        part = anchor.get("part")
+        if not isinstance(part, str) or not _HOLE_NAME_RE.fullmatch(part):
+            errors.append(f"{prefix}.anchor.part must be snake_case")
+        for field in ("instance", "selection"):
+            value = anchor.get(field)
+            if field in anchor and (not isinstance(value, str) or not value):
+                errors.append(f"{prefix}.anchor.{field} must be a non-empty string")
+        qualifier_count = sum(
+            field in anchor for field in ("instance", "selection")
+        )
+        if "instance" in anchor and "selection" in anchor:
+            errors.append(
+                f"{prefix}.anchor cannot contain both instance and selection"
+            )
+        if part == "whole" and qualifier_count:
+            errors.append(
+                f"{prefix}.whole-object anchor cannot contain instance or selection"
+            )
+        if part == "hole" and qualifier_count != 1:
+            errors.append(
+                f"{prefix}.hole anchor requires exactly one of instance or selection"
+            )
+        if hole.get("resolver") == "grasp_candidate" and (
+            part != "whole" or qualifier_count
+        ):
+            errors.append(
+                f"{prefix}.grasp_candidate must use a whole-object anchor; "
+                "grasp-region preference belongs in constraints"
+            )
+        if isinstance(hole.get("resolver"), str) and hole.get("resolver") in {
+            "part_center", "part_axis",
+        } and part != "hole":
+            errors.append(
+                f"{prefix}.{hole.get('resolver')} must use a hole anchor"
+            )
+        if hole.get("resolver") == "principal_axis" and (
+            part != "whole" or qualifier_count
+        ):
+            errors.append(
+                f"{prefix}.principal_axis must use a whole-object anchor; "
+                "use part_axis for a physical part"
+            )
+
+    if execution_frame is not None and hole.get("frame") != execution_frame:
+        errors.append(
+            f"{prefix}.frame must use canonical execution frame "
+            f"{execution_frame!r}")
+    return errors
+
+
+def _hole_errors(
+    hole,
+    prefix: str,
+    *,
+    allow_votes: bool = True,
+    require_geometry_contract: bool = False,
+    registry_ids: set[str] | None = None,
+    stage_object_ids: set[str] | None = None,
+    execution_frame: str | None = None,
+) -> list[str]:
     if not isinstance(hole, dict):
         return [f"{prefix} must be an object"]
     required = {"name", "type", "solver_hint", "frame"}
-    allowed = required | {"purpose"} | ({"votes"} if allow_votes else set())
+    allowed = (
+        required
+        | {"purpose", "resolver", "anchor"}
+        | ({"votes"} if allow_votes else set())
+    )
     errors = []
     missing = sorted(required - set(hole))
     extra = sorted(set(hole) - allowed)
@@ -164,6 +291,86 @@ def _hole_errors(hole, prefix: str, *, allow_votes: bool = True) -> list[str]:
             errors.append(f"{prefix}.purpose is only valid for runtime_condition")
         elif purpose != "lower_stop":
             errors.append(f"{prefix}.purpose is outside the closed vocabulary")
+    errors.extend(_geometry_contract_errors(
+        hole,
+        prefix,
+        require=require_geometry_contract,
+        registry_ids=registry_ids,
+        stage_object_ids=stage_object_ids,
+        execution_frame=execution_frame,
+    ))
+    return errors
+
+
+def validate_live_hole_contract(
+    graph,
+    registry_ids: set[str],
+    *,
+    execution_frame: str = "robot_base",
+) -> list[str]:
+    """Require every geometric hole to be executable without object guessing.
+
+    Legacy offline graphs remain valid through :func:`validate_final_graph`; call
+    this stricter entry point before connecting a graph to live candidate providers.
+    Geometry published by providers must already be transformed into the canonical
+    execution frame.  Source-frame lineage belongs in perception artifacts.
+    """
+    if not isinstance(execution_frame, str) or not execution_frame:
+        return ["execution_frame must be a non-empty string"]
+    if not isinstance(graph, dict):
+        return ["graph.json must be an object"]
+    stages = graph.get("stages")
+    if not isinstance(stages, list):
+        return ["graph.stages must be a list"]
+
+    errors: list[str] = []
+    for position, stage in enumerate(stages):
+        if not isinstance(stage, dict):
+            errors.append(f"graph.stages[{position}] must be an object")
+            continue
+        index = stage.get("index")
+        prefix = (f"s{index}" if isinstance(index, int) and not isinstance(index, bool)
+                  else f"graph.stages[{position}]")
+        stage_objects = stage.get("stage_objects")
+        stage_object_ids: set[str] = set()
+        if isinstance(stage_objects, dict):
+            stage_object_ids = {
+                value for value in stage_objects.values()
+                if isinstance(value, str) and value
+            }
+        else:
+            errors.append(f"{prefix}.stage_objects must be an object")
+        holes = stage.get("holes")
+        if not isinstance(holes, list):
+            errors.append(f"{prefix}.holes must be a list")
+            continue
+        for hole_index, hole in enumerate(holes):
+            errors.extend(_hole_errors(
+                hole,
+                f"{prefix}.holes[{hole_index}]",
+                require_geometry_contract=True,
+                registry_ids=registry_ids,
+                stage_object_ids=stage_object_ids,
+                execution_frame=execution_frame,
+            ))
+        center_holes = [
+            hole
+            for hole in holes
+            if isinstance(hole, dict) and hole.get("resolver") == "part_center"
+        ]
+        axis_holes = [
+            hole
+            for hole in holes
+            if isinstance(hole, dict) and hole.get("resolver") == "part_axis"
+        ]
+        if (
+            len(center_holes) == 1
+            and len(axis_holes) == 1
+            and center_holes[0].get("anchor") != axis_holes[0].get("anchor")
+        ):
+            errors.append(
+                f"{prefix}.part_center and part_axis must use the same anchors"
+            )
     return errors
 
 
@@ -187,9 +394,14 @@ def validate_stage_sample(sample, stage: dict, registry_ids: set[str],
             f"sample.stage {sample.get('stage')!r} does not match {stage.get('name')!r}")
 
     stage_objects = sample.get("stage_objects")
+    sample_stage_object_ids = None
     if not isinstance(stage_objects, dict):
         errors.append("sample.stage_objects must be an object")
     else:
+        sample_stage_object_ids = {
+            value for value in stage_objects.values()
+            if isinstance(value, str) and value
+        }
         expected_keys = {"manipulated", "target"}
         if set(stage_objects) != expected_keys:
             errors.append("sample.stage_objects must contain exactly manipulated and target")
@@ -238,7 +450,12 @@ def validate_stage_sample(sample, stage: dict, registry_ids: set[str],
         names = []
         for index, hole in enumerate(holes):
             errors.extend(_hole_errors(
-                hole, f"sample.holes[{index}]", allow_votes=False))
+                hole,
+                f"sample.holes[{index}]",
+                allow_votes=False,
+                registry_ids=registry_ids,
+                stage_object_ids=sample_stage_object_ids,
+            ))
             if isinstance(hole, dict) and isinstance(hole.get("name"), str):
                 names.append(hole["name"])
         duplicates = sorted({name for name in names if names.count(name) > 1})
@@ -440,8 +657,17 @@ def validate_final_graph(graph, stages, registry_ids: set[str], *,
             errors.append(f"{prefix}.holes must be a list")
             holes = []
         hole_names = []
+        stage_object_ids = {
+            value for value in stage_objects.values()
+            if isinstance(value, str) and value
+        }
         for hole_index, hole in enumerate(holes):
-            errors.extend(_hole_errors(hole, f"{prefix}.holes[{hole_index}]"))
+            errors.extend(_hole_errors(
+                hole,
+                f"{prefix}.holes[{hole_index}]",
+                registry_ids=registry_ids,
+                stage_object_ids=stage_object_ids,
+            ))
             if isinstance(hole, dict) and isinstance(hole.get("name"), str):
                 hole_names.append(hole["name"])
         duplicate_holes = sorted(

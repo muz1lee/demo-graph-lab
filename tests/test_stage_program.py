@@ -15,6 +15,7 @@ from demo_graph_lab.policy.program import (
     compile_program,
     unwired_holes,
     validate_program,
+    wired_hole_contracts_by_stage,
     wired_holes_by_stage,
 )
 
@@ -249,6 +250,37 @@ def test_wired_holes_follow_runtime_signature_not_json_key_order():
     assert wired_holes_by_stage(program) == {
         0: ("grasp_pose", "tube_axis"),
     }
+
+
+def test_wired_hole_contracts_preserve_resolver_and_anchor_metadata():
+    graph = _graph()
+    grasp_pose, tube_axis = graph["stages"][0]["holes"][0], \
+        graph["stages"][0]["holes"][3]
+    grasp_pose.update({
+        "resolver": "grasp_candidate",
+        "anchor": {"object_id": "tube0", "part": "body"},
+    })
+    tube_axis.update({
+        "resolver": "principal_axis",
+        "anchor": {"object_id": "tube0", "part": "long_axis"},
+    })
+    program = _program([{
+        "op": "grasp_at",
+        "args": {
+            "axis": {"hole": "tube_axis"},
+            "grasp_pose": {"hole": "grasp_pose"},
+        },
+    }])
+
+    contracts = wired_hole_contracts_by_stage(program, graph)
+
+    assert tuple(hole["name"] for hole in contracts[0]) == (
+        "grasp_pose", "tube_axis")
+    assert contracts[0][0]["resolver"] == "grasp_candidate"
+    assert contracts[0][1]["anchor"] == {
+        "object_id": "tube0", "part": "long_axis"}
+    contracts[0][0]["anchor"]["part"] = "mutated"
+    assert grasp_pose["anchor"]["part"] == "body"
 
 
 def test_compile_command_writes_program_then_deterministic_policy(tmp_path, monkeypatch):

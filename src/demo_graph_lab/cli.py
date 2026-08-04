@@ -10,10 +10,11 @@
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
-  dgl planning-record --record-dir <dir> [--step plan|capture|predict]
+  dgl planning-record --record-dir <dir> [--step plan|capture|ground|segment|project|predict]
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -52,23 +53,36 @@ def main(argv=None):
     replay.add_argument("--output", required=True)
     record = sub.add_parser(
         "planning-record",
-        help="freeze a read-only head observation and raw GraspNet reply",
+        help="record one graph-anchored Qwen/SAM3/GraspNet perception chain",
     )
     record.add_argument("--record-dir", required=True)
     record.add_argument(
         "--step",
-        choices=("plan", "capture", "predict"),
+        choices=("plan", "capture", "ground", "segment", "project", "predict"),
         default="plan",
     )
     record.add_argument("--graph")
+    record.add_argument("--objects")
     record.add_argument("--stage", type=int, default=0)
+    record.add_argument("--hole")
     record.add_argument("--intrinsics")
     record.add_argument("--pipeline-url", default="http://127.0.0.1:8000")
     record.add_argument("--graspnet-url", default="http://127.0.0.1:8092")
+    record.add_argument("--qwen-url", default=os.environ.get("QWEN_BASE_URL"))
+    record.add_argument(
+        "--qwen-model", default=os.environ.get("QWEN_DEFAULT_MODEL")
+    )
+    sam3_base = os.environ.get("SAM3_SERVER_URL")
+    record.add_argument(
+        "--sam3-url",
+        default=(f"{sam3_base.rstrip('/')}/segment" if sam3_base else None),
+    )
     record.add_argument("--camera-socket", default="/tmp/knowin_sim_camera.sock")
     record.add_argument("--timeout", type=float, default=10.0)
     record.add_argument("--max-grasps", type=int, default=20)
+    record.add_argument("--min-object-points", type=int, default=64)
     record.add_argument("--allow-live-read", action="store_true")
+    record.add_argument("--allow-model-read", action="store_true")
     args = parser.parse_args(argv)
 
     if args.cmd == "planning-replay":
@@ -82,30 +96,61 @@ def main(argv=None):
         from .execution.planning_record import (
             capture_record,
             plan_record,
+        )
+        from .execution.object_record import (
+            ground_record,
             predict_record,
+            project_record,
+            segment_record,
         )
 
         if args.step == "plan":
-            if not args.graph or not args.intrinsics:
+            if not all((
+                args.graph,
+                args.objects,
+                args.intrinsics,
+                args.qwen_url,
+                args.qwen_model,
+                args.sam3_url,
+            )):
                 parser.error(
-                    "planning-record --step plan requires --graph and --intrinsics"
+                    "planning-record --step plan requires --graph, --objects, "
+                    "--intrinsics, --qwen-url, --qwen-model, and --sam3-url"
                 )
             plan_record(
                 graph_path=args.graph,
+                objects_path=args.objects,
                 stage_index=args.stage,
                 record_dir=args.record_dir,
                 intrinsics_path=args.intrinsics,
+                hole_name=args.hole,
                 pipeline_url=args.pipeline_url,
                 graspnet_url=args.graspnet_url,
+                qwen_url=args.qwen_url,
+                qwen_model=args.qwen_model,
+                sam3_url=args.sam3_url,
                 camera_socket=args.camera_socket,
                 timeout_s=args.timeout,
                 max_grasps=args.max_grasps,
+                min_object_points=args.min_object_points,
             )
         elif args.step == "capture":
             capture_record(
                 args.record_dir,
                 allow_live_read=args.allow_live_read,
             )
+        elif args.step == "ground":
+            ground_record(
+                args.record_dir,
+                allow_model_read=args.allow_model_read,
+            )
+        elif args.step == "segment":
+            segment_record(
+                args.record_dir,
+                allow_model_read=args.allow_model_read,
+            )
+        elif args.step == "project":
+            project_record(args.record_dir)
         else:
             predict_record(
                 args.record_dir,

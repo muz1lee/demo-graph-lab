@@ -13,6 +13,7 @@ from demo_graph_lab.demo.stages import uniform_sample, validate_proposal
 from demo_graph_lab.graph.extract import merge_samples
 from demo_graph_lab.graph.validate import (
     validate_final_graph,
+    validate_live_hole_contract,
     validate_run_dir,
     validate_stage_manifest,
     validate_stage_sample,
@@ -203,10 +204,14 @@ def test_merge_votes_separately_by_holds_and_full_hole_contract():
     base_hole = {
         "name": "tube_axis", "type": "axis_3d", "frame": "camera",
         "purpose": None, "solver_hint": "tube segmentation",
+        "resolver": "principal_axis",
+        "anchor": {"object_id": "tube0", "part": "long_axis"},
     }
     for field, value in (
         ("frame", "world"),
         ("purpose", "lower_stop"),
+        ("resolver", "part_axis"),
+        ("anchor", {"object_id": "rack", "part": "hole_axis"}),
         ("solver_hint", "depth segmentation"),
     ):
         changed = dict(base_hole, **{field: value})
@@ -273,6 +278,152 @@ def _valid_final_stage(index=0, name="grasp", start_sec=0.0, end_sec=1.0,
         }],
         "k_valid": 1,
     }
+
+
+def test_live_hole_contract_is_strict_without_breaking_legacy_graphs():
+    stage = _valid_final_stage()
+    manifest = [{key: stage[key] for key in
+                 ("index", "name", "label", "start_sec", "end_sec")}]
+    graph = {"k": 1, "stages": [stage]}
+
+    errors, _, _ = validate_final_graph(
+        graph, manifest, {"tube0", "rack"}, fps=10.0, total_frames=20)
+    assert errors == []
+    live_errors = validate_live_hole_contract(graph, {"tube0", "rack"})
+    assert any("missing live field 'resolver'" in error for error in live_errors)
+    assert any("canonical execution frame" in error for error in live_errors)
+
+    hole = stage["holes"][0]
+    hole.update({
+        "frame": "robot_base",
+        "resolver": "grasp_candidate",
+        "anchor": {
+            "object_id": "tube0",
+            "part": "whole",
+        },
+    })
+    assert validate_live_hole_contract(graph, {"tube0", "rack"}) == []
+
+    hole["anchor"] = {
+        "object_id": "tube0",
+        "part": "body",
+        "selection": "upper_body",
+    }
+    live_errors = validate_live_hole_contract(graph, {"tube0", "rack"})
+    assert any("whole-object anchor" in error for error in live_errors)
+
+
+def test_live_hole_contract_checks_resolver_anchor_and_execution_frame():
+    stage = _valid_final_stage()
+    hole = stage["holes"][0]
+    hole.update({
+        "frame": "world",
+        "resolver": "principal_axis",
+        "anchor": {
+            "object_id": "ghost",
+            "part": "Upper Body",
+            "instance": "",
+        },
+    })
+
+    errors = validate_live_hole_contract(
+        {"k": 1, "stages": [stage]}, {"tube0", "rack"})
+
+    assert any("incompatible with type 'pose_se3'" in error for error in errors)
+    assert any("not a registry id" in error for error in errors)
+    assert any("not a stage object" in error for error in errors)
+    assert any("anchor.part must be snake_case" in error for error in errors)
+    assert any("anchor.instance must be a non-empty string" in error
+               for error in errors)
+    assert any("canonical execution frame" in error for error in errors)
+
+    hole["resolver"] = {"kind": "principal_axis"}
+    assert any("closed vocabulary" in error for error in
+               validate_live_hole_contract(
+                   {"k": 1, "stages": [stage]}, {"tube0", "rack"}))
+
+
+def test_live_hole_contract_rejects_ambiguous_part_anchor_pairs():
+    stage = _valid_final_stage()
+    center = {
+        "name": "rack_hole_center",
+        "type": "point_3d",
+        "solver_hint": "rack opening center",
+        "frame": "robot_base",
+        "resolver": "part_center",
+        "anchor": {"object_id": "rack", "part": "hole", "instance": "left"},
+    }
+    axis = {
+        "name": "rack_hole_axis",
+        "type": "axis_3d",
+        "solver_hint": "rack opening axis",
+        "frame": "robot_base",
+        "resolver": "part_axis",
+        "anchor": {"object_id": "rack", "part": "hole", "instance": "right"},
+    }
+    stage["holes"] = [center, axis]
+    graph = {"k": 1, "stages": [stage]}
+
+    errors = validate_live_hole_contract(graph, {"tube0", "rack"})
+    assert any("must use the same anchors" in error for error in errors)
+
+    axis["anchor"] = {
+        "object_id": "rack",
+        "part": "hole",
+        "instance": "left",
+        "selection": "left_opening",
+    }
+    errors = validate_live_hole_contract(graph, {"tube0", "rack"})
+    assert any("cannot contain both instance and selection" in error
+               for error in errors)
+    assert any("exactly one of instance or selection" in error
+               for error in errors)
+
+
+@pytest.mark.parametrize(("resolver", "hole_type", "anchor", "message"), [
+    (
+        "principal_axis",
+        "axis_3d",
+        {"object_id": "tube0", "part": "body", "selection": "upper_body"},
+        "principal_axis must use a whole-object anchor",
+    ),
+    (
+        "part_center",
+        "point_3d",
+        {"object_id": "rack", "part": "whole"},
+        "part_center must use a hole anchor",
+    ),
+    (
+        "motion_derived",
+        "pose_se3",
+        {"object_id": "rack", "part": "hole"},
+        "hole anchor requires exactly one",
+    ),
+    (
+        "motion_derived",
+        "pose_se3",
+        {"object_id": "tube0", "part": "whole", "instance": "left"},
+        "whole-object anchor cannot contain",
+    ),
+])
+def test_live_hole_contract_enforces_resolver_anchor_semantics(
+    resolver, hole_type, anchor, message
+):
+    stage = _valid_final_stage()
+    stage["holes"] = [{
+        "name": "geometry_value",
+        "type": hole_type,
+        "solver_hint": "trusted runtime geometry",
+        "frame": "robot_base",
+        "resolver": resolver,
+        "anchor": anchor,
+    }]
+
+    errors = validate_live_hole_contract(
+        {"k": 1, "stages": [stage]}, {"tube0", "rack"}
+    )
+
+    assert any(message in error for error in errors)
 
 
 def test_final_graph_requires_complete_ordered_stage_semantics():

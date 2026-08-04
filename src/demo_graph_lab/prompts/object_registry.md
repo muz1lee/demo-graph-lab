@@ -18,10 +18,17 @@ Output a strict JSON list; one entry per PHYSICAL object instance (not per appea
  "first_seen_frame": <int>}
 
 Rules:
+- Start with an inventory of the earliest frame that shows the workspace. Count and
+  enumerate EVERY visible instance of each repeated category before following motion.
+  If three tubes are visible there, the registry must contain three tube entries whose
+  `first_seen_frame` is that frame; a later destination is not a first appearance.
 - Same physical object across the whole video = ONE entry, even if it moves or is
   restacked. Identity persistence over time is the whole point.
+- Track each initial instance forward across every stage. Never reuse one id for a
+  different remaining instance after the original object is placed or occluded.
 - Include manipulable objects, receptacles/fixtures (rack, pad, bank, table), and any
   distractor that a detector could confuse (e.g. a transparent stand near a coin).
 - For identical-looking instances (three same tubes), disambiguate by START position
-  (tube_left/tube_mid/tube_right) and say so in distinguishers.
+  (tube_left/tube_mid/tube_right) and say so in distinguishers. Keep those ids even
+  after the objects move to center/right/left destination slots.
 - Do not invent objects not visible in frames. Output the JSON list only.
