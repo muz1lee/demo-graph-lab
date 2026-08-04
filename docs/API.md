@@ -294,5 +294,6 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
 - 整个文档禁止数值字面量，除 `stage` 索引（指向 graph 的结构性引用）外任何位置出现数字或带单位的字符串都是违规。这条与 `StageProgram` 同规，是纵深防御，不依赖 key 白名单先拦住；
 - hole 身份是 stage 内唯一的 `(stage, hole)`：同名 hole 可以出现在多个 stage，但同一个 stage 的同一个 hole 只能由一个程序发布；
 - v1 只发布被观测到的对象几何，`resolver` 限于 `part_center / part_axis / principal_axis`。`grasp_candidate` 走候选身份与排序机制，`motion_derived` 的值来自执行状态而不是观测，两者出现在 `provides` 里都是违规；
+- 声明了 `resolver` 的 hole 还必须由绑定的那条链发布：`part_center → fit_opening.center`、`part_axis → fit_opening.axis`、`principal_axis → fit_axis.axis`。类型相同不等于语义相同——开口平面法向与点云 PCA 主轴都是 `axis_3d`，只比类型就能互换，而它们测的不是同一个量。绑定表 `perception/program.py::RESOLVER_BINDINGS` 是这条语义的单一真相源，键恰好是可发布 resolver 的全集；没有声明 `resolver` 的 hole 维持类型匹配即可；
 - 失败语义是 all-or-nothing：链在任何一步失败，该程序的 `provides` 一个都不产出。部分成功会让上层以为 hole 已填，是 bug 不是可接受的降级；
 - 未被任何程序覆盖的几何 hole 不是违规，它们继续走 graph resolver 老路。`coverage_by_stage` 只产出 per stage 的 covered/uncovered 名单供记录，不做准入判断。

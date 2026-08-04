@@ -49,6 +49,15 @@ OPERATORS = {
 # ``motion_derived`` 的值来自执行状态而不是观测,两者都不是本 DSL 的产物。
 PROVIDABLE_RESOLVERS = vocab.PERCEPTION_RESOLVERS - {"grasp_candidate"}
 
+# resolver → (终点算子, 字段) 的唯一绑定表:哪种链才有资格发布哪种 resolver。
+# 类型相同不等于语义相同——开口平面法向与点云 PCA 主轴都是 axis_3d,只比类型
+# 就能互换,而它们测的不是同一个量。键恰好是 PROVIDABLE_RESOLVERS,由测试钉住。
+RESOLVER_BINDINGS = {
+    "part_center": ("fit_opening", "center"),
+    "part_axis": ("fit_opening", "axis"),
+    "principal_axis": ("fit_axis", "axis"),
+}
+
 _UNIT_RE = re.compile(r"\d+\.?\d*\s*(mm|cm|m\b|deg|°|rad)", re.I)
 
 
@@ -299,6 +308,18 @@ def validate_perception_program(doc: dict, graph: dict) -> list[str]:
                 errors.append(
                     f"{entry_path}: hole {hole_name!r} 的 resolver {resolver!r} "
                     f"不由感知程序发布,允许 {sorted(PROVIDABLE_RESOLVERS)}"
+                )
+            elif isinstance(resolver, str) and RESOLVER_BINDINGS[resolver] != (
+                    terminal, field):
+                # 洞没有 resolver 时维持类型匹配即可;声明了 resolver 就等于声明了
+                # 语义,这时必须由绑定的那条链发布。
+                bound_op, bound_field = RESOLVER_BINDINGS[resolver]
+                errors.append(
+                    f"{entry_path}: hole {hole_name!r} 的 resolver {resolver!r} "
+                    f"语义由 {bound_op}.{bound_field} 定义"
+                    f"(产出 {OPERATORS[bound_op]['fields'][bound_field]}),"
+                    f"本链终点是 {terminal}.{field}(产出 {fields[field]});"
+                    f"两个算子测的不是同一个量,类型一致不能替代 resolver 绑定"
                 )
             anchor = hole.get("anchor")
             if not isinstance(anchor, dict):

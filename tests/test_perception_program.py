@@ -17,6 +17,7 @@ from demo_graph_lab.perception.program import (
     GEOMETRY,
     OPERATORS,
     PROVIDABLE_RESOLVERS,
+    RESOLVER_BINDINGS,
     ROOT_OPERATOR,
     SCHEMA,
     coverage_by_stage,
@@ -115,6 +116,17 @@ def test_operator_registry_is_a_closed_rooted_chain():
     assert vocab.MOTION_DERIVED_RESOLVER not in PROVIDABLE_RESOLVERS
 
 
+def test_every_providable_resolver_has_exactly_one_operator_binding():
+    """绑定表是「哪条链能发布哪种 resolver」的单一真相源,不能有孤儿或空缺。"""
+    assert set(RESOLVER_BINDINGS) == set(PROVIDABLE_RESOLVERS)
+    for resolver, (operator, field) in RESOLVER_BINDINGS.items():
+        assert OPERATORS[operator]["produces"] == GEOMETRY, resolver
+        assert field in OPERATORS[operator]["fields"], resolver
+        # 绑定的字段类型必须落在 graph 词表给这个 resolver 声明的类型集合里。
+        assert (OPERATORS[operator]["fields"][field]
+                in vocab.HOLE_RESOLVER_TYPES[resolver]), resolver
+
+
 def test_valid_document_passes_and_derives_program_identity():
     doc = _doc([_opening_program(), _axis_program()])
     assert validate_perception_program(doc, _graph()) == []
@@ -197,6 +209,45 @@ def test_grasp_and_motion_holes_are_outside_the_perception_dsl(hole):
     }])
     errors = validate_perception_program(doc, graph)
     assert any("不由感知程序发布" in error for error in errors), errors
+
+
+@pytest.mark.parametrize(("chain", "hole", "bound", "actual"), [
+    # 开口法向洞被点云主轴链发布:两侧都是 axis_3d,只比类型时是合法的。
+    (_AXIS_CHAIN, "opening_axis", "fit_opening.axis", "fit_axis.axis"),
+    # 反向同理:整体主轴洞不能由开口拟合发布。
+    (_OPENING_CHAIN, "peg_long_axis", "fit_axis.axis", "fit_opening.axis"),
+])
+def test_resolver_binds_the_terminal_operator_not_only_the_hole_type(
+    chain, hole, bound, actual
+):
+    doc = _doc([{
+        "stage": 0,
+        "chain": list(chain),
+        "provides": [{"field": "axis", "hole": hole}],
+    }])
+
+    errors = validate_perception_program(doc, _graph())
+
+    # 类型规则一条都不触发,只有绑定规则触发:这正是本规则封住的语义漏洞。
+    assert len(errors) == 1, errors
+    assert f"语义由 {bound} 定义" in errors[0]
+    assert f"本链终点是 {actual}" in errors[0]
+    assert errors[0].count("axis_3d") == 2
+    assert "类型一致不能替代 resolver 绑定" in errors[0]
+
+
+def test_hole_without_a_resolver_keeps_the_type_only_rule():
+    graph = _graph()
+    target = next(item for item in graph["stages"][0]["holes"]
+                  if item["name"] == "opening_axis")
+    target.pop("resolver")
+    doc = _doc([{
+        "stage": 0,
+        "chain": list(_AXIS_CHAIN),
+        "provides": [{"field": "axis", "hole": "opening_axis"}],
+    }])
+
+    assert validate_perception_program(doc, graph) == []
 
 
 def test_provided_hole_must_carry_an_anchor():
