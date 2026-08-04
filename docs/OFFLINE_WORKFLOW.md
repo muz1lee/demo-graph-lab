@@ -19,7 +19,7 @@ dgl all --task <task>
 dgl compile --task <task>
 ```
 
-`dgl all` 负责从视频生成并验证约束图，`dgl compile` 负责生成 `StageProgram`、确定性编译 policy 和 fake dry-run。
+`dgl all` 负责从视频生成并验证约束图，`dgl compile` 负责生成 `StageProgram`、确定性编译 policy 和 fake dry-run，并在 policy 发布之后追加一段 `PerceptionProgram` 编译。
 
 ## 总体流程
 
@@ -35,6 +35,8 @@ video + optional trace
   → StageProgram proposal
   → deterministic Python compilation
   → static check + FakeRuntime dry-run
+  → PerceptionProgram proposal
+  → validation + FakePerceptionRuntime dry-run
 ```
 
 | 步骤 | Backend model | 主要产物 |
@@ -48,6 +50,7 @@ video + optional trace
 | 图验证与报告 | 否 | `validation.json`、`report.html`、可选 `metrics.json` |
 | StageProgram 提议 | 调用 | `stage_program.json` |
 | 确定性编译与 dry-run | 否 | `policy.py`、`compile_report.json`、编译快照 |
+| PerceptionProgram 提议 | policy 发布后调用一次；无可发布 hole 时不调用 | `perception_program.json` |
 
 ## 1. 视频导入
 
@@ -339,9 +342,47 @@ compiled_objects.json
 - program 和静态检查 violations；
 - unwired holes；
 - 两条 dry-run 的结果和调用记录；
-- 实际通过 dry-run 的完整 `StageProgram`。
+- 实际通过 dry-run 的完整 `StageProgram`；
+- `perception_program` 段（只有 policy 发布后才存在，见第 10 节）。
 
 Oracle loader 会将当前 graph、objects、StageProgram 和确定性生成的 policy 与这些编译证据精确比较。任何不一致都会拒绝执行。
+
+## 10. PerceptionProgram 提议
+
+`policy.py` 发布之后，`dgl compile` 追加第二段编译：backend 提出 `PerceptionProgram`，决定几何 hole 由哪条闭集感知链发布。契约见 `docs/API.md` 第 6 节。
+
+覆盖目标不是 graph 里的全部几何 hole，而是 `StageProgram` 真正接线、类型为几何且 `resolver ∈ {part_center, part_axis, principal_axis}` 的那些。prompt 里的算子表与 resolver 绑定表由代码从 `perception/program.py` 渲染，不留第二份副本。
+
+产物：
+
+```text
+perception_program.json
+model_calls/compile_perception/
+```
+
+发布门依次是：
+
+1. `validate_perception_program` 零违规；
+2. `FakePerceptionRuntime` 干跑通过。
+
+两者都过才写 `perception_program.json`。任何一步失败都不发布感知程序，violations 和原始回复照常落在 `compile_report.json` 与 `model_calls/compile_perception/`。感知程序是纯增量产物：未发布时相关 hole 继续走 graph resolver 老路，`stage_program.json`、`policy.py` 和 CLI 退出状态都不受影响。
+
+`compile_report.json` 的 `perception_program` 段：
+
+```json
+{
+  "status": "published",
+  "ref": "perception_program.json",
+  "violations": [],
+  "coverage": [
+    {"stage": 0, "covered": ["opening_axis"], "uncovered": ["peg_grasp_pose"]}
+  ]
+}
+```
+
+`status` 为 `published / failed / skipped`。被接线的几何 hole 里没有任何可发布目标（全是 grasp 或 motion 类）时是 `skipped`，此时不调用 backend；`coverage` 只在 `published` 时非空，来自 `coverage_by_stage`，是记录而不是准入判据——未覆盖的 hole 不是违规。
+
+当前没有运行时消费者：`perception_program.json` 只是编译产物，链上的算子尚未接真实 grounding、segmentation 或几何实现。
 
 ## Backend 调用公共产物
 
@@ -386,6 +427,7 @@ runs/<task>/<timestamp>/
 ├── metrics.json
 ├── stage_program.json
 ├── policy.py
+├── perception_program.json
 ├── compile_report.json
 ├── compiled_graph.json
 ├── compiled_objects.json
@@ -393,4 +435,4 @@ runs/<task>/<timestamp>/
 └── cost.jsonl
 ```
 
-其中 `trace.json`、`stages_proposed.json` 和 `metrics.json` 是条件产物，不保证每个 run 都存在。编译失败时也不会发布 `policy.py` 和编译快照。
+其中 `trace.json`、`stages_proposed.json`、`metrics.json` 和 `perception_program.json` 是条件产物，不保证每个 run 都存在。编译失败时也不会发布 `policy.py` 和编译快照；感知编译失败或被跳过时不会发布 `perception_program.json`。

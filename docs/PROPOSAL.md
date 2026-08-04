@@ -72,7 +72,7 @@
 VLM 可以参与四个位置，但权限不同：
 
 - 从示范中提取阶段、对象和约束；
-- 根据约束图提议有限的 primitive sequence 和 hole wiring；
+- 根据约束图提议有限的 primitive sequence 和 hole wiring，以及发布几何 hole 的闭集感知链；
 - 在运行时对少量离散候选排序，并引用支持选择的约束；
 - 根据真实执行后的残差提出有界、离散的修正建议。
 

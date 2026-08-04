@@ -22,6 +22,9 @@
 | 对象 registry | 全视频采样帧、trace 中的对象别名 | `objects.json` | 每个 demo 一次 |
 | 约束抽取 | 单阶段关键帧、指令、对象 registry | `constraints / acceptance / holes` | 每阶段调用 `k` 次，再确定性合并 |
 | Program 提议 | 已校验 graph、`RuntimeAPI` 源码 | `StageProgram`：primitive sequence + hole wiring | 每个 graph 一次；backend 不写 Python |
+| PerceptionProgram 提议 | `StageProgram` 接线出的几何 hole 契约、从代码渲染的算子闭集与 resolver 绑定表 | `PerceptionProgram`：感知链组合 + hole 发布 | 每个 graph 一次；只在 `StageProgram` 发布后调用，无可发布 hole 时不调用 |
+
+表中这 **5 个调用点**是 backend model 在整个 workflow 中被允许出现的全部位置（此前是 4 个，`PerceptionProgram` 提议是新增的第 5 个）。新调用点和其余四个受同一条边界约束：它输出的是受限 JSON，不是 Python、查询文本、逐步参数或任何数值——model 只从闭集算子里选链并声明哪个字段发布哪个 hole，`localize` 的查询由可信代码从 hole 已有的 anchor 渲染。
 
 视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。在线 hole 求解、候选排序、运动执行、predicate 和 gate 目前也没有 backend model 调用。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
 
@@ -38,9 +41,11 @@ video + optional trace
   → backend StageProgram proposal
   → deterministic validation / Python compilation
   → AST check + fake dry-run
+  → backend PerceptionProgram proposal
+  → deterministic validation + fake perception dry-run
 ```
 
-Backend 输出始终是不可信 proposal。stage、registry、constraint sample 和 `StageProgram` 都经过严格 schema；无效 sample 不参加投票，分母固定为请求次数。同名阶段的约束只有达到严格多数才传播。`StageProgram` 只决定高层 primitive sequence 和 hole/object 接线，validator 检查动作顺序、API 签名、hole 类型与 purpose、对象引用和数字字面量，可信 compiler 再生成 Python。每次调用的脱敏请求、raw reply、parsed result 和 validator 结论都保存在 `model_calls/<tag>/`；同 tag 的再次调用保留在 `history/`，不会把不同请求和回复混在一起。
+Backend 输出始终是不可信 proposal。stage、registry、constraint sample、`StageProgram` 和 `PerceptionProgram` 都经过严格 schema；无效 sample 不参加投票，分母固定为请求次数。同名阶段的约束只有达到严格多数才传播。`StageProgram` 只决定高层 primitive sequence 和 hole/object 接线，validator 检查动作顺序、API 签名、hole 类型与 purpose、对象引用和数字字面量，可信 compiler 再生成 Python。`PerceptionProgram` 只决定哪条闭集算子链发布哪个几何 hole，validator 检查链的类型衔接、字段与 hole 类型、resolver 绑定、`(stage, hole)` 唯一性和数字字面量，fake runtime 再干跑一遍；它未通过时不发布，`StageProgram` 与 `policy.py` 的发布不受影响。每次调用的脱敏请求、raw reply、parsed result 和 validator 结论都保存在 `model_calls/<tag>/`；同 tag 的再次调用保留在 `history/`，不会把不同请求和回复混在一起。
 
 ### 当前建议的在线顺序
 
@@ -256,7 +261,11 @@ HTTP 接受请求不代表机器人到位。控制结果必须通过关节、末
 
 ## 6. PerceptionProgram v1
 
-`PerceptionProgram` 是与 `StageProgram` 平行的第二个 backend model 产物：`StageProgram` 决定动作怎么接线，`PerceptionProgram` 决定几何 hole 由哪条感知链发布。它是独立编译产物（将来落盘 `perception_program.json`），不是 hole 的字段，graph schema 不变。契约实现在 `src/demo_graph_lab/perception/program.py`，干跑实现在 `perception/fake_runtime.py`。当前只有校验器和 fake 干跑，链上的算子尚未接真实模型或几何实现。
+`PerceptionProgram` 是与 `StageProgram` 平行的第二个 backend model 产物：`StageProgram` 决定动作怎么接线，`PerceptionProgram` 决定几何 hole 由哪条感知链发布。它是独立编译产物（落盘 `perception_program.json`），不是 hole 的字段，graph schema 不变。契约实现在 `src/demo_graph_lab/perception/program.py`，干跑实现在 `perception/fake_runtime.py`，编译入口是 `dgl compile` 的第二段。当前只有校验器和 fake 干跑，链上的算子尚未接真实模型或几何实现，也还没有运行时消费者——已发布的 `perception_program.json` 目前只是编译产物。
+
+### 编译与发布门
+
+覆盖目标不是 graph 里的全部几何 hole，而是 `StageProgram` 真正接线、且 `resolver` 落在可发布集里的那些；没被接线的 hole 这一轮不需要值。发布门是「零违规 + fake 干跑通过」，两者都过才写 `perception_program.json`。任何一步失败都只把 violations 写进 `compile_report.json` 的 `perception_program` 段，raw reply 与校验结论照常留在 `model_calls/compile_perception/`；未发布时那些 hole 继续走 graph resolver 老路，因此感知程序是纯增量，不改变 `StageProgram` 的发布结果或 CLI 退出状态。wired 几何 hole 里没有任何可发布目标时 `status=skipped`，不调用 backend。
 
 ### 文档形状
 

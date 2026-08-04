@@ -2,6 +2,17 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-04：PerceptionProgram 编译入口（信息边界调用点 4→5）
+
+- **受治理的边界变更**：`docs/API.md` 中 backend model 被允许出现的调用点从 **4 个增到 5 个**，新增 `PerceptionProgram` 提议。它与其余四个同规——输出的是受限 JSON，不是 Python、查询文本、逐步参数或任何数值；`localize` 的查询仍由可信代码从 hole 已有的 anchor 渲染，model 只从闭集算子里选链并声明哪个字段发布哪个 hole；
+- 封住上一轮记下的语义漏洞：`perception/program.py` 新增 `RESOLVER_BINDINGS`（`part_center → fit_opening.center`、`part_axis → fit_opening.axis`、`principal_axis → fit_axis.axis`）。被 provide 的 hole 声明了 resolver 时，(终点算子, field) 必须与绑定表一致，违规消息定向指出洞的 resolver 语义与链的算子语义；洞没有 resolver 时维持类型匹配即可。`insert_tubes` fixture 原样通过；
+- `dgl compile` 现在产出两个 program。感知段在 `policy.py` 发布之后进行，覆盖目标由 `wired_hole_contracts_by_stage`（设计后首次有生产消费者）给出：只取 `StageProgram` 真正接线、类型为几何且 resolver 可发布的 hole。prompt `prompts/compile_perception.md` 陈述校验器全部规则，算子表与绑定表由代码渲染（单一真相源），few-shot 用 `insert_tubes` fixture 的真实片段；调用走既有 `common/llm.py`，独立 tag `compile_perception`，成本与缓存复用既有机制，单轮无修复回路；
+- 发布门是「零违规 + `FakePerceptionRuntime` 干跑通过」，两者都过才写 `perception_program.json`。失败只落 violations 与 `model_calls/compile_perception/`，`StageProgram`/`policy.py` 的发布与 CLI 退出状态完全不受影响——未发布时相关 hole 继续走 graph resolver 老路。`compile_report.json` 新增 `perception_program` 段（status/ref/violations/coverage）；wired 几何洞里没有可发布目标时 `status=skipped` 且不调用 backend；
+- 感知程序是新的 run 产物，上游六处 `invalidate_outputs` 一并把 `perception_program.json` 列入作废清单，避免它在 graph 变化后独自存活；
+- 测试：新增 `tests/test_perception_compile.py`，全部走 canned 响应、零网络（只有成本/缓存一条按既有手法替换 `sys.modules['openai']` 以跑通真实落盘路径）；本地 `434 passed`（基线 420 + 4 绑定规则 + 10 编译段），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：`perception_program.json` 已经能被编译出来，但**没有运行时消费者**——`PlanningOnlyRuntime`、gates 和 execution CLI 都还没接它，链上算子也仍未接真实 grounding/segmentation/几何实现。明确没做：运行时消费（B3）、改 `StageProgram` schema 与 `compile_policy.md`、动真实感知实现、感知程序的修复回路（与现有 compile 一致保持单轮）。已知文档张力：`docs/PROPOSAL.md` 的「VLM 可以参与四个位置」是角色分类而非调用点计数，本轮只把「提议 program」那一条的措辞扩到两种 program，没有改动那个计数。
+
 ## 2026-08-04：PerceptionProgram v1 可执行骨架
 
 - 新增 `perception/program.py`：感知侧程序的单一真相源，与 `policy/program.py` 对 `StageProgram` 同构。算子闭集 5 个（`localize / segment / fit_opening / crop_points / fit_axis`），`consumes/produces` 类型表把链钉成 `ANCHOR` 起、`GEOMETRY` 止的无环线性链；每个算子的注释指向背后的现有实现（grounding/segmentation client、`estimate_planar_opening_geometry`、`project_masked_depth`、`operators.fit_principal_axis`），本轮只固定契约，不接线；
