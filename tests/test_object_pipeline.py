@@ -352,3 +352,22 @@ def test_opening_geometry_rejects_model_pose_and_malformed_rgb() -> None:
         )
     with pytest.raises(TypeError, match="uint8"):
         _estimate(rgb.astype(np.float32), depth, roi, intrinsics)
+
+
+# --------------------------------------------------------------------------
+# 护栏:感知层源码不得包含任务名或物体名(与 selection/regions.py 同规)。
+# 几何算子和开口估计器必须类别无关,任务专属信息只能经 graph 或 runtime
+# observation 进入。
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("module", ["object_pipeline.py", "operators.py"])
+def test_no_task_or_object_names_in_source(module):
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "demo_graph_lab"
+        / "perception"
+        / module
+    ).read_text("utf-8").lower()
+    for bad in ("insert_tube", "stack_bowl", "deposit", "push_t",
+                "tube", "bowl", "coin", "rack", "slot"):
+        assert bad not in src, f"{module} 出现禁用词 {bad!r}(任务名/物体名硬失败)"

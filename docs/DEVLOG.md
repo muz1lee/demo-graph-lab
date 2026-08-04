@@ -2,6 +2,17 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-04：感知层算子化、去任务先验命名与词表收归
+
+- 新增 `perception/operators.py`：`fit_plane`（SVD 平面拟合 + 平面度 RMSE，保留「第二奇异值 > 1e-8 才算张成 2 维」的退化防护）、`intersect_ray_plane`（保留平行与交点在相机后方两个防护）、`fit_principal_axis`（由 `execution/object_record.py::_principal_axis` 原样移动，失败仍是 raise）。算子用 `OperatorError(reason)` 报前置条件失败，调用方用显式映射表翻译成自己的产物 reason 码，未映射的码直接 KeyError；抽取零行为变化，另用 4000 组随机点集与重构前的内联算法对照，返回值与失败分支逐比特一致；
+- 去 rack 命名：`estimate_rack_hole_geometry` → `estimate_planar_opening_geometry`、`RackHoleGeometry` → `PlanarOpeningGeometry`、schema 串升为 `demo_graph_lab.opening_geometry.v2`（全仓核实该产物无生产下游消费者，只有测试读，不留 v1 兼容层）；reason 码改为 `support_surface_not_planar` / `ray_parallel_to_support_plane` / `plane_intersection_behind_camera` / `estimated_from_rgbd_roi_and_local_support_plane`；record 层 artifact key `opening_geometry`、落盘 `object/opening_geometry.json`、result 字段 `opening_geometry_ref/opening_geometry_status`。graph anchor 词表里的 `part=="hole"` 不动；
+- 唯一行为变化（单独 commit）：开口深度对比门从有符号改为 `abs(depth_contrast)`，凹陷与凸起开口都接受；`metrics.depth_contrast_m` 保留带符号原值，符号正是上层判凹凸的依据；
+- 词表收归：resolver 闭集与 anchor 校验规则此前有三份不同步副本，宽严还不一致。`graph/vocab.py` 新增 `PERCEPTION_RESOLVERS` 与 `anchor_rule_errors(...)` 作为唯一实现，`graph/validate.py`、`execution/object_record.py`、`perception/object_pipeline.py` 全部改为调用；宽严统一到 graph 层的「hole anchor 恰好一个 qualifier」，fixture 与测试无一因此挂掉。`motion_derived` 语义保持拒绝——词表放宽后在 `_plan_context` 显式给出 "derived from execution state, not perception"，不靠「不在集合里」兜底；
+- 护栏：仿照 `tests/test_regions.py`，给 `perception/object_pipeline.py` 与 `perception/operators.py` 加同款源码禁词扫描（tube/bowl/coin/rack/slot 等），作为去污的 enforcement；
+- 本地 `383 passed`（基线 379 + 4 个新用例：凸起开口、motion_derived 拒绝、两个参数化护栏），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：这一轮只做算子抽取、命名/schema 归一和词表收归，是后续受限感知程序 DSL 的地基轮，本轮**不建** DSL。明确没做：`fit_support_surface`（现在没有消费者）、把算子失败改成 status 返回、anchor 词表里 `part=="hole"` 的改名（牵动 prompts/fixtures）、`ring_width_px` 物理化（等 live 标定）、`oracle_runtime` 的 SYNONYMS。`opening_geometry` 产物仍无下游消费者，v2 是首个被消费前的定版机会。
+
 ## 2026-08-04：record 与 selection 两处 fail-open 收口
 
 - `project` 的 `object/result.json` 不再硬编码 `status="ACCEPTED"`：请求了几何但 `hole_geometry_status` 不是 `PASS` 时写 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何才写 `ACCEPTED`；`hole_geometry_status` 字段本身不变。record 确实发生，所以 manifest 的 `OBJECT_CLOUD_RECORDED` 与 CLI 退出码不动，改的只是这个词；`docs/API.md` 同步该派生规则；
