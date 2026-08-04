@@ -666,8 +666,9 @@ def validate_run_dir(run_dir: Path, task: str) -> dict:
 
     run_dir = Path(run_dir)
     artifacts.invalidate_outputs(run_dir, (
-        "validation.json", "report.html", "stage_program.json", "policy.py",
-        "compile_report.json", "compiled_graph.json", "compiled_objects.json",
+        "validation.json", "report.html", "stage_program.json",
+        "perception_program.json", "policy.py", "compile_report.json",
+        "compiled_graph.json", "compiled_objects.json",
     ))
     preflight_errors: list[str] = []
 

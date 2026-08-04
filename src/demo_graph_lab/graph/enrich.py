@@ -160,8 +160,9 @@ def add_control_holes(graph: dict) -> int:
 def run(task: str) -> dict:
     run_dir = artifacts.latest_run_dir(task)
     artifacts.invalidate_outputs(run_dir, (
-        "validation.json", "report.html", "stage_program.json", "policy.py",
-        "compile_report.json", "compiled_graph.json", "compiled_objects.json",
+        "validation.json", "report.html", "stage_program.json",
+        "perception_program.json", "policy.py", "compile_report.json",
+        "compiled_graph.json", "compiled_objects.json",
     ))
     graph = artifacts.read_json(run_dir / "graph.json")
     n = propagate(graph)

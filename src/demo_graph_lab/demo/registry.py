@@ -58,8 +58,8 @@ def run(task: str, model: str | None = None, k_frames: int = 12) -> list[dict]:
     run_dir = artifacts.latest_run_dir(task)
     artifacts.invalidate_outputs(run_dir, (
         "objects.json", "graph.json", "validation.json", "report.html",
-        "stage_program.json", "policy.py", "compile_report.json",
-        "compiled_graph.json", "compiled_objects.json",
+        "stage_program.json", "perception_program.json", "policy.py",
+        "compile_report.json", "compiled_graph.json", "compiled_objects.json",
     ))
     meta = artifacts.read_json(run_dir / "meta.json")
     prompt = (artifacts.PROMPT_ROOT / "object_registry.md").read_text().split("---", 1)[1]

@@ -127,8 +127,8 @@ def run(task: str, model: str | None = None) -> list[dict]:
     artifacts.invalidate_outputs(run_dir, (
         "stages.json", "stages_proposed.json", "keyframes.json", "objects.json",
         "graph.json", "validation.json", "report.html", "stage_program.json",
-        "policy.py", "compile_report.json", "compiled_graph.json",
-        "compiled_objects.json",
+        "perception_program.json", "policy.py", "compile_report.json",
+        "compiled_graph.json", "compiled_objects.json",
     ))
     trace_path = run_dir / "trace.json"
     if trace_path.exists():

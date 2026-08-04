@@ -138,8 +138,8 @@ def run(task: str, k: int = 5, model: str | None = None,
     run_dir = artifacts.latest_run_dir(task)
     artifacts.invalidate_outputs(run_dir, (
         "graph.json", "validation.json", "report.html", "stage_program.json",
-        "policy.py", "compile_report.json", "compiled_graph.json",
-        "compiled_objects.json",
+        "perception_program.json", "policy.py", "compile_report.json",
+        "compiled_graph.json", "compiled_objects.json",
     ))
     meta = artifacts.read_json(run_dir / "meta.json")
     stages = artifacts.read_json(run_dir / "stages.json")

@@ -1,4 +1,9 @@
-"""Ask the backend for a StageProgram, then compile and dry-run it locally."""
+"""Ask the backend for a StageProgram, then compile and dry-run it locally.
+
+StageProgram 发布之后再追加第二段编译:PerceptionProgram 决定被接线的几何 hole 由
+哪条感知链发布。它是纯增量产物——未发布时那些 hole 继续走 graph resolver 老路,
+policy.py 的发布和 CLI 退出状态都不受这一段影响。
+"""
 
 from __future__ import annotations
 
@@ -8,8 +13,15 @@ import json
 from pathlib import Path
 
 from ..common import artifacts
-from ..graph import validate as graph_validate
-from .program import compile_program, unwired_holes, validate_program
+from ..graph import validate as graph_validate, vocab
+from ..perception import program as perception_program
+from ..perception.fake_runtime import FakePerceptionRuntime
+from .program import (
+    compile_program,
+    unwired_holes,
+    validate_program,
+    wired_hole_contracts_by_stage,
+)
 
 
 def report_ready(report: dict) -> bool:
@@ -124,17 +136,137 @@ def dry_run(code: str, graph: dict) -> dict:
             "calls": rt.calls}
 
 
+def perception_targets(program: dict, graph: dict) -> dict[int, tuple[dict, ...]]:
+    """Per stage, the wired holes a PerceptionProgram is allowed to publish.
+
+    覆盖目标不是 graph 里的全部几何 hole,而是 StageProgram 真正接线的那些:没被
+    接线的 hole 这一轮不需要值。``grasp_candidate`` 走候选机制、``motion_derived``
+    来自执行状态,都不在感知 DSL 的产出集合里。
+    """
+    targets: dict[int, tuple[dict, ...]] = {}
+    for index, contracts in wired_hole_contracts_by_stage(program, graph).items():
+        selected = tuple(
+            hole for hole in contracts
+            if hole.get("type") in vocab.GEOMETRIC_HOLE_TYPES
+            and hole.get("resolver") in perception_program.PROVIDABLE_RESOLVERS
+        )
+        if selected:
+            targets[index] = selected
+    return targets
+
+
+def _render_operator_table() -> str:
+    """Render the operator closed set from code; the prompt keeps no second copy."""
+    lines = ["| operator | consumes | produces | published fields |", "|---|---|---|---|"]
+    for name, spec in perception_program.OPERATORS.items():
+        fields = ", ".join(
+            f"`{field}`: {hole_type}"
+            for field, hole_type in spec["fields"].items()
+        ) or "—"
+        lines.append(
+            f"| `{name}` | `{spec['consumes']}` | `{spec['produces']}` | {fields} |")
+    return "\n".join(lines)
+
+
+def _render_resolver_bindings() -> str:
+    """Render the resolver→operator bindings from the validator's own table."""
+    lines = ["| hole resolver | may only be published by |", "|---|---|"]
+    for resolver, (operator, field) in sorted(
+            perception_program.RESOLVER_BINDINGS.items()):
+        lines.append(f"| `{resolver}` | `{operator}` field `{field}` |")
+    return "\n".join(lines)
+
+
+def compile_perception(
+    run_dir: Path,
+    task: str,
+    graph: dict,
+    program: dict,
+    model: str | None = None,
+) -> dict:
+    """Ask the backend for a PerceptionProgram; publish only after validate + dry-run.
+
+    单轮无修复回路,与 StageProgram 编译一致。任何一步失败都只写 violations,不写
+    ``perception_program.json``;raw reply 与校验结论照常留在 ``model_calls/``。
+    """
+    from ..common import llm
+
+    section: dict = {"status": "skipped", "ref": None, "violations": [], "coverage": []}
+    targets = perception_targets(program, graph)
+    if not targets:
+        # 全是 grasp/motion 类 hole:没有可发布目标就不调用 backend。
+        return section
+
+    graph_task = graph.get("task")
+    document = {
+        "schema": perception_program.SCHEMA,
+        "task": graph_task if isinstance(graph_task, str) else task,
+        "stages": [
+            {"stage": index, "holes": list(targets[index])}
+            for index in sorted(targets)
+        ],
+    }
+    prompt = (artifacts.PROMPT_ROOT / "compile_perception.md").read_text(
+        ).split("---", 1)[1]
+    msg = (prompt
+           + "\n\n## OPERATOR TABLE\n" + _render_operator_table()
+           + "\n\n## RESOLVER BINDINGS\n" + _render_resolver_bindings()
+           + "\n\n## TARGET HOLES\n```json\n"
+           + json.dumps(document, ensure_ascii=False, indent=1) + "\n```")
+    tag = "compile_perception"
+    messages = [{"role": "user", "content": msg}]
+    input_refs = ["graph.json", "stage_program.json",
+                  "package:perception/program.py",
+                  "package:prompts/compile_perception.md"]
+    request = llm.request_record(
+        messages, tag=tag, role="perception_program", model=llm.resolve_model(model),
+        max_tokens=4000, temperature=0.1, input_refs=input_refs)
+    out = llm.cached_response(run_dir, tag, request)
+    if out is None:
+        out = llm.chat(
+            messages, run_dir, tag=tag, model=model, max_tokens=4000,
+            temperature=0.1, role="perception_program", input_refs=input_refs)
+
+    section["status"] = "failed"
+    try:
+        doc = llm.parse_json_block(out)
+    except ValueError as error:
+        llm.record_result(run_dir, tag, parse_error=str(error))
+        section["violations"] = [str(error)]
+        return section
+    violations = perception_program.validate_perception_program(doc, graph)
+    llm.record_result(run_dir, tag, parsed=doc, validation_errors=violations)
+    if violations:
+        section["violations"] = violations
+        return section
+    try:
+        FakePerceptionRuntime(graph).run(doc)
+    except Exception as error:
+        section["violations"] = [f"dry-run failed: {type(error).__name__}: {error}"]
+        return section
+
+    artifacts.write_json(run_dir / "perception_program.json", doc)
+    section.update(
+        status="published",
+        ref="perception_program.json",
+        coverage=perception_program.coverage_by_stage(doc, graph),
+    )
+    return section
+
+
 def run(task: str, model: str | None = None) -> Path:
     from ..common import llm
     from . import api
     run_dir = artifacts.latest_run_dir(task)
     policy_path = run_dir / "policy.py"
     program_path = run_dir / "stage_program.json"
+    perception_path = run_dir / "perception_program.json"
     graph_snapshot_path = run_dir / "compiled_graph.json"
     objects_snapshot_path = run_dir / "compiled_objects.json"
     compile_report_path = run_dir / "compile_report.json"
     policy_path.unlink(missing_ok=True)
     program_path.unlink(missing_ok=True)
+    perception_path.unlink(missing_ok=True)
     graph_snapshot_path.unlink(missing_ok=True)
     objects_snapshot_path.unlink(missing_ok=True)
     compile_report_path.unlink(missing_ok=True)
@@ -238,6 +370,10 @@ def run(task: str, model: str | None = None) -> Path:
                         report["publish_error"] = f"{type(error).__name__}: {error}"
                 else:
                     report["dryrun_error"] = "normal or retry-injection dry-run failed"
+    # 感知编译只在 StageProgram 已经发布之后进行:覆盖目标来自它的 hole wiring。
+    if report_ready(report):
+        report["perception_program"] = compile_perception(
+            run_dir, task, graph, program, model)
     artifacts.write_json(run_dir / "compile_report.json", report)
     dr = report.get("dryrun", {})
     violations = report["program_violations"] or report["static_violations"]
@@ -251,5 +387,6 @@ def run(task: str, model: str | None = None) -> Path:
               f"dryrun normal={dr.get('normal', {}).get('ok')} "
               f"retry={dr.get('retry_injection', {}).get('ok')} "
               f"holes={len(dr.get('holes_solved', []))} "
-              f"gates={dr.get('gates_checked')}")
+              f"gates={dr.get('gates_checked')} "
+              f"perception={report['perception_program']['status']}")
     return run_dir / "compile_report.json"
