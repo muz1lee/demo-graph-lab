@@ -17,6 +17,7 @@ from demo_graph_lab.execution.object_record import (
     segment_record,
 )
 from demo_graph_lab.execution.planning_record import plan_record
+from demo_graph_lab.graph import vocab
 
 
 _ANCHOR = {
@@ -50,6 +51,7 @@ def _record(
         "principal_axis": "axis_3d",
         "part_center": "point_3d",
         "part_axis": "axis_3d",
+        "motion_derived": "pose_se3",
     }[resolver]
     _write_json(graph_path, {
         "task": "insert_tubes",
@@ -673,6 +675,19 @@ def test_predict_rejects_non_grasp_resolver_before_transport(tmp_path) -> None:
     assert manifest["status"] == "OBJECT_CLOUD_RECORDED"
     assert manifest["last_error"]["step"] == "predict_object"
     assert FakeSources.calls == calls_before
+
+
+def test_perception_record_refuses_motion_derived_geometry(tmp_path) -> None:
+    # record 层不再自带影子 resolver 集合,而是从 graph 词表减去 motion_derived
+    # 得到感知闭集:它在 graph 里合法,但几何来自执行状态,感知路径必须拒绝,
+    # 不能因为共用词表而被静默放行。
+    assert vocab.MOTION_DERIVED_RESOLVER in vocab.HOLE_RESOLVER_TYPES
+    assert set(vocab.PERCEPTION_RESOLVERS) == set(vocab.HOLE_RESOLVER_TYPES) - {
+        vocab.MOTION_DERIVED_RESOLVER
+    }
+
+    with pytest.raises(ValueError, match="derived from execution state"):
+        _record(tmp_path, resolver="motion_derived", hole_name="tube_pose")
 
 
 def test_part_center_records_conservative_opening_geometry(tmp_path) -> None:

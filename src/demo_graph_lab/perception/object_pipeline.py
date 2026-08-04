@@ -18,6 +18,7 @@ import re
 from types import MappingProxyType
 from typing import Any
 
+from ..graph import vocab
 from .operators import OperatorError, fit_plane, intersect_ray_plane
 
 
@@ -120,10 +121,13 @@ def _graph_object(value: Any, path: str = "graph_object") -> dict[str, Any]:
     selection = record["selection"]
     if selection is not None:
         selection = _required_string(selection, f"{path}.selection")
-    if part == "hole" and instance is None and selection is None:
-        raise ValueError(
-            f"{path}.instance or {path}.selection is required for part='hole'"
-        )
+    anchor_errors = vocab.anchor_rule_errors(
+        part,
+        has_instance=instance is not None,
+        has_selection=selection is not None,
+    )
+    if anchor_errors:
+        raise ValueError(f"{path}.{anchor_errors[0]}")
     return {
         "object_id": object_id,
         "part": part,

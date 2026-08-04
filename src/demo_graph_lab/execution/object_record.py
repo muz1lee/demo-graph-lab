@@ -15,6 +15,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from ..graph import vocab
 from ..perception.adapters import (
     observation_from_record,
     validate_graspnet_response_record,
@@ -112,8 +113,14 @@ def _plan_context(root: Path) -> tuple[dict, dict, Mapping[str, Any]]:
     )
     hole_name = _required_string(request["hole_name"], "perception_request.hole_name")
     resolver = _required_string(request["resolver"], "perception_request.resolver")
-    supported = {"grasp_candidate", "principal_axis", "part_center", "part_axis"}
-    if resolver not in supported:
+    # 闭集来自 graph/vocab.py,但感知路径比它窄一格:motion_derived 在词表里
+    # 合法,在这里必须显式拒绝,而不是因为共用词表而被静默放行。
+    if resolver == vocab.MOTION_DERIVED_RESOLVER:
+        raise ValueError(
+            f"perception resolver {resolver!r} is derived from execution state, "
+            "not perception"
+        )
+    if resolver not in vocab.PERCEPTION_RESOLVERS:
         raise ValueError(f"unsupported perception resolver: {resolver!r}")
     prompt = _required_string(request["prompt"], "perception_request.prompt")
     anchor = _exact_object(
@@ -123,12 +130,14 @@ def _plan_context(root: Path) -> tuple[dict, dict, Mapping[str, Any]]:
     part = _required_string(anchor["part"], "anchor.part")
     instance = _optional_string(anchor["instance"], "anchor.instance")
     selection = _optional_string(anchor["selection"], "anchor.selection")
-    if part == "whole" and (instance is not None or selection is not None):
-        raise ValueError("whole-object anchor cannot contain instance or selection")
-    if part == "hole" and instance is None and selection is None:
-        raise ValueError("hole anchor requires instance or selection")
-    if resolver in {"part_center", "part_axis"} and part != "hole":
-        raise ValueError(f"resolver {resolver!r} requires a hole anchor")
+    anchor_errors = vocab.anchor_rule_errors(
+        part,
+        has_instance=instance is not None,
+        has_selection=selection is not None,
+        resolver=resolver,
+    )
+    if anchor_errors:
+        raise ValueError(anchor_errors[0])
 
     if dict(request) != expected_request:
         raise ValueError("plan.perception_request no longer matches graph/objects")

@@ -208,41 +208,15 @@ def _geometry_contract_errors(
             value = anchor.get(field)
             if field in anchor and (not isinstance(value, str) or not value):
                 errors.append(f"{prefix}.anchor.{field} must be a non-empty string")
-        qualifier_count = sum(
-            field in anchor for field in ("instance", "selection")
+        errors.extend(
+            f"{prefix}.{message}"
+            for message in vocab.anchor_rule_errors(
+                part,
+                has_instance="instance" in anchor,
+                has_selection="selection" in anchor,
+                resolver=hole.get("resolver"),
+            )
         )
-        if "instance" in anchor and "selection" in anchor:
-            errors.append(
-                f"{prefix}.anchor cannot contain both instance and selection"
-            )
-        if part == "whole" and qualifier_count:
-            errors.append(
-                f"{prefix}.whole-object anchor cannot contain instance or selection"
-            )
-        if part == "hole" and qualifier_count != 1:
-            errors.append(
-                f"{prefix}.hole anchor requires exactly one of instance or selection"
-            )
-        if hole.get("resolver") == "grasp_candidate" and (
-            part != "whole" or qualifier_count
-        ):
-            errors.append(
-                f"{prefix}.grasp_candidate must use a whole-object anchor; "
-                "grasp-region preference belongs in constraints"
-            )
-        if isinstance(hole.get("resolver"), str) and hole.get("resolver") in {
-            "part_center", "part_axis",
-        } and part != "hole":
-            errors.append(
-                f"{prefix}.{hole.get('resolver')} must use a hole anchor"
-            )
-        if hole.get("resolver") == "principal_axis" and (
-            part != "whole" or qualifier_count
-        ):
-            errors.append(
-                f"{prefix}.principal_axis must use a whole-object anchor; "
-                "use part_axis for a physical part"
-            )
 
     if execution_frame is not None and hole.get("frame") != execution_frame:
         errors.append(
