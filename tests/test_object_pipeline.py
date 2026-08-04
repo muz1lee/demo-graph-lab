@@ -311,6 +311,21 @@ def test_opening_geometry_is_recomputed_from_rgbd_roi_and_support_plane() -> Non
     assert record["metrics"]["depth_contrast_m"] > 0.04
 
 
+def test_opening_geometry_accepts_a_protruding_opening_and_keeps_the_sign() -> None:
+    np = _np()
+    # 同一个开口,但 ROI 比周围支撑面更近(凸起而不是凹陷)。深度对比门只看
+    # 幅度,所以它同样是 PASS;metrics 里的符号必须保留,上层要靠它判凹凸。
+    rgb, depth, roi, intrinsics = _hole_scene(depth_contrast=-0.05)
+
+    result = _estimate(rgb, depth, roi, intrinsics)
+
+    assert result.status is GeometryStatus.PASS
+    assert result.reason == "estimated_from_rgbd_roi_and_local_support_plane"
+    np.testing.assert_allclose(result.center, [0.02, 0.0, 1.0], atol=1e-6)
+    np.testing.assert_allclose(result.axis, [0.0, 0.0, 1.0], atol=1e-6)
+    assert result.to_record()["metrics"]["depth_contrast_m"] < -0.04
+
+
 def test_opening_geometry_fails_closed_without_depth_evidence() -> None:
     rgb, depth, roi, intrinsics = _hole_scene(depth_contrast=0.0)
 

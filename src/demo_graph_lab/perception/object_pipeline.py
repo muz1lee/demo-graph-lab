@@ -692,7 +692,10 @@ def estimate_planar_opening_geometry(
         "depth_contrast_m": depth_contrast,
         "rgb_contrast": rgb_contrast,
     })
-    if depth_contrast < min_depth_contrast_m:
+    # The gate only asks that the ROI stand off its surroundings in depth; a
+    # recessed opening and a protruding one are both acceptable evidence.  The
+    # signed value stays in metrics because the sign is what tells them apart.
+    if abs(depth_contrast) < min_depth_contrast_m:
         return unknown("insufficient_depth_contrast")
     if rgb_contrast < min_rgb_contrast:
         return unknown("insufficient_rgb_contrast")
