@@ -110,6 +110,7 @@ dgl-oracle episode \
 
 详细内容：
 
+- [docs/OFFLINE_WORKFLOW.md](docs/OFFLINE_WORKFLOW.md)：离线处理阶段与每一步实验产物；
 - [docs/PROPOSAL.md](docs/PROPOSAL.md)：研究问题与实验方法；
 - [docs/API.md](docs/API.md)：VLM、高层 runtime、可信 gate 和底层控制的边界；
 - [docs/TODO.md](docs/TODO.md)：当前待办；

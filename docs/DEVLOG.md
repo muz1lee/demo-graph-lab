@@ -13,6 +13,7 @@
 
 ### 完成的代码
 
+- 新增 `docs/OFFLINE_WORKFLOW.md`，集中说明从视频导入到 policy 编译的阶段、产物和 backend 调用记录；
 - 四类离线 backend call 统一记录脱敏 request、input refs、raw、parsed、validator、实际模型、耗时和成本；
 - stage split 全视频均匀采样；registry、constraint sample、hole 和 object ref 严格校验；
 - 同一 run 在脱敏 request 完全相同时复用已完成 raw reply；prompt、model 或参数变化会重新调用；

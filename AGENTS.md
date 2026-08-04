@@ -5,10 +5,11 @@
 开始工作前阅读：
 
 1. `README.md`：代码架构和入口；
-2. `docs/PROPOSAL.md`：研究假设；
-3. `docs/API.md`：VLM、高层动作和底层控制边界；
-4. `docs/TODO.md` 与 `docs/MILESTONES.md`：当前工作顺序；
-5. `docs/DEVLOG.md`：最近一次开发的范围、验证和停点。
+2. `docs/OFFLINE_WORKFLOW.md`：离线阶段和实验产物；
+3. `docs/PROPOSAL.md`：研究假设；
+4. `docs/API.md`：VLM、高层动作和底层控制边界；
+5. `docs/TODO.md` 与 `docs/MILESTONES.md`：当前工作顺序；
+6. `docs/DEVLOG.md`：最近一次开发的范围、验证和停点。
 
 文档与代码冲突时，以可运行代码和测试为准，并同步修正文档。
 
@@ -81,6 +82,7 @@ PYTHONPATH=src python3 -m demo_graph_lab.execution.cli --help
 只维护以下说明：
 
 - `README.md` 写代码架构和运行入口；
+- `docs/OFFLINE_WORKFLOW.md` 写离线处理阶段和产物契约；
 - `docs/PROPOSAL.md` 写研究方案；
 - `docs/API.md` 写接口和信息边界；
 - `docs/TODO.md` 写具体待办；

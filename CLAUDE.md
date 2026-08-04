@@ -27,5 +27,6 @@
 - 选择最小、最直接的实现，避免为了“以后可能用”增加层级。
 - 改 API 时同步改 `docs/API.md` 和相关测试。
 - 改架构或命令时同步改 `README.md`；具体后续工作写进 `docs/TODO.md` 或 `docs/MILESTONES.md`。
+- 改离线阶段或产物格式时同步改 `docs/OFFLINE_WORKFLOW.md`。
 - 每轮开发只在 `docs/DEVLOG.md` 留一条简短记录，不新增平行状态文档。
 - 完成后至少运行 `python3 -m pytest -q`，并用 `PYTHONPATH=src` 检查两个 CLI 的 `--help`。
