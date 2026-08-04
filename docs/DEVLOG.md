@@ -2,6 +2,15 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-04：record 与 selection 两处 fail-open 收口
+
+- `project` 的 `object/result.json` 不再硬编码 `status="ACCEPTED"`：请求了几何但 `hole_geometry_status` 不是 `PASS` 时写 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何才写 `ACCEPTED`；`hole_geometry_status` 字段本身不变。record 确实发生，所以 manifest 的 `OBJECT_CLOUD_RECORDED` 与 CLI 退出码不动，改的只是这个词；`docs/API.md` 同步该派生规则；
+- `binding.solve_pose_se3` 对词表外 region 从静默退化成质心改为 `ValueError`，与 `regions.region_preference` 同规同错误串；`region` 缺省(非抓取语义)仍取质心，`rim/handle` 仍标 `uncheckable`；`regions.py` 中「与 binding 的 unknown_type 同规」这句与实现不符的注释一并改正；
+- 测试：UNKNOWN 几何路径新增 `status == "GEOMETRY_UNKNOWN"` 断言，新增 record 级几何 `PASS → ACCEPTED` 用例（在 sensor 深度/亮度上造出真正的开口对比度），主链路补「未请求几何 → ACCEPTED」断言；binding 侧补词表外 region 抛错与无 region 仍走质心两个用例；
+- 本地 `379 passed`（基线 376 + 3 个新用例），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：只收口了这两处已核实的 fail-open，没有做任何相邻重构。`object/result.json` 的 `status` 目前仍无下游消费者（全仓只有测试读它），真正的 gate 语义仍在 `evaluation/`；下游接入 candidate 时要显式决定 `GEOMETRY_UNKNOWN` 是否阻断。
+
 ## 2026-08-04：单 anchor object perception chain
 
 - graph 几何 hole 增加闭集 resolver 与 object/part anchor；reviewed `insert_tubes` fixture 固定 `tube_mid/right/left → center/right/left hole`，抓取和 tube axis 复用 whole-object anchor，upper-body 只保留为排序约束；

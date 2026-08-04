@@ -365,15 +365,19 @@ def solve_pose_se3(hole, stage, constraints, rt):
 
     lo, hi = _aabb_bounds(ent)
     x, y = ent["pos"][0], ent["pos"][1]
-    # 竖直归一化区带 → 世界 z。region 缺省(非抓取语义)取质心高度。
+    # 竖直归一化区带 → 世界 z。region 缺省(非抓取语义)取质心高度;
+    # 词表外 region 不静默退化成质心(与 regions.region_preference 同规)。
     if region in _REGION_BAND_CENTER:
         s = _REGION_BAND_CENTER[region]
         z = lo[2] + s * (hi[2] - lo[2])
         region_status = "band"
     elif region in _REGION_UNCHECKABLE:
         z, region_status = ent["pos"][2], "uncheckable"
-    else:
+    elif region is None:
         z, region_status = ent["pos"][2], "centroid"
+    else:
+        raise ValueError(
+            f"未知 region {region!r};合法(vocab.GRASP_REGIONS):{vocab.GRASP_REGIONS}")
 
     xyz = [x, y, z]
     return {"kind": "pose", "hole": hole.get("name"), "xyz": xyz, "quat": None,

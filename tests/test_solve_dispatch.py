@@ -132,6 +132,43 @@ def test_axis_without_observed_pose_fails_instead_of_guessing_vertical():
     assert error.value.reason == "axis_unobserved"
 
 
+def _stage_with_region(region_label):
+    return {
+        "index": 0, "name": "grasp",
+        "stage_objects": {"manipulated": "tube_left", "target": "rack"},
+        "constraints": [
+            {"name": "region_grasp",
+             "args": {"obj": "tube_left", "region": region_label}},
+        ],
+    }
+
+
+def test_unknown_region_fails_closed_instead_of_silently_using_centroid():
+    """词表外 region 不静默退化成质心(与 regions.region_preference 同规抛 ValueError)。"""
+    stage = _stage_with_region("nonexistent_region")
+    hole = {"name": "grasp_pose", "type": "pose_se3"}
+
+    with pytest.raises(ValueError, match="未知 region"):
+        binding.solve_hole(hole, stage, stage["constraints"], _StubRuntime())
+
+
+def test_pose_without_region_constraint_still_uses_centroid():
+    """没有 region 语义(非抓取洞)时仍取质心;fail-closed 只针对词表外标签。"""
+    stage = {
+        "index": 0, "name": "place",
+        "stage_objects": {"manipulated": "tube_left", "target": "rack"},
+        "constraints": [
+            {"name": "center_align",
+             "args": {"obj_a": "tube_left", "obj_b": "rack"}},
+        ],
+    }
+    hole = {"name": "place_pose", "type": "pose_se3"}
+
+    out = binding.solve_hole(hole, stage, stage["constraints"], _StubRuntime())
+
+    assert out["region"] is None and out["region_status"] == "centroid"
+
+
 # --------------------------------------------------------------------------
 # fixture 中包含名字不能可靠表达类型的洞。派发必须服从声明的 type:
 # pose_se3→pose,axis_3d→axis,不能从名字猜测求解器。

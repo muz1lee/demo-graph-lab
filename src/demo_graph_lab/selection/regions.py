@@ -92,7 +92,7 @@ def region_preference(region):
     """返回 region 的偏好函数 f(s)->score;rim/handle 返回 UNCHECKABLE 哨兵(字符串)。
 
     未知 region(不在 vocab.GRASP_REGIONS)→ ValueError:偏好函数是封闭词表,
-    不为词表外标签兜底(与 binding 的 unknown_type 抛异常同规)。
+    不为词表外标签兜底(与 binding.solve_pose_se3 对词表外 region 抛 ValueError 同规)。
     """
     if region in _REGION_PREF:
         return _REGION_PREF[region]
