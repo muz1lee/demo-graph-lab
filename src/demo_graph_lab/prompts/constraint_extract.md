@@ -97,6 +97,14 @@ Extract THREE things for this stage, as strict JSON:
    - the resolver matches the type per the closed table above;
    - no key outside {name, type, solver_hint, frame, purpose, resolver, anchor}.
 
+   OUTPUT ECONOMY — your reply is hard-capped in length and a reply that gets cut off
+   mid-JSON is discarded in full, so never spend that budget on prose:
+   - omit the optional `notes` field entirely; nothing downstream reads it;
+   - keep every `solver_hint` to a short phrase of a few words, never a sentence;
+   - emit the JSON object only, with no commentary before or after it;
+   - if a stage is rich, drop the least load-bearing constraint rather than let the
+     JSON be truncated mid-structure — an incomplete reply scores zero.
+
 HARD RULES:
 - NEVER output numeric values for positions, offsets, sizes, angles-as-targets, or coordinates.
   Every metric quantity is a hole. If you are tempted to write a number, it is a hole.
