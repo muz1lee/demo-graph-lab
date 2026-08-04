@@ -25,9 +25,13 @@ Extract THREE things for this stage, as strict JSON:
 
    Every GEOMETRIC hole (`pose_se3`, `axis_3d`, `point_3d`) must also contain:
    `"resolver": <closed resolver>` and
-   `"anchor": {"object_id": <registry id>, "part": <snake_case part>,
+   `"anchor": {"object_id": <registry id>, "part": "whole" | "hole",
                 "instance": <optional non-empty string>,
                 "selection": <optional non-empty string>}`.
+   `anchor.part` is a CLOSED two-value enum, NOT a part name: write exactly `"whole"`
+   (the object as a whole) or `"hole"` (a cavity/opening on it). Never invent values
+   such as `"whole_object"`, `"top"`, `"body"`, or `"upper_body"`; a grasp region is
+   expressed by the `region_grasp` constraint, never by `anchor.part`.
    Resolver/type compatibility is closed:
    - `grasp_candidate` -> `pose_se3`
    - `principal_axis` -> `axis_3d`
@@ -44,7 +48,54 @@ Extract THREE things for this stage, as strict JSON:
 
    All geometric holes publish in `"frame": "robot_base"`. A camera/source frame and
    its transform lineage belong in perception artifacts, not in the graph. Scalar and
-   runtime-condition holes do not use `resolver` or `anchor`.
+   runtime-condition holes do not use `resolver` or `anchor`, but `frame` is REQUIRED
+   on EVERY hole with no exception, including `scalar` and `runtime_condition`: use
+   `"frame": "robot_base"` for a scalar length and `"frame": "runtime"` for a
+   runtime_condition. A hole that omits `frame` is rejected outright.
+
+   LEGAL HOLE SHAPES — copy these shapes exactly; each one validates as written:
+   ```json
+   {"name": "tube_left_grasp_pose", "type": "pose_se3", "frame": "robot_base",
+    "solver_hint": "antipodal grasp on the manipulated tube",
+    "resolver": "grasp_candidate",
+    "anchor": {"object_id": "tube_left", "part": "whole"}}
+
+   {"name": "tube_left_long_axis", "type": "axis_3d", "frame": "robot_base",
+    "solver_hint": "principal axis of the manipulated tube",
+    "resolver": "principal_axis",
+    "anchor": {"object_id": "tube_left", "part": "whole"}}
+
+   {"name": "rack_target_slot_center", "type": "point_3d", "frame": "robot_base",
+    "solver_hint": "center of the chosen rack opening",
+    "resolver": "part_center",
+    "anchor": {"object_id": "rack", "part": "hole", "selection": "empty_slot"}}
+
+   {"name": "rack_target_slot_axis", "type": "axis_3d", "frame": "robot_base",
+    "solver_hint": "insertion axis of the chosen rack opening",
+    "resolver": "part_axis",
+    "anchor": {"object_id": "rack", "part": "hole", "selection": "empty_slot"}}
+
+   {"name": "tube_left_release_pose", "type": "pose_se3", "frame": "robot_base",
+    "solver_hint": "pose reached at the end of the commanded motion",
+    "resolver": "motion_derived",
+    "anchor": {"object_id": "tube_left", "part": "whole"}}
+
+   {"name": "tube_left_lift_height", "type": "scalar", "frame": "robot_base",
+    "solver_hint": "vertical clearance above the rack rim before transport"}
+
+   {"name": "insert_lower_stop", "type": "runtime_condition", "frame": "runtime",
+    "solver_hint": "contact or motion plateau while lowering"}
+   ```
+
+   BEFORE YOU OUTPUT, re-read every entry of your `holes` list and confirm:
+   - all four of `name`, `type`, `solver_hint`, `frame` are present;
+   - `anchor.part` is exactly `"whole"` or `"hole"`;
+   - `grasp_candidate` and `principal_axis`: `part` is `"whole"` AND neither
+     `instance` nor `selection` is present;
+   - `part_center` and `part_axis`: `part` is `"hole"` AND exactly one of `instance`
+     or `selection` is present;
+   - the resolver matches the type per the closed table above;
+   - no key outside {name, type, solver_hint, frame, purpose, resolver, anchor}.
 
 HARD RULES:
 - NEVER output numeric values for positions, offsets, sizes, angles-as-targets, or coordinates.
