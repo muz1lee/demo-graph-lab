@@ -5,7 +5,7 @@
 ## 当前顺序
 
 1. 在正确的 `insert_tubes` scene 上运行逐对象记录链，人工复核三根 tube 的 Qwen box、SAM3 mask，以及 center/right/left hole geometry 的 `PASS/UNKNOWN` 原因。
-2. 把当前单 anchor record 改成“一次 capture、多个 anchor 子任务”：tube cloud 复用给 grasp/axis，同一 hole geometry 复用给 center/axis，并在同一 observation 下组装 stage required holes；增加人工或独立 identity 接受记录，`MODEL_PROPOSED` 不能直接升级为 candidate。
+2. “一次 capture、多个 anchor 子任务”已由 `planning-record --step programs` 提供（每个感知程序一个 anchor，一条 `fit_opening` 链同时发布 center/axis）。剩下的部分是：把 grasp 链的 tube cloud 复用给同一 anchor 的 axis；在同一 observation 下组装 stage required holes；增加人工或独立 identity 接受记录，`MODEL_PROPOSED` 不能直接升级为 candidate。
 3. 记录 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 标定；live graph hole 要求 `robot_base`，未有完整变换前不生成 candidate。
 4. 从受检 object extent 和 grasp rotation 派生排序特征，再接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
 5. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
@@ -28,7 +28,7 @@
 - 在正确 scene 上验证 Qwen 单框、SAM3 二值 mask、mask-first cloud、pixel lineage 和 assignment 的完整 artifact 链；错误或歧义样例必须 fail-closed。
 - 给 `height_fraction` 与重力相对的 `approach_tilt_deg` 写独立、可检查的派生逻辑；禁止把 camera-frame 裸 `approach_dir` 直接用于 cone 排序。
 - 采集真实 point-cloud manifest 与 K1 grasp-center→runtime-EEF/TCP 标定 artifact；变换值、frame 约定和独立 evidence ref 必须一起保存，只有矩阵转 quaternion 不算完成 pose 语义转换。
-- 让同一 rack-hole anchor 的 `part_center` 与 `part_axis` 复用一次受检几何记录，避免重复模型调用；先保持显式分步，不增加一键入口。
+- `programs` 路径上同一 anchor 的 `part_center` 与 `part_axis` 已由一条 `fit_opening` 链一次发布；单 anchor `ground/segment/project` 链仍是每个 hole 一次模型调用，是否收敛到同一实现留待多 anchor 组装时一并裁决。
 - 实现完整 frame transform，包括旋转；不允许只做平移或把 simulator world pose 混入。
 - 对 live adapter 做最终依赖审查，确认没有 `/state`、官方 probe 或 control side effect；记录同步 render 这一只读传感副作用。
 - 把失败重试改成 append-only attempt；成功前不发布 canonical assignment，失败 payload 必须进入 manifest，不能由残留目录永久锁死同一冻结 observation。

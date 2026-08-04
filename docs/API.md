@@ -79,9 +79,9 @@ synthetic fixture candidates
 
 `StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
 
-`planning-record` 提供六个显式步骤：`plan / capture / ground / segment / project / predict`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment` 分别要求 `--allow-model-read`；`project` 只做本地计算。没有一键入口。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。`project` 的 `object/result.json` 中 `status` 由几何证据派生：请求了几何但其 `opening_geometry_status` 不是 `PASS` 时为 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何时才是 `ACCEPTED`；record 本身确实发生，因此 manifest 的 `OBJECT_CLOUD_RECORDED` 和退出码不受影响。
+`planning-record` 提供七个显式步骤：`plan / capture / ground / segment / project / predict / programs`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment/programs` 分别要求 `--allow-model-read`（`programs` 会代表每个感知程序调用 Qwen 与 SAM3，属模型读）；`project` 只做本地计算。没有一键入口。`programs` 另外要求 `--perception-program` 指向已发布的 `perception_program.json`，把 manifest 从 `OBSERVATION_RECORDED` 推进到 `PROGRAMS_RECORDED`；它和 `ground/segment/project/predict` 互斥地消费同一次 capture，任何一条路径推进了状态，另一条就不再接受这个 record 目录。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。`project` 的 `object/result.json` 中 `status` 由几何证据派生：请求了几何但其 `opening_geometry_status` 不是 `PASS` 时为 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何时才是 `ACCEPTED`；record 本身确实发生，因此 manifest 的 `OBJECT_CLOUD_RECORDED` 和退出码不受影响。
 
-V1 record 一次只处理一个 graph anchor。它不能在同一个 observation 下同时组装 tube grasp/axis 与 opening center/axis，因此还没有接到 `PlanningOnlyRuntime.solve()`。后续结构必须以 capture 为父 observation、以 anchor 为子任务，并让同一 tube cloud 和同一 opening geometry 分别复用；在此之前只报告 component artifact，不报告完整 stage candidate。
+`ground/segment/project/predict` 这条 V1 链一次只处理一个 graph anchor，它不能在同一个 observation 下同时组装 tube grasp/axis 与 opening center/axis。`programs` 是那个「以 capture 为父 observation、以 anchor 为子任务」的结构：同一次冻结 capture 下按 `PerceptionProgram` 逐程序执行，每个程序有自己的 anchor、自己的 Qwen box、SAM3 mask 和几何产物，互不共享中间量。它仍然没有接到 `PlanningOnlyRuntime.solve()`——发布的值停在 optical frame，没有 identity 接受，也没有 candidate normalization；在这三件事完成之前只报告 per-hole component artifact，不报告完整 stage candidate。
 
 真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。可信代码先在 mask 上筛 depth，再同步生成 `Nx3` object cloud 与 `Nx2 (row,col)` lineage；`object_assignment.json` 记录 observation、被请求的 graph anchor、frame、calibration 和 Qwen/SAM3 evidence，但 identity 状态固定为 `MODEL_PROPOSED`。opening center/axis 由局部 RGB-D 对比与开口周围 ring 的局部支撑面重新计算，证据不足返回 `UNKNOWN`，不采用模型 pose。GraspNet 只消费 object cloud，raw detector ID 原值保留；仓库仍不发布 GraspNet→graph candidate converter。之后必须补 identity 接受、lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 变换。
 
@@ -131,8 +131,8 @@ graph 为未来的可信 resolver 层固定以下映射，生成 policy 不直�
 | Graph resolver | 可信层数据路径 | 当前状态 |
 |---|---|---|
 | `grasp_candidate` | Qwen box → SAM3 mask → object cloud → GraspNet | raw proposal 已接，candidate conversion 未接 |
-| `principal_axis` | mask-first object cloud → local PCA | record artifact 已接，robot-base transform 未接 |
-| `part_center` / `part_axis` | opening ROI + local RGB-D contrast + support-plane fit | `PASS/UNKNOWN` artifact 已接，robot-base transform 未接 |
+| `principal_axis` | mask-first object cloud → local PCA | record artifact 与 `programs` 执行器已接，robot-base transform 未接 |
+| `part_center` / `part_axis` | opening ROI + local RGB-D contrast + support-plane fit | `PASS/UNKNOWN` artifact 与 `programs` 执行器已接，robot-base transform 未接 |
 | `motion_derived` | 当前 EEF、持握状态和受检运动结果 | 未实现；不能退回视觉模型猜测 |
 
 表中前三行的数据路径现在有了显式契约，见「6. PerceptionProgram v1」。
@@ -261,7 +261,7 @@ HTTP 接受请求不代表机器人到位。控制结果必须通过关节、末
 
 ## 6. PerceptionProgram v1
 
-`PerceptionProgram` 是与 `StageProgram` 平行的第二个 backend model 产物：`StageProgram` 决定动作怎么接线，`PerceptionProgram` 决定几何 hole 由哪条感知链发布。它是独立编译产物（落盘 `perception_program.json`），不是 hole 的字段，graph schema 不变。契约实现在 `src/demo_graph_lab/perception/program.py`，干跑实现在 `perception/fake_runtime.py`，编译入口是 `dgl compile` 的第二段。当前只有校验器和 fake 干跑，链上的算子尚未接真实模型或几何实现，也还没有运行时消费者——已发布的 `perception_program.json` 目前只是编译产物。
+`PerceptionProgram` 是与 `StageProgram` 平行的第二个 backend model 产物：`StageProgram` 决定动作怎么接线，`PerceptionProgram` 决定几何 hole 由哪条感知链发布。它是独立编译产物（落盘 `perception_program.json`），不是 hole 的字段，graph schema 不变。契约实现在 `src/demo_graph_lab/perception/program.py`，干跑实现在 `perception/fake_runtime.py`，编译入口是 `dgl compile` 的第二段，真实执行器是 `execution/program_record.py`（`planning-record --step programs`）。
 
 ### 编译与发布门
 
@@ -294,6 +294,26 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
 | `fit_axis` | `POINTS` | `GEOMETRY` | `axis: axis_3d` | `operators.fit_principal_axis` |
 
 链必须以 `localize` 开头（根是 `ANCHOR`）、逐步类型衔接、终点必须产出 `GEOMETRY` 字段。类型表本身是无环的，所以链里不可能出现回路。
+
+### 执行
+
+`planning-record --step programs` 在一次已冻结的 capture 上逐程序执行已发布的文档，按 `(stage, 文档索引)` 顺序。算子绑定与上表逐条对应：`localize` 走 Qwen single-box client，`segment` 走 SAM3 binary-mask client，`crop_points` 走 `project_masked_depth`（经 `build_object_point_cloud`，同时产出 `MODEL_PROPOSED` assignment 与 cloud manifest），`fit_opening` 走 `estimate_planar_opening_geometry`，`fit_axis` 走 `operators.fit_principal_axis`。客户端与几何实现都是注入参数，离线测试注假实现，生产注真实 client；执行器的算子实现集合由测试钉死等于 `OPERATORS` 的闭集，契约加算子而执行器没跟上会直接失败。
+
+`localize` 的查询由与单 anchor record 相同的可信渲染器从 hole 的 graph anchor 渲染，model 依旧写不了任何文本。每个程序的 request、raw reply 和校验结果分别落在 `programs/p<stage>_<index>/{grounding,segmentation,geometry}/`，父 observation 的 JPEG 只冻结一份放在 `programs/observation_input.jpg`；token 不写入任何 artifact。
+
+每个被 `provide` 的 `(stage, hole)` 在 `program_results.json` 里得到一条 envelope：
+
+```json
+{"value": [0.0, 1.0, 0.0], "frame": "camera_head_optical",
+ "calibration_ref": "<...>/calibration/bundle.json", "object_id": "tube_mid",
+ "identity_status": "MODEL_PROPOSED", "status": "PASS",
+ "reason": "pca_dominant_axis", "failed_step": null,
+ "evidence_refs": ["<...>"], "program": "p0_0"}
+```
+
+`frame` 如实写测量所在的相机光学系。graph hole 请求的是 `robot_base`，而标定链还没建，所以下游 typed-hole 校验会因为 frame 不一致而拒绝这些值——这是设计意图，不是缺陷；把 optical 数值改标签成 `robot_base` 才是错误。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受。
+
+失败时 `status=UNKNOWN`、`value=null`，`reason` 是机器可读码（客户端拒绝如 `grounding_reference_count_not_one`，几何估不出来时直接沿用估计器自己的 reason 如 `insufficient_depth_contrast`），`failed_step` 指出链上断在哪个算子，`evidence_refs` 保留已经产出的证据。all-or-nothing 在这里是硬约束：一个程序的全部 `provides` 要么都有值，要么都是 `UNKNOWN`。一个程序失败不影响同一次 capture 下的其它程序。
 
 ### 信息边界
 

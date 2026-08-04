@@ -2,6 +2,19 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-04：PerceptionProgram 真实执行器（capture 为父、anchor 为子）
+
+- 新增 `execution/program_record.py`：`perception_program.json` 的第一个运行时消费者，也是 `docs/API.md` 预告的结构演进——一次 capture 是父 observation，每个感知程序是一个 anchor 子任务。输入是一个已 `plan + capture` 的 record 目录加一份已发布的文档，按 `(stage, 文档索引)` 顺序逐程序执行；
+- 算子接线与契约注释逐条对应：`localize → Qwen single-box client`、`segment → SAM3 binary-mask client`、`crop_points → project_masked_depth`（经 `build_object_point_cloud`，顺带拿到 `MODEL_PROPOSED` assignment 与 cloud manifest）、`fit_opening → estimate_planar_opening_geometry`、`fit_axis → operators.fit_principal_axis`。客户端走既有 `source_module` 注入手法，几何走 `GEOMETRY_IMPLEMENTATIONS` 注入；执行器的算子集合由测试钉死等于 `perception/program.py::OPERATORS`，契约加算子而执行器没跟上会直接失败；
+- `localize` 的查询由 `planning_record._perception_request` 渲染——与单 anchor record 同一个渲染器，model 依旧写不了任何查询文本、参数或数值；
+- 产物 `programs/p<stage>_<index>/{grounding,segmentation,geometry}/` 各自保存 request/raw/validated 记录，父 observation 的 JPEG 只冻结一份在 `programs/observation_input.jpg`；每个被 provide 的 `(stage, hole)` 在 `program_results.json` 里得到一条 envelope，含 `value / frame / calibration_ref / object_id / identity_status / status / reason / failed_step / evidence_refs / program`；
+- **frame 如实写 `camera_head_optical`**。graph hole 请求 `robot_base`，标定链未建，所以下游 typed-hole 校验会因 frame 不一致而拒绝这些值——这是设计意图，不是缺陷。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受；
+- 失败语义 all-or-nothing：客户端异常、grounding 非单框、mask 非法或越框、几何 `UNKNOWN` 都让该程序全部 provides 记 `UNKNOWN`，带机器可读 reason（几何直接沿用估计器自己的 reason，例如 `insufficient_depth_contrast`）、`failed_step` 与已产出的 evidence refs。一个程序失败不影响同一次 capture 下的其它程序；
+- CLI 新增 `planning-record --step programs`，与 `ground/segment` 同规要求 `--allow-model-read`，另需 `--perception-program`；manifest 推进到 `PROGRAMS_RECORDED`。没有新增任何一键端到端入口；
+- 测试：新增 `tests/test_program_record.py`（假 Qwen/SAM3 + 合成 RGB-D，手法沿用 `tests/test_object_record.py`，零网络）12 个用例，含两种链形正常路径、单步失败 all-or-nothing、几何 UNKNOWN 传播、缺授权拒绝、envelope 的 frame/identity/provenance 断言、状态推进与重跑拒绝，以及把 `insert_tubes` 的 graph + perception_program fixture 组合起来跑完 9 个程序、断言 filled 与 `coverage_by_stage` 的 covered 逐项一致的表达力用例。本地 `446 passed`（基线 434 + 12），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：`programs` 只把值算出来并如实标注，**没有接 `PlanningOnlyRuntime.solve()`**，没有 frame 变换、没有 identity 接受、没有 candidate 消费（那是 B3b）。明确没做：动 compiler 与 prompts、接真实网络、GraspNet 进感知程序、把单 anchor 链与多程序链收敛成一套实现。已知接缝：record 目录的 manifest 状态是一条线性链，所以 `programs` 与 `ground/segment/project/predict` 在 capture 之后互斥——任一条推进了状态，另一条就不再接受这个目录；这是 fail-closed 的诚实表现，但两条路径最终要不要合并成一条需要单独裁决。另一处接缝：`programs` 仍要求 plan 里那个单 anchor `perception_request` 保持有效（`_revalidate_record_plan` 的前置检查），虽然它并不消费这个请求。
+
 ## 2026-08-04：PerceptionProgram 编译入口（信息边界调用点 4→5）
 
 - **受治理的边界变更**：`docs/API.md` 中 backend model 被允许出现的调用点从 **4 个增到 5 个**，新增 `PerceptionProgram` 提议。它与其余四个同规——输出的是受限 JSON，不是 Python、查询文本、逐步参数或任何数值；`localize` 的查询仍由可信代码从 hole 已有的 anchor 渲染，model 只从闭集算子里选链并声明哪个字段发布哪个 hole；

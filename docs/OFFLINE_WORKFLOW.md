@@ -382,7 +382,27 @@ model_calls/compile_perception/
 
 `status` 为 `published / failed / skipped`。被接线的几何 hole 里没有任何可发布目标（全是 grasp 或 motion 类）时是 `skipped`，此时不调用 backend；`coverage` 只在 `published` 时非空，来自 `coverage_by_stage`，是记录而不是准入判据——未覆盖的 hole 不是违规。
 
-当前没有运行时消费者：`perception_program.json` 只是编译产物，链上的算子尚未接真实 grounding、segmentation 或几何实现。
+运行时消费者是 `planning-record --step programs`（`execution/program_record.py`）。它不是离线步骤，也不写进 run 目录：它在一个已 `plan + capture` 的 record 目录上执行已发布的文档，产物落在那个 record 目录里。
+
+```text
+<record-dir>/
+├── programs/
+│   ├── observation_input.jpg      父 observation 冻结的唯一一份 JPEG
+│   ├── call.json                  本步的授权、服务地址、程序数与耗时
+│   └── p<stage>_<index>/          每个程序一个 anchor 子任务
+│       ├── grounding/             request.json / raw.json / result.json
+│       ├── segmentation/          request.json / raw.json / mask.png / mask.npy /
+│       │                          mask_record.json / result.json
+│       ├── geometry/              request.json / result.json，外加终点算子的载荷：
+│       │                          crop_points → pointcloud.npz / pixels_rc.npy /
+│       │                          assignment.json / cloud_manifest.json；
+│       │                          fit_opening → opening_geometry.json；
+│       │                          fit_axis → principal_axis.json
+│       └── call.json              本程序的状态、reason 与 failed_step
+└── program_results.json           每个被 provide 的 (stage, hole) 一条 envelope
+```
+
+`program_results.json` 的 envelope 形状、`camera_head_optical` 的诚实 frame、`MODEL_PROPOSED` identity 和 all-or-nothing 失败语义见 `docs/API.md` 第 6 节的「执行」小节。这些值还没有接到 `PlanningOnlyRuntime.solve()`：标定链、identity 接受和 candidate normalization 都还没做。
 
 ## Backend 调用公共产物
 

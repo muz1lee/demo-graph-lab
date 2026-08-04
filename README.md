@@ -152,11 +152,21 @@ dgl planning-record --record-dir /path/to/record \
   --step predict --allow-live-read
 ```
 
+已发布 `perception_program.json` 时，同一次 capture 还可以改走多程序执行：
+
+```bash
+dgl planning-record --record-dir /path/to/record \
+  --step programs --allow-model-read \
+  --perception-program runs/<task>/<timestamp>/perception_program.json
+```
+
 `plan` 校验 graph 的 resolver/anchor 和 objects registry，只写本地调用计划；token 不进入 `plan.json`。`capture` 冻结一次 head snapshot 与固定的 `get_qpos/get_xquat`；`ground` 和 `segment` 分别调用 Qwen 与 SAM3；`project` 在本地做 mask-first 反投影、anchor binding 和几何估计；只有 `resolver=grasp_candidate` 才允许 `predict` 调用 GraspNet。5090 现有的 `QWEN_BASE_URL / QWEN_DEFAULT_MODEL / QWEN_AUTH_TOKEN / SAM3_SERVER_URL` 可直接作为默认配置，SAM3 使用其 `/segment`；命令行参数优先，Qwen 也兼容 `QWEN_API_KEY`，SAM3 如需认证则读取 `SAM3_API_KEY`。
 
 每一步有独立授权和状态，没有一键跨阶段命令。Qwen/SAM3 在这里属于非特权感知模型，不是负责离线 graph/program 的 backend model。hole 几何证据不足时保存 `UNKNOWN`；GraspNet 完成后状态为 `OBJECT_RAW_GRASPNET_RECORDED`，仍停在 candidate normalization、运动规划和控制之前。
 
-当前一个 `record-dir` 只处理一个 `--hole`/anchor；省略 `--hole` 时只允许 stage 恰好有一个 `grasp_candidate`。它是 component record，不是完整 stage solve。不能把多个不同 capture 的单-anchor record 拼成“同一 observation”的 candidate bundle；多 anchor 复用列在 TODO 的下一步。
+`ground/segment/project/predict` 这条链一个 `record-dir` 只处理一个 `--hole`/anchor；省略 `--hole` 时只允许 stage 恰好有一个 `grasp_candidate`。它是 component record，不是完整 stage solve。不能把多个不同 capture 的单-anchor record 拼成“同一 observation”的 candidate bundle。
+
+`programs` 是同一次 capture 下的多 anchor 路径：以 capture 为父 observation，按 `perception_program.json` 逐程序执行，每个程序有自己的 anchor 和自己的 Qwen/SAM3/几何产物，结果写进 `programs/` 与 `program_results.json`。它和上面那条链互斥——任一条推进了 manifest 状态，另一条就不再接受这个 record 目录。发布的几何值仍然停在 `camera_head_optical`，identity 仍是 `MODEL_PROPOSED`，因此仍然不是 candidate，也没有接到 `solve()`。
 
 `predict` 要求 GraspNet 已由实验环境单独启动，并且只接受 loopback URL。仓库里的 client 不负责安装模型、启动常驻服务或接收局域网请求。
 
