@@ -197,13 +197,18 @@ def run(task: str, k: int = 5, model: str | None = None,
                 parse_fail += 1
                 llm.record_result(run_dir, tag, parse_error=str(error))
                 continue
-            validation_errors = validate.validate_stage_sample(
+            validation_errors, dropped_holes = validate.validate_stage_sample(
                 parsed, st, registry_ids,
                 total_frames=meta["video"]["total_frames"],
                 allowed_evidence_frames=allowed_evidence_frames,
             )
             llm.record_result(
                 run_dir, tag, parsed=parsed, validation_errors=validation_errors)
+            if dropped_holes:
+                # 洞级错误只丢洞:坏洞不参加投票,同一个样本的约束和结构照常计入。
+                dropped = {drop["index"] for drop in dropped_holes}
+                parsed["holes"] = [hole for index, hole in enumerate(parsed["holes"])
+                                   if index not in dropped]
             if validation_errors:
                 schema_fail += 1
                 continue

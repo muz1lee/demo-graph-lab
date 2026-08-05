@@ -136,23 +136,77 @@ def _valid_stage_sample():
 def test_constraint_sample_schema_checks_evidence_objects_and_holes():
     stage = {"index": 0, "name": "grasp"}
     sample = _valid_stage_sample()
-    assert validate_stage_sample(sample, stage, {"tube0", "rack"}) == []
+    assert validate_stage_sample(sample, stage, {"tube0", "rack"}) == ([], [])
 
     sample["constraints"][0]["args"]["obj"] = "invented_tube"
     sample["constraints"][0]["confidence"] = True
     sample["constraints"][0]["evidence_frames"] = []
     sample["holes"][0].pop("frame")
-    errors = validate_stage_sample(sample, stage, {"tube0", "rack"})
+    errors, dropped = validate_stage_sample(sample, stage, {"tube0", "rack"})
     assert any("object registry" in error for error in errors)
     assert any("confidence" in error for error in errors)
     assert any("must not be empty" in error for error in errors)
-    assert any("missing fields ['frame']" in error for error in errors)
+    # 洞级错误不再进样本错误表,只让这一个洞出局。
+    assert not any("missing fields ['frame']" in error for error in errors)
+    assert [drop["name"] for drop in dropped] == ["tube_grasp_pose"]
+    assert any("missing fields ['frame']" in error for error in dropped[0]["errors"])
+
+
+def test_bad_hole_is_dropped_without_voiding_the_rest_of_the_sample():
+    stage = {"index": 0, "name": "grasp"}
+    sample = _valid_stage_sample()
+    sample["holes"] = [
+        # 昨夜真实错误型:scalar 洞缺 frame、anchor.part 不是零件名。
+        {"name": "insert_depth", "type": "scalar", "solver_hint": "depth from rim"},
+        dict(sample["holes"][0]),
+        {
+            "name": "rack_hole_center", "type": "point_3d", "frame": "camera",
+            "solver_hint": "center from rack segmentation",
+            "resolver": "part_center",
+            "anchor": {"object_id": "rack", "part": "whole_object"},
+        },
+    ]
+    errors, dropped = validate_stage_sample(sample, stage, {"tube0", "rack"})
+
+    assert errors == []
+    assert [drop["index"] for drop in dropped] == [0, 2]
+    assert [drop["name"] for drop in dropped] == ["insert_depth", "rack_hole_center"]
+    assert any("missing fields ['frame']" in error for error in dropped[0]["errors"])
+    assert dropped[1]["errors"]
+    # 好洞、好约束和验收条件原样留在样本里。
+    assert sample["holes"][1]["name"] == "tube_grasp_pose"
+    assert len(sample["constraints"]) == 1 and len(sample["acceptance"]) == 1
+
+
+def test_duplicate_hole_names_drop_both_holes_but_keep_the_sample():
+    stage = {"index": 0, "name": "grasp"}
+    sample = _valid_stage_sample()
+    twin = dict(sample["holes"][0], type="point_3d")
+    sample["holes"] = [sample["holes"][0], twin]
+
+    errors, dropped = validate_stage_sample(sample, stage, {"tube0", "rack"})
+
+    assert errors == []
+    assert [drop["index"] for drop in dropped] == [0, 1]
+    assert all("duplicated" in drop["errors"][0] for drop in dropped)
+
+
+def test_constraint_errors_still_void_the_whole_sample():
+    """约束级语义不变:一条坏约束仍然否决整个样本,P/R 口径不受洞级改动影响。"""
+    stage = {"index": 0, "name": "grasp"}
+    sample = _valid_stage_sample()
+    sample["constraints"][0]["args"]["region"] = "invented_region"
+
+    errors, dropped = validate_stage_sample(sample, stage, {"tube0", "rack"})
+
+    assert dropped == []
+    assert any("非法 region" in error for error in errors)
 
 
 def test_constraint_sample_rejects_evidence_past_the_video():
     sample = _valid_stage_sample()
     sample["constraints"][0]["evidence_frames"] = [20]
-    errors = validate_stage_sample(
+    errors, _ = validate_stage_sample(
         sample, {"index": 0, "name": "grasp"}, {"tube0", "rack"},
         total_frames=20,
     )
@@ -161,7 +215,7 @@ def test_constraint_sample_rejects_evidence_past_the_video():
 
 def test_constraint_sample_rejects_evidence_not_shown_to_backend():
     sample = _valid_stage_sample()
-    errors = validate_stage_sample(
+    errors, _ = validate_stage_sample(
         sample, {"index": 0, "name": "grasp"}, {"tube0", "rack"},
         total_frames=20, allowed_evidence_frames={3},
     )

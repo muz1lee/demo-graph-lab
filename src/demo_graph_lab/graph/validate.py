@@ -348,12 +348,31 @@ def validate_live_hole_contract(
     return errors
 
 
+def _hole_drop(index: int, hole, errors: list[str]) -> dict:
+    name = hole.get("name") if isinstance(hole, dict) else None
+    return {
+        "index": index,
+        "name": name if isinstance(name, str) else None,
+        "errors": errors,
+    }
+
+
 def validate_stage_sample(sample, stage: dict, registry_ids: set[str],
                           total_frames: int | None = None,
-                          allowed_evidence_frames: set[int] | None = None) -> list[str]:
-    """Validate one raw constraint-extraction sample before it can vote."""
+                          allowed_evidence_frames: set[int] | None = None
+                          ) -> tuple[list[str], list[dict]]:
+    """Validate one raw constraint-extraction sample before it can vote.
+
+    Returns ``(errors, dropped_holes)``。``errors`` 决定整个样本能不能投票；
+    单个 hole 的校验失败不进 ``errors``，只作为一条 ``{"index", "name",
+    "errors"}`` 记录进 ``dropped_holes``，由调用方在投票前把这些洞删掉——一个洞写
+    坏只损失这个洞，同一个样本写对的 constraints/acceptance 照常参与投票。约束级
+    错误的语义不变，仍然否决整个样本。被丢弃的洞不参加洞投票，因此在多数样本里被
+    丢的洞自然到不了阈值；进入 ``graph.json`` 的洞仍由 :func:`validate_final_graph`
+    全严校验。
+    """
     if not isinstance(sample, dict):
-        return ["sample must be an object"]
+        return ["sample must be an object"], []
     errors = []
     required = {"stage", "stage_objects", "constraints", "acceptance", "holes"}
     allowed = required | {"notes"}
@@ -418,26 +437,35 @@ def validate_stage_sample(sample, stage: dict, registry_ids: set[str],
                 normalized, stage.get("index", -1), field, registry_ids=registry_ids))
 
     holes = sample.get("holes")
+    dropped_holes: list[dict] = []
     if not isinstance(holes, list):
         errors.append("sample.holes must be a list")
     else:
-        names = []
+        kept: list[tuple[int, dict]] = []
         for index, hole in enumerate(holes):
-            errors.extend(_hole_errors(
+            hole_errors = _hole_errors(
                 hole,
                 f"sample.holes[{index}]",
                 allow_votes=False,
                 registry_ids=registry_ids,
                 stage_object_ids=sample_stage_object_ids,
-            ))
-            if isinstance(hole, dict) and isinstance(hole.get("name"), str):
-                names.append(hole["name"])
-        duplicates = sorted({name for name in names if names.count(name) > 1})
-        if duplicates:
-            errors.append(f"sample.holes has duplicate names {duplicates}")
+            )
+            if hole_errors:
+                dropped_holes.append(_hole_drop(index, hole, hole_errors))
+            else:
+                kept.append((index, hole))
+        names = [hole["name"] for _, hole in kept]
+        duplicates = {name for name in names if names.count(name) > 1}
+        # 重名也只丢洞:分不清同名的哪一个才是对的,就都不参加投票,而不是牵连整个样本。
+        dropped_holes.extend(
+            _hole_drop(index, hole,
+                       [f"sample.holes[{index}].name is duplicated in this sample"])
+            for index, hole in kept if hole["name"] in duplicates
+        )
+        dropped_holes.sort(key=lambda drop: drop["index"])
     if "notes" in sample and not isinstance(sample["notes"], str):
         errors.append("sample.notes must be a string")
-    return errors
+    return errors, dropped_holes
 
 
 def _is_finite_number(value) -> bool:
