@@ -11,6 +11,8 @@ np = pytest.importorskip("numpy")
 cv2 = pytest.importorskip("cv2")
 
 from demo_graph_lab.execution.object_record import (
+    _mask_outside_box,
+    _validated_grounding_reference,
     ground_record,
     predict_record,
     project_record,
@@ -18,6 +20,7 @@ from demo_graph_lab.execution.object_record import (
 )
 from demo_graph_lab.execution.planning_record import plan_record
 from demo_graph_lab.graph import vocab
+from demo_graph_lab.perception.semantic_sources import _bbox_1000_to_pixel
 
 
 _ANCHOR = {
@@ -466,6 +469,81 @@ def test_project_rejects_replaced_grounding_jpeg(tmp_path) -> None:
         project_record(root)
 
     assert not (root / "object/assignment.json").exists()
+
+
+def test_mask_box_guard_absorbs_the_recorded_one_pixel_quantization() -> None:
+    # 2026-08-04 5090 实测:Qwen bbox_1000=[486,285,605,343] @ 1280x720,SAM3 前景
+    # 半开 bbox = cols 623..774 / rows 204..245(5571 px,分割落在试管架上)。
+    width, height = 1280, 720
+    bbox_1000 = [486.0, 285.0, 605.0, 343.0]
+    bbox = _bbox_1000_to_pixel(bbox_1000, width, height)
+
+    # 客户端换算与守卫侧的期望值是同一个覆盖式约定:min 边 floor、max 边 ceil,
+    # 像素框因此完整覆盖 1000 制连续框 (622.08, 205.2)-(774.4, 246.96)。
+    assert bbox == [622, 205, 775, 247]
+    assert _validated_grounding_reference(
+        {"rank": 1, "bbox_1000": bbox_1000, "bbox_pixel": bbox},
+        width=width,
+        height=height,
+    )["bbox_pixel"] == bbox
+
+    mask = np.zeros((height, width), dtype=np.bool_)
+    mask[204:246, 623:775] = True
+    # 右边溢出由覆盖式换算吃掉;上边 204 相对连续上边 205.2 是真的差一个像素。
+    assert not _mask_outside_box(mask, bbox)
+
+    excursion = np.zeros((height, width), dtype=np.bool_)
+    excursion[202:246, 623:775] = True
+    assert _mask_outside_box(excursion, bbox)
+
+
+def test_segment_accepts_one_pixel_overflow_through_the_whole_chain(tmp_path) -> None:
+    root, mask = _record(tmp_path)
+    overflow = mask.copy()
+    overflow[1:7, 2:4] = True  # box x0=3,越出恰好一个像素列
+    FakeSources.reset(overflow)
+
+    ground_record(
+        root,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+    manifest = segment_record(
+        root,
+        allow_model_read=True,
+        source_module=FakeSources,
+    )
+
+    assert manifest["status"] == "MASK_RECORDED"
+    # project 用同一条守卫重验冻结证据;两处不同规的话 segment 收下的记录会在
+    # 下一步猝死,所以这里一路跑到 OBJECT_CLOUD_RECORDED。
+    assert project_record(root)["status"] == "OBJECT_CLOUD_RECORDED"
+
+
+def test_segment_still_rejects_a_three_pixel_excursion(tmp_path) -> None:
+    root, mask = _record(tmp_path)
+    excursion = mask.copy()
+    excursion[1:7, 0:4] = True  # box x0=3,越出三个像素列
+    FakeSources.reset(excursion)
+    ground_record(
+        root,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    with pytest.raises(ValueError, match="foreground outside the Qwen box"):
+        segment_record(
+            root,
+            allow_model_read=True,
+            source_module=FakeSources,
+        )
+
+    manifest = json.loads((root / "manifest.json").read_text())
+    assert manifest["status"] == "GROUNDING_RECORDED"
+    assert manifest["last_error"]["step"] == "segment"
+    assert not (root / "segmentation/mask.npy").exists()
 
 
 def test_segmentation_rejects_non_binary_png_and_keeps_raw_artifacts(tmp_path) -> None:

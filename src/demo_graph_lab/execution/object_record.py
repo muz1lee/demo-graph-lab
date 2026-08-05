@@ -531,6 +531,26 @@ def _decode_binary_png(mask_bytes: bytes, *, shape: tuple[int, int]):
     return (decoded > 0).astype(np.bool_, copy=False)
 
 
+# Qwen 的 bbox_1000 是连续框,像素框按 floor(min)/ceil(max) 覆盖它,所以取整本身
+# 不会让 mask 越界。剩下的是分割器在这条量化边界上的像素级抖动:实测连续上边
+# y=205.2(bbox_1000 y1=285 @ 720),SAM3 前景到 y=204,恰好溢出一个像素。容差只
+# 吸收这一个像素,不放宽分割质量——溢出更多仍然按越框拒绝。
+_MASK_BOX_QUANTIZATION_TOLERANCE_PX = 1
+
+
+def _mask_outside_box(mask, bbox: list[int]) -> bool:
+    """Report mask foreground beyond the accepted box plus one pixel of slack."""
+
+    height, width = mask.shape
+    tolerance = _MASK_BOX_QUANTIZATION_TOLERANCE_PX
+    outside = mask.copy()
+    outside[
+        max(0, bbox[1] - tolerance):min(height, bbox[3] + tolerance),
+        max(0, bbox[0] - tolerance):min(width, bbox[2] + tolerance),
+    ] = False
+    return bool(outside.any())
+
+
 def _validated_mask_evidence(
     root: Path,
     request_spec: Mapping[str, Any],
@@ -643,9 +663,7 @@ def _validated_mask_evidence(
     png_mask = _decode_binary_png(png_path.read_bytes(), shape=shape)
     if not np.array_equal(mask, png_mask):
         raise ValueError("bool mask no longer matches the recorded SAM3 PNG")
-    outside = mask.copy()
-    outside[bbox[1]:bbox[3], bbox[0]:bbox[2]] = False
-    if outside.any():
+    if _mask_outside_box(mask, bbox):
         raise ValueError("recorded mask no longer lies inside the accepted Qwen box")
     return grounding, mask_record, mask
 
@@ -728,9 +746,7 @@ def segment_record(
         png_path = (directory / "mask.png").resolve()
         png_path.write_bytes(mask_bytes)
         mask = _decode_binary_png(mask_bytes, shape=(height, width))
-        outside = mask.copy()
-        outside[bbox[1]:bbox[3], bbox[0]:bbox[2]] = False
-        if outside.any():
+        if _mask_outside_box(mask, bbox):
             raise ValueError("SAM3 mask contains foreground outside the Qwen box")
         mask_path = (directory / "mask.npy").resolve()
         mask_record_path = (directory / "mask_record.json").resolve()

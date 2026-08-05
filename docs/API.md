@@ -181,6 +181,7 @@ head RGB-D、Qwen/SAM3、object cloud、opening geometry 和 GraspNet `/predict`
 
 - snapshot 的 depth 是 float32 米制左目 render depth；反投影后只保留 finite 且 `z>0` 的 optical-frame 点；
 - Qwen 必须只返回一个合法 box，SAM3 必须返回与冻结图像同尺寸的非空二值 mask；零框、多框、全帧 mask 和 schema 漂移都 fail-closed；
+- `bbox_1000 → bbox_pixel` 是覆盖式换算——min 边 `floor`、max 边 `ceil`，像素框完整覆盖 1000 制连续框；client 与 record 校验用同一份约定，不一致的像素框直接拒绝。mask 越出该像素框只容许每边 1px 量化抖动（分割器在量化边界上的像素级差，不是放宽分割质量），越出更多仍按越框 fail-closed；
 - graph identity 只来自已校验 anchor，模型回复只作为 evidence；assignment 与 object cloud 由本地代码发布，GraspNet 实际只消费该 object-only `point_cloud_path` 与 `extra.max_grasps`；
 - baseline 的 `pred_decode()` 把所有 `object_id` 固定为 `-1`，raw 记录可以成功，candidate normalization 必须 fail-closed；
 - head camera 挂在可升降 link 上；静态 extrinsics 没有实时 lift 修正，不能把 optical cloud 改标签成 robot base；
