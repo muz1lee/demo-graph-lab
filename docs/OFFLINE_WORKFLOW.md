@@ -203,12 +203,15 @@ graph.json
 
 - 请求次数 `k`；
 - 每阶段有效回复数 `k_valid`；
+- 每阶段洞级丢弃统计 `hole_drops`（`count` 丢了几个、`reasons` 错误类型分布、`dropped` 逐条 hole 名与错误）；
 - 多数票保留的 constraints、acceptance 和 holes；
 - `confidence`、`evidence_frames`、`provenance`；
 - `throughout` 或 `at_end` 的时间语义；
 - hole 的 name、type、frame、solver hint、可选 purpose，以及几何 hole 的 resolver/anchor。
 
 无效回复不参加投票，但多数票分母仍使用请求次数 `k`。因此不能通过丢弃失败回复降低通过门槛。
+
+样本校验分两级粒度：**约束级**错误否决整个样本，该回复不计入 `k_valid`，也不投任何票；**洞级**错误只丢那一个洞（同名洞按分不清对错处理，同名的都丢），样本的其余部分照常参与投票。被丢的洞不参加洞投票，所以在多数样本里都写坏的洞自然到不了 `k//2+1` 阈值，不会进入最终图；`hole_drops` 让洞级错误率单独可见，不再藏在 `schema_fail` 里。进入 `graph.json` 的洞仍由 `dgl validate` 全严校验，采样阶段放宽的只是粒度，不是最终契约。
 
 ## 6. 确定性图补全
 

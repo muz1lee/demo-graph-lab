@@ -33,7 +33,8 @@ frames: {{ n_frames }} | 总成本: ${{ cost }} | 生成时间: {{ ts }}</p>
 {% for st in stages %}
 <div class="stage"><h2>Stage {{ st.index }}: {{ st.name }}</h2>
 <p class="meta">{{ st.label }} | {{ st.start_sec }}–{{ st.end_sec }}s |
-parsed {{ st.k_valid }}/{{ k }}{% if st.parse_fail %} (parse_fail={{ st.parse_fail }}){% endif %}</p>
+parsed {{ st.k_valid }}/{{ k }}{% if st.parse_fail %} (parse_fail={{ st.parse_fail }}){% endif %}
+{% if st.hole_drops and st.hole_drops.count %}(丢弃洞 {{ st.hole_drops.count }}){% endif %}</p>
 <div class="kf">{% for f in st.frames %}<figure>
 <img src="data:image/jpeg;base64,{{ f.b64 }}"><figcaption>f{{ f.frame_idx }} · {{ f.t_sec }}s</figcaption>
 </figure>{% endfor %}</div>

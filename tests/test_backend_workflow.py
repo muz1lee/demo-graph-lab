@@ -792,6 +792,75 @@ def test_extract_requires_registry_and_records_resolved_model(tmp_path, monkeypa
     assert graph["stages"][0]["k_valid"] == 1
 
 
+def _extract_stage_run(tmp_path, monkeypatch, response: dict, k: int = 1) -> dict:
+    """最小 run 目录:只跑一个 stage,模型回复固定为 response,返回 graph.json。"""
+    runs_root = tmp_path / "runs"
+    run_dir = runs_root / "demo" / "20260805_000000"
+    frame_dir = run_dir / "frames" / "stage00"
+    frame_dir.mkdir(parents=True)
+    (frame_dir / "f.jpg").write_bytes(b"jpeg-placeholder")
+    artifacts.write_json(run_dir / "meta.json", {
+        "task": "demo", "video": {"fps": 10.0, "total_frames": 20}, "frames": [],
+    })
+    artifacts.write_json(run_dir / "stages.json", [{
+        "index": 0, "name": "grasp", "label": "grasp",
+        "start_sec": 0.0, "end_sec": 1.0,
+    }])
+    artifacts.write_json(run_dir / "keyframes.json", {"0": [
+        {"frame_idx": 3, "t_sec": 0.3, "file": "frames/stage00/f.jpg"},
+        {"frame_idx": 5, "t_sec": 0.5, "file": "frames/stage00/f.jpg"},
+    ]})
+    artifacts.write_json(run_dir / "objects.json", [
+        {"id": "tube0", "category": "tube", "distinguishers": "only tube",
+         "trace_aliases": [], "first_seen_frame": 0},
+        {"id": "rack", "category": "rack", "distinguishers": "only rack",
+         "trace_aliases": [], "first_seen_frame": 0},
+    ])
+    monkeypatch.setattr(artifacts, "RUNS_ROOT", runs_root)
+    monkeypatch.setenv("DGL_VLM_MODEL", "resolved/offline-model")
+    monkeypatch.setattr(llm, "chat", lambda *_args, **_kwargs: json.dumps(response))
+
+    from demo_graph_lab.graph import extract
+
+    return artifacts.read_json(extract.run("demo", k=k))
+
+
+def test_extract_drops_bad_holes_and_accounts_for_them_per_stage(
+        tmp_path, monkeypatch):
+    sample = _valid_stage_sample()
+    sample["holes"] = [
+        {"name": "insert_depth", "type": "scalar", "solver_hint": "depth from rim"},
+        dict(sample["holes"][0]),
+    ]
+
+    stage = _extract_stage_run(tmp_path, monkeypatch, sample)["stages"][0]
+
+    assert stage["k_valid"] == 1 and stage["schema_fail"] == 0
+    assert [hole["name"] for hole in stage["holes"]] == ["tube_grasp_pose"]
+    assert len(stage["constraints"]) == 1 and len(stage["acceptance"]) == 1
+    assert stage["hole_drops"]["count"] == 1
+    assert stage["hole_drops"]["dropped"] == [{
+        "sample": 0,
+        "name": "insert_depth",
+        "errors": [
+            "sample.holes[0] missing fields ['frame']",
+            "sample.holes[0].frame must be a non-empty string",
+        ],
+    }]
+    assert stage["hole_drops"]["reasons"] == {
+        "sample.holes[] missing fields ['frame']": 1,
+        "sample.holes[].frame must be a non-empty string": 1,
+    }
+
+
+def test_extract_keeps_hole_drop_accounting_empty_on_a_clean_sample(
+        tmp_path, monkeypatch):
+    stage = _extract_stage_run(
+        tmp_path, monkeypatch, _valid_stage_sample())["stages"][0]
+
+    assert stage["hole_drops"] == {"count": 0, "reasons": {}, "dropped": []}
+
+
 def test_cli_returns_nonzero_when_validate_fails(monkeypatch):
     from demo_graph_lab import cli
     from demo_graph_lab.graph import validate

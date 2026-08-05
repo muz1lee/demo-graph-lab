@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 from ..common import artifacts
 from . import validate, vocab
@@ -11,6 +12,17 @@ from . import validate, vocab
 
 _RESERVED = {"name", "args", "stage", "confidence", "evidence_frames",
              "provenance", "notes", "votes"}
+_HOLE_DROP_INDEX_RE = re.compile(r"^sample\.holes\[\d+\]")
+
+
+def _hole_drop_reasons(drops: list[dict]) -> dict[str, int]:
+    """洞级错误类型分布:抹掉洞下标,同一类错误才能合并成一条计数。"""
+    reasons: dict[str, int] = {}
+    for drop in drops:
+        for message in drop["errors"]:
+            key = _HOLE_DROP_INDEX_RE.sub("sample.holes[]", message)
+            reasons[key] = reasons.get(key, 0) + 1
+    return dict(sorted(reasons.items()))
 
 
 def _norm_item(item: dict) -> dict:
@@ -173,6 +185,7 @@ def run(task: str, k: int = 5, model: str | None = None,
         allowed_evidence_frames = {frame["frame_idx"] for frame in frames}
         msgs = _stage_messages(prompt, instruction, st, frames, run_dir)
         samples, parse_fail, schema_fail, replayed = [], 0, 0, 0
+        hole_drops: list[dict] = []
         input_refs = [
             "meta.json", "stages.json", "keyframes.json", "objects.json",
             "package:prompts/constraint_extract.md", *(fr["file"] for fr in frames),
@@ -209,6 +222,9 @@ def run(task: str, k: int = 5, model: str | None = None,
                 dropped = {drop["index"] for drop in dropped_holes}
                 parsed["holes"] = [hole for index, hole in enumerate(parsed["holes"])
                                    if index not in dropped]
+                hole_drops.extend(
+                    {"sample": i, "name": drop["name"], "errors": drop["errors"]}
+                    for drop in dropped_holes)
             if validation_errors:
                 schema_fail += 1
                 continue
@@ -227,10 +243,17 @@ def run(task: str, k: int = 5, model: str | None = None,
                                 "role": st.get("role", "core"),
                                 "stage_objects": stage_objects,
                                 **merged, "k_valid": len(samples),
-                                "parse_fail": parse_fail, "schema_fail": schema_fail})
+                                "parse_fail": parse_fail, "schema_fail": schema_fail,
+                                # 洞级错误率必须可见:整样本否决时它藏在 schema_fail 里。
+                                "hole_drops": {
+                                    "count": len(hole_drops),
+                                    "reasons": _hole_drop_reasons(hole_drops),
+                                    "dropped": hole_drops,
+                                }})
         print(f"[extract] stage {st['index']} {st['name']}: "
               f"{len(merged['constraints'])} constraints, {len(merged['holes'])} holes "
               f"({len(samples)}/{k} valid; parse_fail={parse_fail}; "
-              f"schema_fail={schema_fail}; replayed={replayed})")
+              f"schema_fail={schema_fail}; hole_drop={len(hole_drops)}; "
+              f"replayed={replayed})")
     artifacts.write_json(run_dir / "graph.json", graph)
     return run_dir / "graph.json"
