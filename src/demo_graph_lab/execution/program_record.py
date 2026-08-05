@@ -52,6 +52,7 @@ from .object_record import (
     _frozen_observation,
     _image_array,
     _jpeg_bytes,
+    _mask_outside_box,
     _validated_grounding_reference,
 )
 from .planning_record import (
@@ -357,9 +358,9 @@ def _segment(scene: _Scene, program_dir: Path, identity: str,
         raise _ProgramFailure(
             "segment", "segmentation_mask_invalid", str(error)
         ) from error
-    outside = mask.copy()
-    outside[box[1]:box[3], box[0]:box[2]] = False
-    if outside.any():
+    # 与单 anchor 链共用同一个越框守卫(含 1px 量化容差);两条链对同一张 mask
+    # 的判定必须一致,否则 segment 收下的记录会在另一条链上被判 UNKNOWN。
+    if _mask_outside_box(mask, box):
         raise _ProgramFailure(
             "segment",
             "segmentation_mask_outside_box",
