@@ -2,6 +2,16 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-05：两项裁决落地——抽取校验改逐洞丢弃、SAM3 越框守卫给 1px 量化容差
+
+- **裁决一（抽取样本校验粒度）**：样本内某个 hole 校验失败只丢那个 hole，不再否决整个样本。`validate_stage_sample` 改返回 `(errors, dropped_holes)`：hole 级错误只进 `dropped_holes`（`index / name / errors`），`extract` 在投票前把这些洞从样本里删掉；`errors` 只留样本级问题，决定这份回复能不能进 `k_valid`。**约束级语义一个字没改**——一条坏约束仍然否决整个样本，P/R 口径不受这次改动影响；投票机制也没动，被丢的洞不参加洞投票，在多数样本里都写坏的洞自然到不了 `k//2+1`。同名洞按洞级处理（分不清哪个对，就都不投票）；`validate_final_graph` 与 live contract 保持全严，进 `graph.json` 的洞仍必须完全合法；
+- 动机数据（2026-08-04 5090 实跑）：30/30 样本被整体否决，其中 29/30 只犯洞级错误；132 个洞错 vs 149 条约束里只有 1 条错。按新语义这批数据可救回 143 条约束和 60 个干净洞。典型洞错误是 scalar 洞缺 `frame`、`part` 写成 `whole_object`/`top`、`principal_axis`/`grasp_candidate` 带 qualifier；
+- 洞级错误率单独可见：`graph.json` 的 stage 记录新增 `hole_drops = {count, reasons, dropped}`（`reasons` 抹掉洞下标后按错误类型计数），`extract` 的 stage 行与 `report.html` 的 stage 头带上丢弃数。落点选 stage 记录而非 `validation.json`：后者由 `validate_run_dir` 从 `graph.json` 反推，拿不到抽取期事实，而 `parse_fail/schema_fail` 已经在这里。`validate_final_graph` 不做 stage key 闭集检查，不需要同步 allowed 集。统计口径与 `parse_fail/schema_fail` 一致，覆盖全部 k 次尝试（含事后被约束级错误否决的样本），衡量的是洞的书写质量而不是投票损失；
+- **裁决二（SAM3 越框守卫）**：先审两侧代码，结论是**取整约定没有错配**——`semantic_sources._bbox_1000_to_pixel` 与 `object_record._validated_grounding_reference` 用同一套覆盖式换算（min 边 `floor`、max 边 `ceil`），守卫与 `_pixel_bbox` 都按半开框比较。按这套换算 `bbox_1000=[486,285,605,343] @1280x720 → [622,205,775,247]`，昨夜报的右边 1px 溢出本来就不存在（那对应截断式换算 `[622,205,774,246]`，仓内没有这条路径）；剩下的上边溢出是真的：连续上边 `y=205.2`，mask 前景到 `y=204`。因此走裁决第二档，给守卫**每边 1px 量化容差**（`_MASK_BOX_QUANTIZATION_TOLERANCE_PX`，注释写明是量化抖动、不是放宽分割质量），两处守卫（`segment` 实时检查与 `_validated_mask_evidence` 重验）收敛到同一个 `_mask_outside_box`——不同规的话 `segment` 收下的记录会在 `project` 步猝死；
+- 测试：新增 8 个用例。抽取侧 5 条（坏洞被丢而样本存活、同名洞双丢、坏约束仍否决整样本、`hole_drops` 形状实样、干净样本记账为空），感知侧 3 条（昨夜真实数字的换算与守卫单测、1px 溢出一路跑到 `OBJECT_CLOUD_RECORDED`、3px 溢出仍被拒）。把容差常量按回 0 时前两条感知用例会失败，守卫没有失去牙齿。更新了 4 处旧断言（`validate_stage_sample` 的返回形状，以及「洞缺 frame → 样本作废」那条）。本地 `454 passed`（基线 446 + 8），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：两项都是离线语义修复，没有重跑 5090 抽取，也没有重跑感知记录——救回 143 条约束是按昨夜错误分布的推算，不是实测。明确没做：动 prompts、动 perception DSL、放松其他守卫、改 `record_result` 的 result.json 形状（洞级证据只落在 `graph.json`）。已知接缝：`execution/program_record.py` 的 `segmentation_mask_outside_box` 是同一条守卫在感知程序执行器里的第二份实现，仍是零容差，同一张 mask 在两条路径上会得到不同判定；要不要合并成一份留给下一轮裁决。
+
 ## 2026-08-04：PerceptionProgram 真实执行器（capture 为父、anchor 为子）
 
 - 新增 `execution/program_record.py`：`perception_program.json` 的第一个运行时消费者，也是 `docs/API.md` 预告的结构演进——一次 capture 是父 observation，每个感知程序是一个 anchor 子任务。输入是一个已 `plan + capture` 的 record 目录加一份已发布的文档，按 `(stage, 文档索引)` 顺序逐程序执行；
