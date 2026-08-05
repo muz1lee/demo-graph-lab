@@ -114,21 +114,109 @@ _OBJECTS = [
     },
 ]
 
+# 同一根管子被两个 stage 各问一次:合法的重复查询,两个程序本来就该命中同一个框。
+_REPEAT_GRAPH = {
+    "task": "insert_tubes",
+    "stages": [
+        {
+            "index": index,
+            "name": name,
+            "stage_objects": {"manipulated": "tube_left", "target": "rack"},
+            "holes": [
+                {
+                    "name": "tube_long_axis",
+                    "type": "axis_3d",
+                    "frame": "robot_base",
+                    "solver_hint": "long axis of the tube body",
+                    "resolver": "principal_axis",
+                    "anchor": dict(_TUBE_ANCHOR),
+                },
+            ],
+        }
+        for index, name in enumerate(("pick", "insertion"))
+    ],
+}
+
+_REPEAT_PROGRAM = {
+    "schema": "demo_graph_lab.perception_program.v1",
+    "task": "insert_tubes",
+    "programs": [
+        {
+            "stage": index,
+            "chain": ["localize", "segment", "crop_points", "fit_axis"],
+            "provides": [{"field": "axis", "hole": "tube_long_axis"}],
+        }
+        for index in (0, 1)
+    ],
+}
+
+_TUBES = ("tube_left", "tube_right", "tube_third")
+
+# 今晨那次观测的形状:三根同类管子各占一个 stage,靠 distinguisher 区分。
+# `tube_third` 的 distinguisher 是时序描述,单帧不可解析——这正是退化的起点。
+_TUBE_OBJECTS = [
+    {"id": "tube_left", "category": "test tube",
+     "distinguishers": "the left tube"},
+    {"id": "tube_right", "category": "test tube",
+     "distinguishers": "the right tube"},
+    {"id": "tube_third", "category": "test tube",
+     "distinguishers": "the third tube that was inserted"},
+    {"id": "rack", "category": "three-hole rack",
+     "distinguishers": "the rack on the right"},
+]
+
+_TUBE_GRAPH = {
+    "task": "insert_tubes",
+    "stages": [
+        {
+            "index": index,
+            "name": f"insert_{object_id}",
+            "stage_objects": {"manipulated": object_id, "target": "rack"},
+            "holes": [
+                {
+                    "name": f"{object_id}_long_axis",
+                    "type": "axis_3d",
+                    "frame": "robot_base",
+                    "solver_hint": "long axis of the tube body",
+                    "resolver": "principal_axis",
+                    "anchor": {"object_id": object_id, "part": "whole"},
+                },
+            ],
+        }
+        for index, object_id in enumerate(_TUBES)
+    ],
+}
+
+_TUBE_PROGRAM = {
+    "schema": "demo_graph_lab.perception_program.v1",
+    "task": "insert_tubes",
+    "programs": [
+        {
+            "stage": index,
+            "chain": ["localize", "segment", "crop_points", "fit_axis"],
+            "provides": [{"field": "axis", "hole": f"{object_id}_long_axis"}],
+        }
+        for index, object_id in enumerate(_TUBES)
+    ],
+}
+
 
 def _write_json(path: Path, value) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _scene_arrays(*, opening: bool):
+def _scene_arrays(*, opening: bool, shape=(_HEIGHT, _WIDTH), mask_bounds=(1, 7, 4, 6)):
     """Synthetic RGB-D whose ROI either reads as an opening or as flat surface."""
 
-    image = np.zeros((_HEIGHT, _WIDTH, 3), dtype=np.uint8)
-    image[:, :, 0] = np.arange(_WIDTH, dtype=np.uint8)
-    image[:, :, 1] = np.arange(_HEIGHT, dtype=np.uint8)[:, None]
-    depth = np.ones((_HEIGHT, _WIDTH), dtype=np.float32)
-    mask = np.zeros((_HEIGHT, _WIDTH), dtype=np.bool_)
-    mask[1:7, 4:6] = True
+    height, width = shape
+    row0, row1, col0, col1 = mask_bounds
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    image[:, :, 0] = (np.arange(width) % 256).astype(np.uint8)
+    image[:, :, 1] = (np.arange(height) % 256).astype(np.uint8)[:, None]
+    depth = np.ones((height, width), dtype=np.float32)
+    mask = np.zeros((height, width), dtype=np.bool_)
+    mask[row0:row1, col0:col1] = True
     if opening:
         # 让 ROI 在 RGB-D 上真的像一个开口:比周围支撑面更远、更亮,越过估计器的
         # 深度/亮度对比度门槛。手法与 tests/test_object_record.py 的 PASS 用例一致。
@@ -145,9 +233,13 @@ def _record(
     stage_index: int = 0,
     hole_name: str = "tube_grasp_pose",
     opening: bool = True,
+    shape=(_HEIGHT, _WIDTH),
+    mask_bounds=(1, 7, 4, 6),
 ) -> tuple[Path, np.ndarray, Path]:
     """Build one planned+captured record dir with a frozen synthetic capture."""
 
+    height, width = shape
+    principal = ((width - 1) / 2.0, (height - 1) / 2.0)
     root = (tmp_path / "record").resolve()
     graph_path = (tmp_path / "graph.json").resolve()
     objects_path = (tmp_path / "objects.json").resolve()
@@ -157,11 +249,11 @@ def _record(
     _write_json(objects_path, _OBJECTS if objects is None else objects)
     _write_json(intrinsics_path, {
         "head": {
-            "resolution": [_WIDTH, _HEIGHT],
+            "resolution": [width, height],
             "fx": 100.0,
             "fy": 100.0,
-            "cx": 4.5,
-            "cy": 3.5,
+            "cx": principal[0],
+            "cy": principal[1],
             "baseline": 0.05,
         }
     })
@@ -187,7 +279,9 @@ def _record(
     calibration_dir = root / "calibration"
     sensor.mkdir()
     calibration_dir.mkdir()
-    image, depth, mask = _scene_arrays(opening=opening)
+    image, depth, mask = _scene_arrays(
+        opening=opening, shape=shape, mask_bounds=mask_bounds
+    )
     image_path = (sensor / "head_left_bgr.npy").resolve()
     depth_path = (sensor / "head_depth_m.npy").resolve()
     calibration_path = (calibration_dir / "bundle.json").resolve()
@@ -200,12 +294,12 @@ def _record(
         "camera": "head",
         "frame": _OPTICAL_FRAME,
         "intrinsics": {
-            "width": _WIDTH,
-            "height": _HEIGHT,
+            "width": width,
+            "height": height,
             "fx": 100.0,
             "fy": 100.0,
-            "cx": 4.5,
-            "cy": 3.5,
+            "cx": principal[0],
+            "cy": principal[1],
             "baseline": 0.05,
         },
     })
@@ -246,18 +340,57 @@ def _record(
     return root, mask, program_path
 
 
+def _reference(box, *, width: int, height: int) -> dict:
+    """One grounding reference whose 1000-scale box quantizes back to ``box``.
+
+    契约侧按 min 边 `floor`、max 边 `ceil` 反算像素框,这里取半像素内缩,保证往返
+    稳稳落回同一个框而不受浮点抖动影响。
+    """
+
+    x0, y0, x1, y1 = box
+    return {
+        "rank": 1,
+        "bbox_1000": [
+            (x0 + 0.5) * 1000.0 / width,
+            (y0 + 0.5) * 1000.0 / height,
+            (x1 - 0.5) * 1000.0 / width,
+            (y1 - 0.5) * 1000.0 / height,
+        ],
+        "bbox_pixel": list(box),
+    }
+
+
 class FakeSources:
     """Fake Qwen/SAM3 transports; nothing here opens a socket."""
 
     mask = None
     calls: list = []
     reject_prompt_substring = None
+    box_overrides: tuple = ()
+    boxes: dict = {}
 
     @classmethod
-    def reset(cls, mask) -> None:
+    def reset(cls, mask, *, box_overrides=()) -> None:
         cls.mask = mask
         cls.calls = []
         cls.reject_prompt_substring = None
+        # (查询子串, 像素框):命中的查询改用指定框,用来造真实里出现的同框情形。
+        cls.box_overrides = tuple(box_overrides)
+        cls.boxes = {}
+
+    @classmethod
+    def box_for(cls, prompt: str, *, width: int, height: int) -> list:
+        """同一个查询固定同一个框;默认每个不同 anchor 拿到属于自己的那个框。"""
+
+        for substring, box in cls.box_overrides:
+            if substring in prompt:
+                return list(box)
+        if prompt not in cls.boxes:
+            index = len(cls.boxes)
+            # 默认框互不相同(否则不同 anchor 会假性同框),但都包住 fake mask
+            # (否则会先撞上越框守卫)。
+            cls.boxes[prompt] = [index % 4, 0, width - index // 4, height]
+        return list(cls.boxes[prompt])
 
     class QwenGroundingClient:
         def __init__(self, endpoint, *, token, model, timeout_s):
@@ -267,11 +400,13 @@ class FakeSources:
             assert jpeg_bytes.startswith(b"\xff\xd8")
             assert jpeg_bytes.endswith(b"\xff\xd9")
             FakeSources.calls.append(("ground", prompt))
-            reference = {
-                "rank": 1,
-                "bbox_1000": [300.0, 100.0, 700.0, 900.0],
-                "bbox_pixel": [3, 0, 7, 8],
-            }
+            reference = _reference(
+                FakeSources.box_for(
+                    prompt, width=image_width, height=image_height
+                ),
+                width=image_width,
+                height=image_height,
+            )
             reject = FakeSources.reject_prompt_substring
             references = [dict(reference)]
             if isinstance(reject, str) and reject in prompt:
@@ -299,10 +434,10 @@ class FakeSources:
             }
 
 
-def _run(tmp_path: Path, *, document=None, **record_kwargs):
+def _run(tmp_path: Path, *, document=None, box_overrides=(), **record_kwargs):
     root, mask, program_path = _record(tmp_path, **record_kwargs)
     _write_json(program_path, _PROGRAM if document is None else document)
-    FakeSources.reset(mask)
+    FakeSources.reset(mask, box_overrides=box_overrides)
     return root, mask, program_path
 
 
@@ -488,6 +623,191 @@ def test_geometry_unknown_propagates_to_every_hole_of_that_program(tmp_path) -> 
     assert json.loads(
         (root / "programs/p1_1/geometry/result.json").read_text()
     )["fields"] == {}
+
+
+def test_two_object_ids_on_one_box_demote_each_other(tmp_path) -> None:
+    # 一个框不可能同时是两个物体:证据分不清身份,两边都不能发布。
+    shared = [3, 0, 7, 8]
+    root, _, program_path = _run(tmp_path, box_overrides=(
+        ("test tube", shared), ("three-hole rack", shared),
+    ))
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    assert [item["bbox_pixel"] for item in results["programs"]] == [shared, shared]
+    assert [item["status"] for item in results["programs"]] == ["UNKNOWN", "UNKNOWN"]
+    for name in ("s0.tube_long_axis", "s1.rack_hole_center", "s1.rack_hole_axis"):
+        envelope = results["holes"][name]
+        assert envelope["status"] == "UNKNOWN"
+        assert envelope["value"] is None
+        assert envelope["reason"] == "grounding_identity_collision"
+        assert envelope["failed_step"] == "localize"
+        assert envelope["identity_status"] == "MODEL_PROPOSED"
+        assert all(Path(ref).is_file() for ref in envelope["evidence_refs"])
+    # 互相点名:归因不必回头翻另一个程序的产物。
+    assert results["holes"]["s0.tube_long_axis"]["collides_with"] == ["p1_1"]
+    assert results["holes"]["s1.rack_hole_center"]["collides_with"] == ["p0_0"]
+    assert results["holes"]["s1.rack_hole_axis"]["collides_with"] == ["p0_0"]
+    assert [item["collides_with"] for item in results["programs"]] == [
+        ["p1_1"], ["p0_0"]
+    ]
+    # 产物留在原地作证据:链确实跑完了,降级只发生在 envelope 上。
+    assert (root / "programs/p0_0/geometry/pointcloud.npz").is_file()
+    for program in ("p0_0", "p1_1"):
+        assert json.loads(
+            (root / f"programs/{program}/geometry/result.json").read_text()
+        )["status"] == "PASS"
+        assert json.loads(
+            (root / f"programs/{program}/call.json").read_text()
+        )["status"] == "ok"
+
+
+def test_one_object_queried_twice_on_one_box_still_passes(tmp_path) -> None:
+    # 今晨 p0_0/p1_1 的情形:同一个 object_id 被两个程序各查一次,命中同一个框是
+    # 正常的,守卫不许误伤。
+    root, _, program_path = _run(
+        tmp_path,
+        graph=_REPEAT_GRAPH,
+        document=_REPEAT_PROGRAM,
+        hole_name="tube_long_axis",
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    boxes = [item["bbox_pixel"] for item in results["programs"]]
+    assert [item["program"] for item in results["programs"]] == ["p0_0", "p1_1"]
+    assert boxes[0] == boxes[1]
+    assert set(results["holes"]) == {"s0.tube_long_axis", "s1.tube_long_axis"}
+    for envelope in results["holes"].values():
+        assert envelope["status"] == "PASS"
+        assert envelope["collides_with"] == []
+        assert envelope["object_id"] == "tube_left"
+        assert len(envelope["value"]) == 3
+
+
+def test_three_programs_demote_only_the_two_sharing_a_box(tmp_path) -> None:
+    shared = [3, 0, 7, 8]
+    root, _, program_path = _run(
+        tmp_path,
+        graph=_TUBE_GRAPH,
+        document=_TUBE_PROGRAM,
+        objects=_TUBE_OBJECTS,
+        hole_name="tube_left_long_axis",
+        box_overrides=(("the right tube", shared), ("the third tube", shared)),
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    left = results["holes"]["s0.tube_left_long_axis"]
+    right = results["holes"]["s1.tube_right_long_axis"]
+    third = results["holes"]["s2.tube_third_long_axis"]
+    # 没参与同框的第三个程序不受牵连。
+    assert left["status"] == "PASS"
+    assert left["collides_with"] == []
+    assert len(left["value"]) == 3
+    for envelope in (right, third):
+        assert envelope["status"] == "UNKNOWN"
+        assert envelope["value"] is None
+        assert envelope["reason"] == "grounding_identity_collision"
+    assert right["collides_with"] == ["p2_2"]
+    assert third["collides_with"] == ["p1_1"]
+
+
+def test_morning_shared_box_between_tube_right_and_tube_third(tmp_path) -> None:
+    """2026-08-05 5090 实跑的回归:`tube_third` 的 distinguisher 是时序描述,单帧
+    不可解析,Qwen 退化成「右边那根」,与 `tube_right` 返回同一个框
+    `[730, 387, 811, 483]`,`tube_third_long_axis` 因此拿到一个来自错误物体、逐位
+    等于 `tube_right` 的 PASS 值。守卫必须让这两个都记 UNKNOWN。
+    """
+
+    morning_box = [730, 387, 811, 483]
+    root, _, program_path = _run(
+        tmp_path,
+        graph=_TUBE_GRAPH,
+        document=_TUBE_PROGRAM,
+        objects=_TUBE_OBJECTS,
+        hole_name="tube_left_long_axis",
+        # 框是实测值,画幅取一个能容纳它的头相机分辨率;mask 取细长条,PCA 才有
+        # 明确主轴(近方形的点云会被 fit_axis 判为 ambiguous)。
+        shape=(720, 1280),
+        mask_bounds=(390, 480, 745, 765),
+        box_overrides=(
+            ("the right tube", morning_box), ("the third tube", morning_box),
+        ),
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    summaries = {item["program"]: item for item in results["programs"]}
+    assert summaries["p1_1"]["bbox_pixel"] == morning_box
+    assert summaries["p2_2"]["bbox_pixel"] == morning_box
+    right = results["holes"]["s1.tube_right_long_axis"]
+    third = results["holes"]["s2.tube_third_long_axis"]
+    for envelope, peer in ((right, "p2_2"), (third, "p1_1")):
+        assert envelope["status"] == "UNKNOWN"
+        assert envelope["value"] is None
+        assert envelope["reason"] == "grounding_identity_collision"
+        assert envelope["failed_step"] == "localize"
+        assert envelope["collides_with"] == [peer]
+    assert results["holes"]["s0.tube_left_long_axis"]["status"] == "PASS"
+
+
+def test_a_collided_program_keeps_its_own_earlier_failure_reason(tmp_path) -> None:
+    # 冲突另一端已经因为自己链上的失败记了 UNKNOWN 时,保留那个更具体的 reason,
+    # 冲突本身走 collides_with 记账。
+    shared = [3, 0, 7, 8]
+    root, _, program_path = _run(tmp_path, opening=False, box_overrides=(
+        ("test tube", shared), ("three-hole rack", shared),
+    ))
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    tube = results["holes"]["s0.tube_long_axis"]
+    center = results["holes"]["s1.rack_hole_center"]
+    assert tube["status"] == "UNKNOWN"
+    assert tube["reason"] == "grounding_identity_collision"
+    assert tube["failed_step"] == "localize"
+    assert tube["collides_with"] == ["p1_1"]
+    assert center["status"] == "UNKNOWN"
+    assert center["value"] is None
+    assert center["reason"] == "insufficient_depth_contrast"
+    assert center["failed_step"] == "fit_opening"
+    assert center["collides_with"] == ["p0_0"]
 
 
 def test_programs_step_advances_the_manifest_and_refuses_a_rerun(tmp_path) -> None:

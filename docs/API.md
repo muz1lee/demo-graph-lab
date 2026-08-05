@@ -309,12 +309,18 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
  "calibration_ref": "<...>/calibration/bundle.json", "object_id": "tube_mid",
  "identity_status": "MODEL_PROPOSED", "status": "PASS",
  "reason": "pca_dominant_axis", "failed_step": null,
- "evidence_refs": ["<...>"], "program": "p0_0"}
+ "evidence_refs": ["<...>"], "program": "p0_0", "collides_with": []}
 ```
 
 `frame` 如实写测量所在的相机光学系。graph hole 请求的是 `robot_base`，而标定链还没建，所以下游 typed-hole 校验会因为 frame 不一致而拒绝这些值——这是设计意图，不是缺陷；把 optical 数值改标签成 `robot_base` 才是错误。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受。
 
 失败时 `status=UNKNOWN`、`value=null`，`reason` 是机器可读码（客户端拒绝如 `grounding_reference_count_not_one`，几何估不出来时直接沿用估计器自己的 reason 如 `insufficient_depth_contrast`），`failed_step` 指出链上断在哪个算子，`evidence_refs` 保留已经产出的证据。all-or-nothing 在这里是硬约束：一个程序的全部 `provides` 要么都有值，要么都是 `UNKNOWN`。一个程序失败不影响同一次 capture 下的其它程序。
+
+### 跨程序身份守卫
+
+上面那些守卫都在一个程序内部生效，因此拦不住这一类污染：同一次 observation 内，两个 `object_id` 不同的程序接受了**逐元素相同**的 `bbox_pixel`。此时这个框没有识别出其中任何一个对象（一个框不可能同时是两个 graph object），落在它上面的几何值来自哪个物体无从判断，所以同框的程序**全部**记 `UNKNOWN`、`value=null`、`reason=grounding_identity_collision`、`failed_step=localize`（被判定的正是 `localize` 交出的那个框），并在 envelope 与 program 摘要的 `collides_with` 里互相点名。判定精确相等、无参数：不用 IoU、不设阈值，只处理「两个身份压在同一份证据上」这一种情形。同一个 `object_id` 被多个程序各查一次而命中同一个框是**合法**的——一个 anchor 本来就可以被多条链观测——不受影响。
+
+判定在全部程序执行完、写 `program_results.json` 之前做一次，所以「先发布后被撞」与「先被撞后发布」两个方向对称，与文档里的程序顺序无关。已经因为自己链上失败记了 `UNKNOWN` 的程序保留它自己的 reason（更具体的事实），冲突只由 `collides_with` 记账。`programs/p<stage>_<index>/` 下的产物**照原样保留**：链确实跑完了，那份记录正是这条判定的证据，降级只发生在 envelope 与 program 摘要上。program 摘要另外记下被接受的 `bbox_pixel`，让判定与它依据的证据出现在同一份文件里。
 
 ### 信息边界
 
@@ -326,4 +332,5 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
 - v1 只发布被观测到的对象几何，`resolver` 限于 `part_center / part_axis / principal_axis`。`grasp_candidate` 走候选身份与排序机制，`motion_derived` 的值来自执行状态而不是观测，两者出现在 `provides` 里都是违规；
 - 声明了 `resolver` 的 hole 还必须由绑定的那条链发布：`part_center → fit_opening.center`、`part_axis → fit_opening.axis`、`principal_axis → fit_axis.axis`。类型相同不等于语义相同——开口平面法向与点云 PCA 主轴都是 `axis_3d`，只比类型就能互换，而它们测的不是同一个量。绑定表 `perception/program.py::RESOLVER_BINDINGS` 是这条语义的单一真相源，键恰好是可发布 resolver 的全集；没有声明 `resolver` 的 hole 维持类型匹配即可；
 - 失败语义是 all-or-nothing：链在任何一步失败，该程序的 `provides` 一个都不产出。部分成功会让上层以为 hole 已填，是 bug 不是可接受的降级；
+- 身份判定跨程序生效：一个 pixel box 只能属于一个 graph object，两个 `object_id` 不同的程序接受同一个框时双双 `UNKNOWN`；同一个 `object_id` 的重复查询不算冲突。graph anchor 的 distinguisher 必须在单帧里可判——`localize` 只看得到一张冻结图，写成时序或历史描述（「第三个被插入的」）时模型只能退化成某种空间描述，退化的终点就是这条守卫；
 - 未被任何程序覆盖的几何 hole 不是违规，它们继续走 graph resolver 老路。`coverage_by_stage` 只产出 per stage 的 covered/uncovered 名单供记录，不做准入判断。

@@ -2,6 +2,16 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-05：感知程序跨程序身份守卫（同框不同 object → 双双 UNKNOWN）
+
+- **动机是一起真实的静默污染**（今晨 5090 实跑）：registry 里 `tube_third` 的 distinguisher 写成时序描述（「第三个被插入的」），单帧不可解析，Qwen 退化成「右边那根」，与 `tube_right` 返回**同一个 bbox** `[730, 387, 811, 483]`；`tube_third_long_axis` 因此拿到一个来自错误物体、逐位等于 `tube_right` 的 `PASS` 值。1/6 静默污染，现有守卫（单框、mask 越框、几何 UNKNOWN）全部在单个程序内部生效，一个都拦不住；
+- 新守卫在 `execution/program_record.py`：同一次 capture 内收集每个程序**被接受**的 `bbox_pixel`，两个及以上 `object_id` 不同的程序命中逐元素相同的框时，这些程序**全部**降级 `UNKNOWN`（含已算出值的：`value` 置 null，all-or-nothing 语义不变），`reason=grounding_identity_collision`、`failed_step=localize`，envelope 与 program 摘要新增 `collides_with` 互相点名。判定精确相等、**无参数**：不引 IoU、不引阈值常量、不加配置项；
+- **同 `object_id` 命中同框不受影响**——今晨同一次 observation 里 `tube_left` 被 p0_0 与 p1_1 各查一次、命中同一个框，那是合法的重复查询，一个 anchor 本来就可以被多条链观测；
+- 落点选**全部程序跑完后、写 `program_results.json` 之前**的一次后处理，不放执行循环内：一个程序要等被 ground 之后才成为另一个程序的歧义证据，放循环里会让「先 PASS 后撞」与「后撞先 PASS」两个方向按文档顺序得到不同判定。产物目录 `programs/p<stage>_<index>/{grounding,segmentation,geometry}/` 与 `call.json` **照原样保留**（链确实跑完了，那份记录正是本判定的证据），降级只发生在 envelope 与摘要上；摘要另记被接受的 `bbox_pixel`，让判定与证据同处一份文件。已经因为自己链上失败记 `UNKNOWN` 的程序保留原 reason（更具体的事实），冲突只由 `collides_with` 记账；
+- 测试：新增 5 个用例（两个不同 object 同框双双降级且互指、同 object 两次查询全 PASS、三程序两撞一独而独者 PASS、今晨真实数字 `[730,387,811,483]` 在 1280×720 画幅上的端到端回归、冲突对端保留自己的先发失败 reason）。把守卫调用摘掉后这 5 条全红、其余 12 条全绿，反向验证过。测试侧顺带修了假 Qwen 的一个失真：它此前对**所有**查询返回同一个框（正是本轮要抓的病态），现在按 anchor 给不同框，并留 `box_overrides` 显式造同框；`insert_tubes` fixture 的 9 程序用例因此同时成为「6 个 anchor、3 处合法重复查询」的不误伤证据。本地 `459 passed`（基线 454 + 5），两个 CLI `--help` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：只动了 `program_record.py` 与其测试/文档。**没动 registry 与 prompts**——「anchor 的 distinguisher 必须单帧可判」是这起污染的上游根因，属于待办研究项，本轮只在 `docs/API.md` 的信息边界里记下这条纪律，不改词表、不改 prompt、不给 distinguisher 加校验。明确没做：把判定放宽到 IoU 或 `(object_id, part, instance)` 全 anchor 粒度（现在 rack 的两个 hole 命中同一个框**不算**冲突，是否该算需要单独裁决）、动 `object_record.py` 的单 anchor 链（一次只有一个 anchor，没有冲突语义）、把冲突写进 `programs/p*/call.json`。
+
 ## 2026-08-05：两项裁决落地——抽取校验改逐洞丢弃、SAM3 越框守卫给 1px 量化容差
 
 - **裁决一（抽取样本校验粒度）**：样本内某个 hole 校验失败只丢那个 hole，不再否决整个样本。`validate_stage_sample` 改返回 `(errors, dropped_holes)`：hole 级错误只进 `dropped_holes`（`index / name / errors`），`extract` 在投票前把这些洞从样本里删掉；`errors` 只留样本级问题，决定这份回复能不能进 `k_valid`。**约束级语义一个字没改**——一条坏约束仍然否决整个样本，P/R 口径不受这次改动影响；投票机制也没动，被丢的洞不参加洞投票，在多数样本里都写坏的洞自然到不了 `k//2+1`。同名洞按洞级处理（分不清哪个对，就都不投票）；`validate_final_graph` 与 live contract 保持全严，进 `graph.json` 的洞仍必须完全合法；

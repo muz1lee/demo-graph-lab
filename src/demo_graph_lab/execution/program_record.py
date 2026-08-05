@@ -16,6 +16,14 @@ these values instead of silently accepting mislabelled geometry.
 Failure is all-or-nothing per program: any refused step publishes ``UNKNOWN`` for
 every hole that program provides, with a machine-readable reason and the evidence
 produced so far.  Partial success would let a caller believe a hole was filled.
+
+Identity is judged across programs too, not only inside one.  Two programs
+anchored on different graph objects that accept the element-wise identical pixel
+box have not identified either object — one box cannot be two objects — so every
+program on that box publishes ``UNKNOWN`` even when its chain finished and a
+value exists.  One object queried by several programs is the normal case and is
+left alone.  Without this the run stays silently wrong: the second object's holes
+receive a value measured on the first object's pixels.
 """
 
 from __future__ import annotations
@@ -81,6 +89,7 @@ _IDENTITY_STATUS = "MODEL_PROPOSED"
 _PASS = "PASS"
 _UNKNOWN = "UNKNOWN"
 _TOP_K = 2
+_COLLISION_REASON = "grounding_identity_collision"
 
 _PROGRAM_ARTIFACTS = {
     "program_results": "program_results.json",
@@ -625,6 +634,7 @@ def _execute_program(scene: _Scene, directory: Path, offset: int,
     evidence: list[str] = []
     fields: dict[str, list[float]] = {}
     failure: _ProgramFailure | None = None
+    reference: Mapping[str, Any] | None = None
     try:
         reference = _localize(scene, program_dir, identity, request, evidence)
         mask, mask_record = _segment(
@@ -671,6 +681,9 @@ def _execute_program(scene: _Scene, directory: Path, offset: int,
             "stage": stage_index,
             "chain": chain,
             "anchor": dict(anchor),
+            # 被接受的那个框跟着结果走:跨程序的身份冲突就判在这个字段上,判定和
+            # 它的证据应当读同一份文件。
+            "bbox_pixel": None if reference is None else list(reference["bbox_pixel"]),
             "hole_name_rendered_from": holes[0],
             "provides": sorted(envelopes),
             "status": status,
@@ -681,6 +694,71 @@ def _execute_program(scene: _Scene, directory: Path, offset: int,
         },
         "holes": envelopes,
     }
+
+
+def _identity_collisions(summaries: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Map each program to the other programs that accepted its exact box.
+
+    One pixel box cannot be two graph objects at once.  When programs anchored on
+    different ``object_id`` accept element-wise identical boxes, the grounding
+    evidence stops telling those objects apart, so none of them may publish.  The
+    comparison is exact and parameter-free on purpose: no overlap threshold is
+    involved, only the case where two identities rest on literally one piece of
+    evidence.  Programs repeating one ``object_id`` are the normal case — the same
+    anchor may legitimately be queried by several programs — and never collide.
+    """
+
+    by_box: dict[tuple[int, ...], list[dict[str, Any]]] = {}
+    for summary in summaries:
+        box = summary["bbox_pixel"]
+        if box is not None:
+            by_box.setdefault(tuple(box), []).append(summary)
+    collisions: dict[str, list[str]] = {}
+    for members in by_box.values():
+        if len({item["anchor"]["object_id"] for item in members}) < 2:
+            continue
+        for item in members:
+            collisions[item["program"]] = sorted(
+                other["program"] for other in members
+                if other["program"] != item["program"]
+            )
+    return collisions
+
+
+def _apply_identity_collisions(summaries: list[dict[str, Any]],
+                               holes: dict[str, Any]) -> None:
+    """Refuse every value whose grounding box was claimed by another object.
+
+    This runs once after the whole run rather than inside the execution loop: a
+    program only becomes evidence of another one's ambiguity after it has been
+    grounded, so an in-loop guard would judge "published first, hit later" and
+    "hit first, published later" differently depending on document order.  The
+    per-program artifacts stay on disk exactly as produced — the chain really did
+    run, and that record is the evidence for this verdict; only the published
+    envelope is demoted.
+    """
+
+    collisions = _identity_collisions(summaries)
+    refusal = {
+        "status": _UNKNOWN,
+        "reason": _COLLISION_REASON,
+        # 判定的对象是 localize 交出的那个框,所以断点记在 localize;链后面的步骤
+        # 照常跑完了,它们的产物留在原地作证据。
+        "failed_step": "localize",
+    }
+    for summary in summaries:
+        peers = collisions.get(summary["program"], [])
+        # 没撞的程序也带这个字段:结果的 key 集合不随判定结果变化。
+        summary["collides_with"] = peers
+        if peers and summary["status"] == _PASS:
+            summary.update(refusal)
+    for envelope in holes.values():
+        peers = collisions.get(envelope["program"], [])
+        envelope["collides_with"] = peers
+        # 已经因为自己链上的失败记 UNKNOWN 的程序保留原 reason:那是更具体的事实,
+        # 冲突本身另有 collides_with 记账。
+        if peers and envelope["status"] == _PASS:
+            envelope.update({**refusal, "value": None})
 
 
 def programs_record(
@@ -773,6 +851,7 @@ def programs_record(
             )
             summaries.append(outcome["summary"])
             holes.update(outcome["holes"])
+        _apply_identity_collisions(summaries, holes)
 
         _write_json(root / "program_results.json", {
             "schema": _RESULTS_SCHEMA,
