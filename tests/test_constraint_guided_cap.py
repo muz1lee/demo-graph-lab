@@ -207,10 +207,11 @@ def test_three_arm_ablation_changes_generated_selection_code(
 ) -> None:
     graph_path = tmp_path / "graph.json"
     graph_path.write_text(json.dumps(_graph()))
+    calls = []
 
     def fake_chat(messages, output_dir, *, tag, **kwargs):
-        mode = tag.split("_", 1)[0]
-        context = selection_context(_graph(), mode=mode)[0]
+        calls.append(tag)
+        context = selection_context(_graph(), mode="vanilla")[0]
         program = deepcopy(_program())
         selection = program["stages"][0]["selection"]
         selection["current_constraints"] = context["current_constraints"]
@@ -223,13 +224,49 @@ def test_three_arm_ablation_changes_generated_selection_code(
     summary_path = ablation.run(graph_path, tmp_path / "experiment", repeats=1)
     summary = json.loads(summary_path.read_text())
 
+    assert calls == ["shared_000"]
+    assert summary["generation_design"] == "one_shared_program_per_repeat"
+    assert summary["generations"] == [{
+        "tag": "shared_000",
+        "repeat": 0,
+        "valid": True,
+        "violations": [],
+        "program_ref": "programs/shared_000.json",
+    }]
     assert all(item["valid"] == 1 for item in summary["modes"].values())
+    assert {item["source_generation"] for item in summary["attempts"]} == {
+        "shared_000"
+    }
     assert summary["paired"] == [{
         "repeat": 0,
         "all_valid": True,
         "action_ops_equal": True,
         "selection_code_differs": True,
     }]
+
+
+def test_shared_generation_failure_is_recorded_for_all_arms(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    graph_path = tmp_path / "graph.json"
+    graph_path.write_text(json.dumps(_graph()))
+
+    def fail_chat(*args, **kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(ablation.llm, "chat", fail_chat)
+
+    summary_path = ablation.run(graph_path, tmp_path / "experiment", repeats=1)
+    summary = json.loads(summary_path.read_text())
+
+    assert summary["generations"][0]["valid"] is False
+    assert [item["valid"] for item in summary["attempts"]] == [False] * 3
+    assert all(
+        item["violations"] == [
+            "model_call:RuntimeError:provider unavailable"
+        ]
+        for item in summary["attempts"]
+    )
 
 
 def _observation() -> ObservationPacket:

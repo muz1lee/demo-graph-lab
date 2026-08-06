@@ -125,7 +125,7 @@ dgl cap-ablate \
   --repeats 5
 ```
 
-`vanilla` 不引用示范约束，`local` 只写当前阶段约束，`backchain` 额外把涉及同一 manipulated object 的下游约束写入 `require_future(...)`。三组共享 graph、primitive contract 和模型设置。
+每个 repeat 只让 backend 生成一次共享的 primitive sequence 与 hole wiring；可信代码再从这同一份骨架派生三组 policy。`vanilla` 不引用示范约束，`local` 只写当前阶段约束，`backchain` 额外把涉及同一 manipulated object 的下游约束写入 `require_future(...)`。因此三组共享 graph、动作骨架、候选和模型调用，唯一实验变量是生成 CaP 中的 selection dataflow。
 
 只跑 planning-only 固定 replay：
 

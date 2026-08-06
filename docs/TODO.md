@@ -4,7 +4,7 @@
 
 ## 当前顺序
 
-1. 在 5090 上用同一份 `insert_tubes` graph 跑 `vanilla / local / backchain` 的配对 CaP 代码生成实验，统计合法率并保存三组 policy。
+1. 在 5090 上用同一份 `insert_tubes` graph 跑共享动作骨架的 `vanilla / local / backchain` 配对 CaP 实验，统计共享 StageProgram 合法率并保存三组 policy。
 2. 检查真实 graph 是否能为每个抓取阶段回传正确的同对象下游约束；人工复核错误 coreference，不能让字符串匹配替代任务语义。
 3. 把 `candidate.features.future_constraints` 的 synthetic 标签替换为真实几何/规划 compatibility result，先覆盖“当前 grasp 是否保留插入轴对齐、inside 和夹爪 clearance”。
 4. 冻结同一 observation 和候选集，比较三组 top-1、下游拒绝原因、UNKNOWN 率和计算成本。

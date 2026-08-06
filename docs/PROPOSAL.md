@@ -104,13 +104,13 @@ backend 输出结构化 `StageProgram`，决定 primitive sequence、hole/object
 
 ### 三组核心消融
 
-固定模型、graph、候选和执行预算，对比生成代码中的选择上下文：
+每个 repeat 只生成一次共享的 primitive sequence 与 hole wiring，再从同一份骨架确定性派生三组 CaP。固定模型、graph、动作骨架、候选和执行预算，只对比生成代码中的选择上下文：
 
 - `vanilla`：`begin_candidates → choose`；
 - `local`：再加入当前阶段的 `rank_by`；
 - `backchain`：再加入下游约束的 `require_future`。
 
-先测 StageProgram 合法率、三组生成代码是否真的不同；接入真实 compatibility 后再测 top-1 改变率、长程成功率和第一失败阶段。如果 `backchain` 不改变选择或不提升长程结果，主张不成立。
+先测共享 StageProgram 合法率、三组 selection 代码是否真的不同且 action ops 逐项相同；接入真实 compatibility 后再测 top-1 改变率、长程成功率和第一失败阶段。如果 `backchain` 不改变选择或不提升长程结果，主张不成立。
 
 ### 示范排序是否真的改变选择
 

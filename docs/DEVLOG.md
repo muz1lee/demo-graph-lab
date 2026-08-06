@@ -2,6 +2,14 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-07：三组消融改为共享动作骨架
+
+- 5090 `20260807_backchain_v6` 的首个独立生成三元组给出了一条反例：`vanilla_000` 与 `local_000` 合法且 action ops 逐项相同，`backchain_000` 虽正确复制全部 selection refs，却把 stage 1/3/5 的 `actions` 写成空列表，被 validator 拒绝。这个结果不能解释成下游约束无效；它证明原实验把「selection 方法」与「三次独立 StageProgram 生成的动作随机性」混在了一起。
+- `dgl cap-ablate` 因此改成每个 repeat 只调用一次 backend，生成一份共享 primitive sequence + hole wiring；可信代码从它确定性派生 `vanilla / local / backchain` 的 selection block，再走原有 validator、compiler、静态检查和两条 dry-run。三组现在共享同一动作骨架，`summary.json` 增加 `generation_design=one_shared_program_per_repeat`、`generations` 与每条 arm 的 `source_generation`。
+- 这不是 repair：共享骨架本身动作非法时三组一起失败，不让模型重写、不补动作；确定性派生只改变本来就由 graph 和实验 mode 唯一决定的 `current_constraints / downstream_constraints`。模型调用数从每轮 3 次降为 1 次，也移除了无研究价值的抄写噪声。
+
+本地 targeted 测试已覆盖「每轮只调用一次」「三组 action ops 相同、selection code 不同」和「共享调用失败时三组如实失败」；全量回归为 `703 passed`，两个 CLI help smoke test 与 `git diff --check` 均通过。当前停点：Gitea 推送和 5090 v7 尚待完成；v6 作为旧实验设计的原始诊断证据保留，不改写其产物。
+
 ## 2026-08-06：研究主线纠偏为 constraint-guided CaP
 
 - 核心因果路径改为：demo graph 提供当前与下游约束，backend 生成带 `selection` 的 StageProgram，compiler 把它降成显式的 `begin_candidates / rank_by / require_future / choose`，runtime 只执行这段候选数据流。新 CaP program 不再沿用 `begin_stage()` 里的旧隐藏选择；legacy program 仍保留原行为。

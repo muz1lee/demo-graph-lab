@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 from ..common import artifacts, llm
@@ -10,25 +11,49 @@ from .compiler import compile_prompt, dry_run, static_check
 from .program import compile_program, validate_program
 
 
-def _attempt(
+def _program_for_mode(source: dict, graph: dict, mode: str) -> dict:
+    """Derive one arm from a shared generated action-and-wiring skeleton."""
+    program = deepcopy(source)
+    contexts = backchain.selection_context(graph, mode=mode)
+    stages = program.get("stages")
+    if not isinstance(stages, list):
+        return program
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        context = contexts.get(stage.get("index"))
+        if context is None:
+            stage.pop("selection", None)
+            continue
+        grasp_holes = context["grasp_holes"]
+        if len(grasp_holes) != 1:
+            raise ValueError(
+                f"stage {stage.get('index')} must expose exactly one grasp hole"
+            )
+        stage["selection"] = {
+            "grasp_hole": grasp_holes[0],
+            "current_constraints": list(context["current_constraints"]),
+            "downstream_constraints": list(context["downstream_constraints"]),
+        }
+    return program
+
+
+def _generation(
     graph: dict,
     output_dir: Path,
     *,
-    mode: str,
     repeat: int,
     model: str | None,
-) -> dict:
-    tag = f"{mode}_{repeat:03d}"
-    prompt = compile_prompt(graph, selection_mode=mode)
+) -> tuple[dict | None, dict]:
+    """Generate one shared StageProgram skeleton for all three arms."""
+    tag = f"shared_{repeat:03d}"
+    prompt = compile_prompt(graph, selection_mode="vanilla")
     messages = [{"role": "user", "content": prompt}]
-    result = {
+    generation = {
         "tag": tag,
-        "mode": mode,
         "repeat": repeat,
         "valid": False,
         "violations": [],
-        "selection_calls": [],
-        "action_ops": [],
     }
     try:
         raw = llm.chat(
@@ -40,25 +65,62 @@ def _attempt(
             # before emitting the six-stage JSON program.
             max_tokens=20000,
             temperature=0.1,
-            role="cap_selection_ablation",
+            role="cap_shared_program_ablation",
             input_refs=["graph.json", "package:prompts/compile_policy.md"],
         )
     except Exception as error:
-        result["violations"] = [
+        generation["violations"] = [
             f"model_call:{type(error).__name__}:{error}"
         ]
-        return result
+        return None, generation
     try:
-        program = llm.parse_json_block(raw)
+        source = llm.parse_json_block(raw)
+    except ValueError as error:
+        generation["violations"] = [str(error)]
+        llm.record_result(output_dir, tag, parse_error=str(error))
+        return None, generation
+
+    violations = validate_program(source, graph, selection_mode="vanilla")
+    llm.record_result(
+        output_dir, tag, parsed=source, validation_errors=violations,
+    )
+    source_ref = Path("programs") / f"{tag}.json"
+    artifacts.write_json(output_dir / source_ref, source)
+    generation.update(
+        valid=not violations,
+        violations=violations,
+        program_ref=str(source_ref),
+    )
+    return source, generation
+
+
+def _attempt(
+    graph: dict,
+    output_dir: Path,
+    *,
+    mode: str,
+    repeat: int,
+    source: dict,
+    generation_tag: str,
+) -> dict:
+    tag = f"{mode}_{repeat:03d}"
+    result = {
+        "tag": tag,
+        "mode": mode,
+        "repeat": repeat,
+        "source_generation": generation_tag,
+        "valid": False,
+        "violations": [],
+        "selection_calls": [],
+        "action_ops": [],
+    }
+    try:
+        program = _program_for_mode(source, graph, mode)
     except ValueError as error:
         result["violations"] = [str(error)]
-        llm.record_result(output_dir, tag, parse_error=str(error))
         return result
 
     violations = validate_program(program, graph, selection_mode=mode)
-    llm.record_result(
-        output_dir, tag, parsed=program, validation_errors=violations,
-    )
     result["violations"] = violations
     artifacts.write_json(output_dir / "programs" / f"{tag}.json", program)
     if violations:
@@ -120,21 +182,42 @@ def run(
     artifacts.write_json(output_dir / "graph.json", graph)
 
     attempts = []
+    generations = []
     summary_path = output_dir / "summary.json"
     for repeat in range(repeats):
-        for mode in backchain.MODES:
-            attempts.append(_attempt(
-                graph,
-                output_dir,
-                mode=mode,
-                repeat=repeat,
-                model=model,
-            ))
-            artifacts.write_json(summary_path, {
-                "graph_ref": "graph.json",
-                "repeats_requested": repeats,
-                "attempts": attempts,
-            })
+        source, generation = _generation(
+            graph, output_dir, repeat=repeat, model=model,
+        )
+        generations.append(generation)
+        if source is None:
+            for mode in backchain.MODES:
+                attempts.append({
+                    "tag": f"{mode}_{repeat:03d}",
+                    "mode": mode,
+                    "repeat": repeat,
+                    "source_generation": generation["tag"],
+                    "valid": False,
+                    "violations": list(generation["violations"]),
+                    "selection_calls": [],
+                    "action_ops": [],
+                })
+        else:
+            for mode in backchain.MODES:
+                attempts.append(_attempt(
+                    graph,
+                    output_dir,
+                    mode=mode,
+                    repeat=repeat,
+                    source=source,
+                    generation_tag=generation["tag"],
+                ))
+        artifacts.write_json(summary_path, {
+            "graph_ref": "graph.json",
+            "repeats_requested": repeats,
+            "generation_design": "one_shared_program_per_repeat",
+            "generations": generations,
+            "attempts": attempts,
+        })
 
     by_mode = {
         mode: {
@@ -167,6 +250,8 @@ def run(
     artifacts.write_json(summary_path, {
         "graph_ref": "graph.json",
         "repeats_requested": repeats,
+        "generation_design": "one_shared_program_per_repeat",
+        "generations": generations,
         "modes": by_mode,
         "paired": paired,
         "attempts": attempts,
