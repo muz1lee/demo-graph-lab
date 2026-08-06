@@ -625,6 +625,60 @@ def test_geometry_unknown_propagates_to_every_hole_of_that_program(tmp_path) -> 
     )["fields"] == {}
 
 
+def test_segment_accepts_one_pixel_overflow_like_the_single_anchor_chain(
+    tmp_path,
+) -> None:
+    # 两条链共用 object_record._mask_outside_box,所以单 anchor 链收下的那张 1px
+    # 量化溢出 mask 在这里也必须被收下;不同规的话同一张 mask 会一边 PASS 一边
+    # UNKNOWN。守卫内联零容差时这条会红,是这次收敛的回归位。
+    box = [3, 0, _WIDTH, _HEIGHT]
+    root, _, program_path = _run(
+        tmp_path,
+        box_overrides=(("test tube", box),),
+        mask_bounds=(1, 7, 2, 6),  # box x0=3,越出恰好一个像素列
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    axis = _results(root)["holes"]["s0.tube_long_axis"]
+    assert axis["status"] == "PASS"
+    assert axis["failed_step"] is None
+    assert axis["value"] is not None
+
+
+def test_segment_still_rejects_a_three_pixel_excursion(tmp_path) -> None:
+    # 容差只吸收量化抖动,不放宽分割质量:越出三列仍然按越框拒绝,与单 anchor
+    # 链的同名用例同规。
+    box = [3, 0, _WIDTH, _HEIGHT]
+    root, _, program_path = _run(
+        tmp_path,
+        box_overrides=(("test tube", box),),
+        mask_bounds=(1, 7, 0, 6),  # box x0=3,越出三个像素列
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    axis = _results(root)["holes"]["s0.tube_long_axis"]
+    assert axis["status"] == "UNKNOWN"
+    assert axis["value"] is None
+    assert axis["reason"] == "segmentation_mask_outside_box"
+    assert axis["failed_step"] == "segment"
+    # all-or-nothing:守卫在 segment 就断链,几何一步没跑。
+    assert not (root / "programs/p0_0/geometry").exists()
+
+
 def test_two_object_ids_on_one_box_demote_each_other(tmp_path) -> None:
     # 一个框不可能同时是两个物体:证据分不清身份,两边都不能发布。
     shared = [3, 0, 7, 8]

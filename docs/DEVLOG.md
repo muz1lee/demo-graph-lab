@@ -26,6 +26,16 @@
 - 本轮**没有**调用 Qwen、SAM3、camera、GraspNet、planner，也没有重跑 simulator——修改依据是 8/6 那次实测留下的数字，测试全部离线。
 
 当前停点：只动了 `oracle_runtime.py` 与 `tests/test_motion_planning.py`，没碰 planning/perception/policy，`docs/API.md` 的 `grasp_at` 签名与语义不变（翻转是到位后的内部兜底，不进契约）。**明确没做**：`lift` 仍是**开环发固定步数**（`LIFT_DZ/0.02` 步，每步 `_verify_moved` 的返回值被丢弃，只在结束后用总位移和外力做承重记账）——闭环化是下一轮，本轮刻意没动；也没做关节限位表、没把翻转推广到 `align`/`approach`、没给 `_wait_settle` 的 `timeout` 加上调用方处置（现在两个调用方都只是继续往下走）。已知接缝：`_tool_axes` 的行内注释把下标 0 写成「+x 接近轴」、下标 1 写成「+y 开合轴」，与模块常量 `APPROACH_AXIS_IDX=2 / FINGER_AXIS_IDX=1` 和 `_tdx` 的文档（接近轴 = 工具 +z）不一致；代码按常量走是对的，注释是旧的，本轮外科手术式改动没有顺手动它。
+## 2026-08-06：越框守卫两条链收敛补测试（裁决确认：共用一份守卫）
+
+- **裁决确认**：`object_record` 的单 anchor 链与 `program_record` 的感知程序执行器**必须共用同一份越框守卫**。一张 mask 只有一个判定，不同规的话 `segment` 收下的记录会在另一条链上被判 `UNKNOWN`，同一份 Qwen 框加 SAM3 mask 走哪条路径决定它的死活——这不是可以按路径调的策略，是同一个物理事实；
+- **代码侧本轮没动**：审计发现 08-05 的 `5c87aa3` 已经把 `program_record._segment` 的内联零容差换成共享的 `_mask_outside_box`，但那个 commit 只改了 `src/`，**没留测试、也没在 DEVLOG 记账**。因此下面 08-05「两项裁决落地」条目末尾那句「仍是零容差……留给下一轮裁决」在写下 3 分钟后（`f17681a` 10:54 → `5c87aa3` 10:57）就已经过期，本条即是它的结案；
+- **测试补两条而不是一条**：只镜像 `test_segment_still_rejects_a_three_pixel_excursion` 是不够的——3px 拒绝在**旧的零容差实现下同样通过**，它测的是守卫有没有牙齿，不是两条链有没有对齐。真正钉住这次收敛的是新增的 1px 接受用例（`test_segment_accepts_one_pixel_overflow_like_the_single_anchor_chain`）：box `x0=3`、mask 越出恰好一列，程序须 `PASS`。两条都用 `box_overrides` 钉住 tube 查询的框，沿用既有假 Qwen/SAM3 手法，零网络；
+- 反向验证：把 `_segment` 按回内联零容差后，1px 用例转红（`UNKNOWN != PASS`）、3px 用例仍绿（正是上一条说的盲区），而 `test_object_record.py` 的同名两条全程保持绿——分歧精确定位在两条链之间，不是共享 helper 坏了。验证后已 `git checkout` 复原；
+- 顺带核实全仓不存在第四份实现：`src/` 内 `_mask_outside_box` 恰好三个调用点（`object_record` 的 `segment_record` 与 `_validated_mask_evidence`、`program_record` 的 `_segment`），两文件之外没有任何内联清框写法；
+- 本地 `461 passed`（基线 459 + 2），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：只动了 `tests/test_program_record.py` 与本文件，`src/` 一行未改。明确没做：改容差常量的值、把容差做成可配置项、动 08-05 那条历史条目的正文（历史按当时事实保留，过期由本条结案）、把 `_mask_outside_box` 从私有 helper 提成公开 API（两个消费者同在 `execution/`，现在这样够用）。
 
 ## 2026-08-05：感知程序跨程序身份守卫（同框不同 object → 双双 UNKNOWN）
 
