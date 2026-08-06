@@ -166,7 +166,20 @@ dgl planning-record --record-dir /path/to/record \
 
 `ground/segment/project/predict` 这条链一个 `record-dir` 只处理一个 `--hole`/anchor；省略 `--hole` 时只允许 stage 恰好有一个 `grasp_candidate`。它是 component record，不是完整 stage solve。不能把多个不同 capture 的单-anchor record 拼成“同一 observation”的 candidate bundle。
 
-`programs` 是同一次 capture 下的多 anchor 路径：以 capture 为父 observation，按 `perception_program.json` 逐程序执行，每个程序有自己的 anchor 和自己的 Qwen/SAM3/几何产物，结果写进 `programs/` 与 `program_results.json`。它和上面那条链互斥——任一条推进了 manifest 状态，另一条就不再接受这个 record 目录。发布的几何值仍然停在 `camera_head_optical`，identity 仍是 `MODEL_PROPOSED`，因此仍然不是 candidate，也没有接到 `solve()`。
+`programs` 是同一次 capture 下的多 anchor 路径：以 capture 为父 observation，按 `perception_program.json` 逐程序执行，每个程序有自己的 anchor 和自己的 Qwen/SAM3/几何产物，结果写进 `programs/` 与 `program_results.json`。它和上面那条链互斥——任一条推进了 manifest 状态，另一条就不再接受这个 record 目录。发布的几何值停在 `camera_head_optical`，identity 是 `MODEL_PROPOSED`。
+
+要让这些值成为 `solve()` 能用的 base 系候选绑定，还要两个本地步骤（零网络）：
+
+```bash
+dgl planning-record --record-dir /path/to/record \
+  --step identity-accept --program p1_1 --object-id rack \
+  --accepted-by <name> --basis "<核对了什么>"
+
+dgl planning-record --record-dir /path/to/record \
+  --step project-base --extrinsics /path/to/camera_extrinsics.json
+```
+
+`identity-accept` 是人对某个 `(program, object_id)` 的显式接受，写独立的 `identity_acceptance.json`；没有它的洞不进 candidate。`project-base` 用一份已测量的相机外参把 optical 值变换进 `robot_base`（point 带升降修正，axis 只吃 `R`），写 `base_frame_values.json`。两者都不调用任何模型或网络。详见 `docs/API.md` 第 7 节。
 
 `predict` 要求 GraspNet 已由实验环境单独启动，并且只接受 loopback URL。仓库里的 client 不负责安装模型、启动常驻服务或接收局域网请求。
 

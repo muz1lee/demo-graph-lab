@@ -5,8 +5,8 @@
 ## 当前顺序
 
 1. 在正确的 `insert_tubes` scene 上运行逐对象记录链，人工复核三根 tube 的 Qwen box、SAM3 mask，以及 center/right/left hole geometry 的 `PASS/UNKNOWN` 原因。
-2. “一次 capture、多个 anchor 子任务”已由 `planning-record --step programs` 提供（每个感知程序一个 anchor，一条 `fit_opening` 链同时发布 center/axis）。剩下的部分是：把 grasp 链的 tube cloud 复用给同一 anchor 的 axis；在同一 observation 下组装 stage required holes；增加人工或独立 identity 接受记录，`MODEL_PROPOSED` 不能直接升级为 candidate。
-3. 记录 lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 标定；live graph hole 要求 `robot_base`，未有完整变换前不生成 candidate。
+2. “一次 capture、多个 anchor 子任务”已由 `planning-record --step programs` 提供（每个感知程序一个 anchor，一条 `fit_opening` 链同时发布 center/axis）。剩下的部分是：把 grasp 链的 tube cloud 复用给同一 anchor 的 axis；在同一 observation 下组装 stage required holes。
+3. 给只读 proprio 通道接一个升降关节读数源：`camera_head_optical → robot_base` 变换与 `identity-accept` 已实现（`docs/API.md` 第 7 节），但 `capture` 目前只能读两条手臂的 `get_qpos`，`lift_position_m` 记 `null`，因此真实记录里所有 `point_3d` 洞都会拒绝。`graspnet_parallel_jaw → runtime_ee` 标定仍然没有，grasp 洞不走这条路径。
 4. 从受检 object extent 和 grasp rotation 派生排序特征，再接三个真实 hard checker：reachability 检查未裁剪目标和最终残差；collision 固定 K1 参数；gripper width 在米制 opening 标定完成前保持 `UNKNOWN`。
 5. 把 observation、normalized candidates 和三个 certificate 冻结为第一份真实 replay，复现过滤、排序、日志和无候选路径。
 6. 审查一个非特权 stage 的 gate 输入与 abort 行为，然后停下评审；得到明确允许后才连接控制。

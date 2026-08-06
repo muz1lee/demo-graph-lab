@@ -405,7 +405,27 @@ model_calls/compile_perception/
 └── program_results.json           每个被 provide 的 (stage, hole) 一条 envelope
 ```
 
-`program_results.json` 的 envelope 形状、`camera_head_optical` 的诚实 frame、`MODEL_PROPOSED` identity 和 all-or-nothing 失败语义见 `docs/API.md` 第 6 节的「执行」小节。这些值还没有接到 `PlanningOnlyRuntime.solve()`：标定链、identity 接受和 candidate normalization 都还没做。
+`program_results.json` 的 envelope 形状、`camera_head_optical` 的诚实 frame、`MODEL_PROPOSED` identity 和 all-or-nothing 失败语义见 `docs/API.md` 第 6 节的「执行」小节。
+
+这些 optical 值再经两个**本地**步骤才成为 base 系候选绑定（同样在 record 目录里，零网络）：
+
+```bash
+dgl planning-record --record-dir <dir> --step identity-accept \
+  --program p1_1 --object-id rack --accepted-by <name> --basis <evidence>
+
+dgl planning-record --record-dir <dir> --step project-base \
+  --extrinsics <camera_extrinsics.json>
+```
+
+```text
+<record-dir>/
+├── identity_acceptance.json    人对 (program, object_id) 的显式接受,含 by/basis/框/证据目录
+└── base_frame_values.json      每个 (stage, hole) 一条 robot_base envelope,
+                                含 status/reason、identity_accepted、
+                                source_frame/source_value 与外参 ref
+```
+
+`project-base` 需要一份 `demo_graph_lab.camera_extrinsics.v1` 记录（不在 record 目录里，是独立的标定产物），并从该次 observation 自己的 `proprioception.json` 读 `lift_position_m`：拿不到同时刻的升降读数时 `point_3d` 洞记 `UNKNOWN`，`axis_3d` 洞不受影响（方向只吃 `R`）。manifest 推进到 `BASE_VALUES_PROJECTED`，重跑允许——多接受一个身份就该能多出一个候选值，不必重采。schema、拒绝规则、质心禁令与身份闸门见 `docs/API.md` 第 7 节。
 
 ## Backend 调用公共产物
 

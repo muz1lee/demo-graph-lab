@@ -79,11 +79,11 @@ synthetic fixture candidates
 
 `StageProgram` 的 hole wiring 决定每阶段真正需要哪些值。`PlanningOnlyRuntime` 可以直接接收已经校验的 program 并据此收窄 required holes；没有 program 时保守要求该 stage 的全部几何 holes。`scalar` 和 `runtime_condition` 只能来自另一条可信 runtime resolver；candidate provider 提供这两类值会 `FAIL`，需要但尚无可信 resolver 时为 `UNKNOWN`。
 
-`planning-record` 提供七个显式步骤：`plan / capture / ground / segment / project / predict / programs`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment/programs` 分别要求 `--allow-model-read`（`programs` 会代表每个感知程序调用 Qwen 与 SAM3，属模型读）；`project` 只做本地计算。没有一键入口。`programs` 另外要求 `--perception-program` 指向已发布的 `perception_program.json`，把 manifest 从 `OBSERVATION_RECORDED` 推进到 `PROGRAMS_RECORDED`；它和 `ground/segment/project/predict` 互斥地消费同一次 capture，任何一条路径推进了状态，另一条就不再接受这个 record 目录。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。`project` 的 `object/result.json` 中 `status` 由几何证据派生：请求了几何但其 `opening_geometry_status` 不是 `PASS` 时为 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何时才是 `ACCEPTED`；record 本身确实发生，因此 manifest 的 `OBJECT_CLOUD_RECORDED` 和退出码不受影响。
+`planning-record` 提供九个显式步骤：`plan / capture / ground / segment / project / predict / programs / identity-accept / project-base`。`plan` 零网络；`capture/predict` 分别要求 `--allow-live-read`；`ground/segment/programs` 分别要求 `--allow-model-read`（`programs` 会代表每个感知程序调用 Qwen 与 SAM3，属模型读）；`project / identity-accept / project-base` 只做本地计算，后两个见第 7 节。没有一键入口。`programs` 另外要求 `--perception-program` 指向已发布的 `perception_program.json`，把 manifest 从 `OBSERVATION_RECORDED` 推进到 `PROGRAMS_RECORDED`；它和 `ground/segment/project/predict` 互斥地消费同一次 capture，任何一条路径推进了状态，另一条就不再接受这个 record 目录。capture 的同步 render、camera cache 更新和 frame-id 增量写入 `sensor/call.json`。每次 Qwen/SAM3 请求、raw reply、校验结果和耗时分别保存在 `grounding/` 与 `segmentation/`，token 不写入 artifact。`project` 的 `object/result.json` 中 `status` 由几何证据派生：请求了几何但其 `opening_geometry_status` 不是 `PASS` 时为 `GEOMETRY_UNKNOWN`，几何 `PASS` 或本次未请求几何时才是 `ACCEPTED`；record 本身确实发生，因此 manifest 的 `OBJECT_CLOUD_RECORDED` 和退出码不受影响。
 
-`ground/segment/project/predict` 这条 V1 链一次只处理一个 graph anchor，它不能在同一个 observation 下同时组装 tube grasp/axis 与 opening center/axis。`programs` 是那个「以 capture 为父 observation、以 anchor 为子任务」的结构：同一次冻结 capture 下按 `PerceptionProgram` 逐程序执行，每个程序有自己的 anchor、自己的 Qwen box、SAM3 mask 和几何产物，互不共享中间量。它仍然没有接到 `PlanningOnlyRuntime.solve()`——发布的值停在 optical frame，没有 identity 接受，也没有 candidate normalization；在这三件事完成之前只报告 per-hole component artifact，不报告完整 stage candidate。
+`ground/segment/project/predict` 这条 V1 链一次只处理一个 graph anchor，它不能在同一个 observation 下同时组装 tube grasp/axis 与 opening center/axis。`programs` 是那个「以 capture 为父 observation、以 anchor 为子任务」的结构：同一次冻结 capture 下按 `PerceptionProgram` 逐程序执行，每个程序有自己的 anchor、自己的 Qwen box、SAM3 mask 和几何产物，互不共享中间量。它发布的值停在 optical frame；接到 `PlanningOnlyRuntime.solve()` 的是第 7 节那两个本地步骤（`project-base` 做变换、`identity-accept` 开身份闸门）。没有它们时 `programs` 的产物只是 per-hole component artifact，不是 stage candidate。
 
-真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。可信代码先在 mask 上筛 depth，再同步生成 `Nx3` object cloud 与 `Nx2 (row,col)` lineage；`object_assignment.json` 记录 observation、被请求的 graph anchor、frame、calibration 和 Qwen/SAM3 evidence，但 identity 状态固定为 `MODEL_PROPOSED`。opening center/axis 由局部 RGB-D 对比与开口周围 ring 的局部支撑面重新计算，证据不足返回 `UNKNOWN`，不采用模型 pose。GraspNet 只消费 object cloud，raw detector ID 原值保留；仓库仍不发布 GraspNet→graph candidate converter。之后必须补 identity 接受、lift-aware `camera_head_optical → robot_base` 与 `graspnet_parallel_jaw → runtime_ee` 变换。
+真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。可信代码先在 mask 上筛 depth，再同步生成 `Nx3` object cloud 与 `Nx2 (row,col)` lineage；`object_assignment.json` 记录 observation、被请求的 graph anchor、frame、calibration 和 Qwen/SAM3 evidence，但 identity 状态固定为 `MODEL_PROPOSED`。opening center/axis 由局部 RGB-D 对比与开口周围 ring 的局部支撑面重新计算，证据不足返回 `UNKNOWN`，不采用模型 pose。GraspNet 只消费 object cloud，raw detector ID 原值保留；仓库仍不发布 GraspNet→graph candidate converter。identity 接受与 lift-aware `camera_head_optical → robot_base` 变换见第 7 节；`graspnet_parallel_jaw → runtime_ee` 变换仍未做，因此 grasp 洞不走那条路径。
 
 在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`；缺少某项排序特征时，对应 preference meta 是 `UNCHECKABLE`，只有部分候选有特征时为 `PARTIAL`，不能把 ID tie-break 误写成 demo ranking。固定 synthetic replay 已经验证一次 hard filter 后共享 accepted set 的 demo/no-demo 对照；这不是 live 感知或物理 checker 结果。当前 replay loader 只接受 `synthetic_contract_fixture`，在真实 provenance/manifest contract 完成前会拒绝任何 `recorded_real` 标签。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
 
@@ -184,7 +184,7 @@ head RGB-D、Qwen/SAM3、object cloud、opening geometry 和 GraspNet `/predict`
 - `bbox_1000 → bbox_pixel` 是覆盖式换算——min 边 `floor`、max 边 `ceil`，像素框完整覆盖 1000 制连续框；client 与 record 校验用同一份约定，不一致的像素框直接拒绝。mask 越出该像素框只容许每边 1px 量化抖动（分割器在量化边界上的像素级差，不是放宽分割质量），越出更多仍按越框 fail-closed；
 - graph identity 只来自已校验 anchor，模型回复只作为 evidence；assignment 与 object cloud 由本地代码发布，GraspNet 实际只消费该 object-only `point_cloud_path` 与 `extra.max_grasps`；
 - baseline 的 `pred_decode()` 把所有 `object_id` 固定为 `-1`，raw 记录可以成功，candidate normalization 必须 fail-closed；
-- head camera 挂在可升降 link 上；静态 extrinsics 没有实时 lift 修正，不能把 optical cloud 改标签成 robot base；
+- head camera 挂在可升降 link 上；改标签仍然禁止，真正的变换是第 7 节那个独立步骤，且必须带上与该次 observation 同时刻的 `q_lift`，拿不到就记 `UNKNOWN`；
 - recorded reply 的 point-cloud ref、frame ID 和 coordinate frame 必须与当前 observation 精确一致，structured grasp fields 还要与原始 17D array 一致；
 - point-cloud binding manifest、完整 projection manifest、pixel lineage 和 assignment 分开保存；grasp center 不能直接当 TCP pose；
 - GraspNet 不做碰撞过滤，也不直接给 `approach_tilt_deg` 或 `height_fraction`；
@@ -312,7 +312,7 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
  "evidence_refs": ["<...>"], "program": "p0_0", "collides_with": []}
 ```
 
-`frame` 如实写测量所在的相机光学系。graph hole 请求的是 `robot_base`，而标定链还没建，所以下游 typed-hole 校验会因为 frame 不一致而拒绝这些值——这是设计意图，不是缺陷；把 optical 数值改标签成 `robot_base` 才是错误。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受。
+`frame` 如实写测量所在的相机光学系。执行器**不做**任何 frame 变换，所以把它的 envelope 直接喂给 typed-hole 校验仍然会因 frame 不一致被拒——这是设计意图，不是缺陷。真正的变换是第 7 节那个独立的本地步骤，它需要额外输入（外参记录 + 与该次 observation 同时刻的 `q_lift`）；把 optical 数值改标签成 `robot_base` 依然是错误。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受。
 
 失败时 `status=UNKNOWN`、`value=null`，`reason` 是机器可读码（客户端拒绝如 `grounding_reference_count_not_one`，几何估不出来时直接沿用估计器自己的 reason 如 `insufficient_depth_contrast`），`failed_step` 指出链上断在哪个算子，`evidence_refs` 保留已经产出的证据。all-or-nothing 在这里是硬约束：一个程序的全部 `provides` 要么都有值，要么都是 `UNKNOWN`。一个程序失败不影响同一次 capture 下的其它程序。
 
@@ -334,3 +334,85 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
 - 失败语义是 all-or-nothing：链在任何一步失败，该程序的 `provides` 一个都不产出。部分成功会让上层以为 hole 已填，是 bug 不是可接受的降级；
 - 身份判定跨程序生效：一个 pixel box 只能属于一个 graph object，两个 `object_id` 不同的程序接受同一个框时双双 `UNKNOWN`；同一个 `object_id` 的重复查询不算冲突。graph anchor 的 distinguisher 必须在单帧里可判——`localize` 只看得到一张冻结图，写成时序或历史描述（「第三个被插入的」）时模型只能退化成某种空间描述，退化的终点就是这条守卫；
 - 未被任何程序覆盖的几何 hole 不是违规，它们继续走 graph resolver 老路。`coverage_by_stage` 只产出 per stage 的 covered/uncovered 名单供记录，不做准入判断。
+
+## 7. camera → robot_base 变换与 base 系候选
+
+第 6 节的 envelope 停在 `camera_head_optical`，而 graph 的几何 hole 请求 `robot_base`。本节是这两者之间那一步：它是**本地计算**（零网络），输入是一份已测量的外参记录、一次已冻结的 record 目录，以及一份独立的 identity 接受记录。实现在 `perception/frames.py`（变换与标定 schema）与 `execution/program_projection.py`（逐洞投影、身份闸门、runtime provider）。
+
+### 标定记录 schema
+
+`demo_graph_lab.camera_extrinsics.v1` 是闭集记录，字段全部必填：
+
+```json
+{"schema": "demo_graph_lab.camera_extrinsics.v1",
+ "frame_from": "camera_head_optical", "frame_to": "robot_base",
+ "axis_convention": {"x": "right", "y": "down", "z": "forward"},
+ "rotation": [[...], [...], [...]],
+ "translation": [0.097078, 0.037055, 1.161351], "translation_unit": "meter",
+ "lift_dependency": {"link": "lifting_link", "joint_type": "prismatic",
+   "axis_base": [0, 0, 1], "limits_m": [-0.35, 0.0],
+   "q_lift_assumed": 0.0, "correction": "translate_base_origin"},
+ "method": "...", "provenance": {"calibrated_at": "...", "operator": "...",
+   "source_refs": ["..."]},
+ "validation": {"table_normal_angle_deg": 0.055,
+   "table_height_residual_m": 0.00069, "evidence_refs": ["..."]}}
+```
+
+`rotation` 与 `quaternion_xyzw` 只能给一个（同一件事的两种写法，两个都给就要回答哪个是真的）。校验包含 `SO(3)` 成员资格与 `det ≈ +1`：镜像矩阵会把每个轴悄悄翻过来，绝不能进 hole 值。`axis_convention` 只接受 OpenCV 光学系——`R` 的数值就是在这个约定下解出来的，换约定它直接失效，所以不做任何别名。`provenance` 与 `validation` 必填，是因为一份没有来历、没有残差的变换事后无法审计。
+
+### 两个变换与升降依赖
+
+- `point_to_base(p_cam, extrinsics, q_lift)`：`t_eff = t + axis * (q_lift - q_lift_assumed)`。相机挂在棱柱 `lifting_link` 上，一份静态 `(R, t)` 只在一个升降位置成立；
+- `direction_to_base(d_cam, extrinsics)`：**只吃 `R`，永不加 `t`**，结果重新归一。方向没有原点，加 `t` 会把单位轴变成一个随相机位置漂移的向量。因此 axis hole 与升降位置无关，`q_lift` 缺失时它照常可用，而 point hole 必须拒绝。
+
+拒绝规则（返回带 reason 的 `UNKNOWN`，不抛裸异常，一个洞失败不影响同次观测的其它洞）：
+
+| reason | 触发 |
+|---|---|
+| `q_lift_unavailable` | 拿不到与该次 observation 同时刻的升降读数 |
+| `q_lift_out_of_limits` | 读数超出记录声明的关节限位，它不是一个升降位置 |
+| `q_lift_correction_unavailable` | 记录声明 `correction=none`，而实际位移超过 2mm |
+
+2mm 是 8/6 标定残差的量级（修正后 +0.69mm），再大就不是噪声而是没被记账的升降位移。**绝不发布静默偏移的位姿**：默认按标定姿态处理会让误差等于升降行程，而下游看不到任何异常。
+
+`q_lift` 的来源是该次 observation 自己的 proprioception 记录（`observation.robot_state.evidence_ref` 指向的那份，`lift_position_m` + `lift_source`，schema `demo_graph_lab.readonly_proprioception.v2`）。当前只读 proprio 通道只有两条手臂的 `get_qpos`，没有升降关节来源，因此 capture 如实写 `null`，consuming 端据此拒绝 point 类洞——这是当前真实状态，不是暂时的占位。
+
+### 投影产物
+
+`planning-record --step project-base --extrinsics <record>` 逐洞投影 `program_results.json`，写 `base_frame_values.json`（`demo_graph_lab.base_frame_hole_values.v1`）：
+
+```json
+{"value": [0.6, 0.0, 0.75069], "frame": "robot_base",
+ "calibration_ref": "<...>/head_extrinsics.json", "object_id": "rack",
+ "identity_status": "MODEL_PROPOSED", "identity_accepted": true,
+ "status": "PASS", "reason": "transformed_with_lift_corrected_translation",
+ "hole_type": "point_3d", "resolver": "part_center", "program": "p1_1",
+ "source_frame": "camera_head_optical", "source_value": [...],
+ "source_calibration_ref": "<...>/calibration/bundle.json",
+ "evidence_refs": ["<...>"]}
+```
+
+前四个键与 `selection/binding.py::_CANDIDATE_VALUE_FIELDS` 逐字对齐，候选只携带它们；其余字段留在记录里。变换后这个数值的有效性由**外参**决定，所以 `calibration_ref` 换成外参记录，产生相机系数值的内参记录留在 `source_calibration_ref` 与证据里。上游已经是 `UNKNOWN` 的洞原样保留它自己的 reason（`grounding_identity_collision` 比「无法变换」具体得多）。
+
+派生的 base 系 observation 保留原 `observation_id`（同一次 capture，只是换了表述），`frame` 与 `calibration_ref` 换成 base 与外参，因此 typed-hole 校验的 frame/calibration/observation 三项比较是同类相比，不存在隐式 alias。
+
+### 质心禁令
+
+只有绑定到**拟合几何中心**的 resolver 可以填 `point_3d`（当前只有 `part_center → fit_opening.center`）。`crop_points` 的点云质心是「可见表面的重心」而不是部件中心：8/6 实测它比实体中心偏向相机约一个半径（共模 `x ≈ −10.7mm`、`z ≈ +12.9mm`），接到 `point_3d` 等于把这个偏置直接变成插入点误差。v1 里 `fit_axis` 只发布 `axis`，所以这条路径目前不存在；名单写在 `program_projection.py::_POINT_RESOLVERS`，将来有人接 POINTS 质心时必须先显式改这份名单，而不是靠「类型都是 `point_3d`」混进来。投影同时要求程序链的终点算子与 hole 的 resolver 绑定一致，否则记 `chain_terminal_does_not_match_resolver`。
+
+### identity-accept
+
+Qwen/SAM3 给的是框和掩码，不是「这个框就是 anchor 指名的那个 graph object」的证明，所以执行器发布的 identity 一律 `MODEL_PROPOSED`。投影产物**保留**这个状态，并且默认**不可**进 candidate。唯一的出口是一条独立记录：
+
+```bash
+dgl planning-record --record-dir <dir> --step identity-accept \
+  --program p1_1 --object-id rack --accepted-by <name> --basis <evidence>
+```
+
+写 `identity_acceptance.json`（`demo_graph_lab.identity_acceptance.v1`），每条含 `program / object_id / accepted_by / basis / accepted_at / bbox_pixel / evidence_dir`。四个字段都必须显式给：这是人的判断，不是任何模型输出的推论。接受**只能加**不能减——它不能接受一个 anchor 对不上的 `object_id`，也不能接受一个自身 `UNKNOWN` 的程序（否则「人工接受」就成了推翻同框守卫的后门）。
+
+闸门有两道，方向不同：候选只携带 `status=PASS` **且** `identity_accepted=true` 的洞；派生 observation 也只把被接受的对象列为「已观测」。因此即使有人手工拼一个候选，typed-hole 校验也会在 `object_not_observed` 上拦住。
+
+### 现在能说什么
+
+`base_frame_values.json` 加上一条 acceptance 记录后，`execution/program_projection.py::base_frame_sources` 直接充当 `PlanningOnlyRuntime` 的 observation/candidate provider，离线测试可以从冻结记录一路走到 `solve()` 并拿到 base 系 `point_3d/axis_3d`。这证明的是**合约打通**：frame、calibration、observation 绑定、identity 闸门和 typed-hole 校验在一条真实数值上自洽。它**不**证明真实链已经跑通——第 2 节「执行前门槛」的四项一条都没变，reachability/collision/gripper-width 仍是未接入的 checker，`execution_enabled` 保持 `False`；`pose_se3`（grasp）洞不走本节路径，仍要独立的 tool transform 与 evidence artifact。
