@@ -9,6 +9,7 @@
   dgl report    --task insert_tubes
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
+  dgl repair    --run-dir runs/insert_tubes/<ts> --episode <episode_*.json> [--model slug]
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
   dgl planning-record --record-dir <dir> \\
       [--step plan|capture|ground|segment|project|predict|programs]
@@ -49,6 +50,16 @@ def main(argv=None):
             p.add_argument("--max-stages", type=int, default=None)
         if name == "metrics":
             p.add_argument("--gold", required=True)
+    repair = sub.add_parser(
+        "repair",
+        help="revise one published StageProgram from one of its failed episodes",
+    )
+    repair.add_argument("--run-dir", required=True)
+    repair.add_argument(
+        "--episode", required=True,
+        help="episode report written by `dgl-oracle episode`",
+    )
+    repair.add_argument("--model", default=None)
     replay = sub.add_parser(
         "planning-replay",
         help="compare demo/no-demo selection on one frozen, read-only replay",
@@ -102,6 +113,19 @@ def main(argv=None):
     record.add_argument("--allow-live-read", action="store_true")
     record.add_argument("--allow-model-read", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.cmd == "repair":
+        artifacts.load_env()
+        from .policy import compiler, repair as repair_loop
+
+        try:
+            report_path = repair_loop.run(args.run_dir, args.episode, args.model)
+        except (ValueError, FileNotFoundError) as error:
+            print(f"[repair] REFUSED: {error}")
+            return 1
+        report = artifacts.read_json(report_path)
+        return 0 if (compiler.report_ready(report)
+                     and (report_path.parent / "policy.py").exists()) else 1
 
     if args.cmd == "planning-replay":
         from .execution.planning_replay import run_replay

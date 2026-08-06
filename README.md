@@ -30,7 +30,7 @@ graph hole anchor + head RGB-D
 |---|---|---|---|
 | `demo/` | 视频、动作 trace | stages、keyframes、objects | 整理示范证据 |
 | `graph/` | stages 与关键帧 | `graph.json`、报告、指标 | 提取和校验约束图 |
-| `policy/` | graph 与高层 API | `stage_program.json`、`policy.py` | 校验接线、确定性编译、fake dry-run |
+| `policy/` | graph、高层 API、失败 episode | `stage_program.json`、`policy.py`、`repairs/r<N>/` | 校验接线、确定性编译、fake dry-run、同门修复 |
 | `perception/` | sensor artifact、graph anchor、模型回复 | typed observation、mask、object cloud、hole geometry | 窄只读 transport 与可信本地几何；不做控制 |
 | `selection/` | graph holes、观测与候选 | binding/物理证书、排序 | fail-closed 校验和确定性偏好 |
 | `execution/` | stage handlers、handles | 决策或动作日志 | planning-only runtime、runner 与受信任控制 |
@@ -197,6 +197,21 @@ dgl-oracle episode \
 ```
 
 这两个命令都不是非特权方法评测。
+
+episode 失败之后，可以把那份失败轨迹交回给提出 program 的 backend model，让它改自己写的那份 program：
+
+```bash
+dgl repair \
+  --run-dir runs/insert_tubes/<timestamp> \
+  --episode runs/insert_tubes/<timestamp>/episode_<ts>.json
+
+dgl-oracle episode \
+  --run-dir runs/insert_tubes/<timestamp> \
+  --program-dir runs/insert_tubes/<timestamp>/repairs/r1 \
+  --task-id robodojo_insert_tubes_000
+```
+
+模型只能在闭集原语与已声明 hole 内改动作序列和接线：graph、约束、验收条件和 gate 判据都不在它的输出 schema 里。修订版走与 `compile` 完全相同的发布门，产物落在 `repairs/r<N>/`，原发布产物不覆盖，每个 run 目录上限 3 次。因为 episode 来自 `OracleRuntime`，这条回路的产出同样属于特权调试口径。详见 `docs/API.md` 第 8 节与 `docs/OFFLINE_WORKFLOW.md` 第 11 步。
 
 ## 当前研究重点
 
