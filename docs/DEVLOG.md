@@ -8,7 +8,9 @@
 - `dgl cap-ablate` 因此改成每个 repeat 只调用一次 backend，生成一份共享 primitive sequence + hole wiring；可信代码从它确定性派生 `vanilla / local / backchain` 的 selection block，再走原有 validator、compiler、静态检查和两条 dry-run。三组现在共享同一动作骨架，`summary.json` 增加 `generation_design=one_shared_program_per_repeat`、`generations` 与每条 arm 的 `source_generation`。
 - 这不是 repair：共享骨架本身动作非法时三组一起失败，不让模型重写、不补动作；确定性派生只改变本来就由 graph 和实验 mode 唯一决定的 `current_constraints / downstream_constraints`。模型调用数从每轮 3 次降为 1 次，也移除了无研究价值的抄写噪声。
 
-本地 targeted 测试已覆盖「每轮只调用一次」「三组 action ops 相同、selection code 不同」和「共享调用失败时三组如实失败」；全量回归为 `703 passed`，两个 CLI help smoke test 与 `git diff --check` 均通过。当前停点：Gitea 推送和 5090 v7 尚待完成；v6 作为旧实验设计的原始诊断证据保留，不改写其产物。
+本地 targeted 测试已覆盖「每轮只调用一次」「三组 action ops 相同、selection code 不同」和「共享调用失败时三组如实失败」；本地与 5090 全量回归均为 `703 passed`，两个 CLI help smoke test 与 `git diff --check` 通过。代码提交 `21aed36` 已推送 Gitea，并通过 bundle 快进同步到 5090 的干净 checkout；原 dirty checkout 未动。
+
+5090 v7 位于 `/home/knowin-sim/dgl-cap-experiments/20260807_shared_v7`，共 5 个 repeat，仍在 tmux `dgl_cap_shared_20260807_v7` 运行。`shared_000` 因 provider 连续 5 次响应 JSON 解码失败而让三组共同失败，未进入 StageProgram validator；`shared_001` 在第 2 次 provider attempt 得到合法共享骨架，三组 action ops 逐项相同：`vanilla` 为 3 `begin_candidates` / 0 `rank_by` / 0 `require_future` / 3 `choose`，`local` 为 3 / 5 / 0 / 3，`backchain` 为 3 / 5 / 13 / 3。三组均有 3 个 `grasp_at`、没有 grasp pose 走普通 `solve`，validator、静态检查及 normal/retry dry-run 全过。这只证明下游约束已经进入同一 CaP 骨架的 selection dataflow；真实 compatibility 尚未接入，不能据此声称长程任务成功率提升。v6 原始诊断产物继续保留。
 
 ## 2026-08-06：研究主线纠偏为 constraint-guided CaP
 
