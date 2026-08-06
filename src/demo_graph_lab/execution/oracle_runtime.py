@@ -34,6 +34,10 @@ LOWER_PLATEAU_M = 0.2 * LOWER_STEP
 GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0  # Pipeline convention: 100=open, 0=closed.
 GRIP_CLOSE_TUBE = GRIP_CLOSE
 GRIP_SETTLE_S = 4.0
+# 夹爪角回读的判定容差(度)。原本只是 `_wait_grip` 的「到没到目标角」局部容差,
+# `reorient_held_axis` 的持物证据要用同一把尺子从 GRIP_CLOSE/GRIP_OPEN 两端向内收
+# 出「夹住带」,所以提成常量,不在两处各写一个 2.0。
+GRIP_ANGLE_TOL_DEG = 2.0
 # lift 的闭环参数(语义 = 「抬到目标高度」,不是「发够步数」;见 `lift`)。
 LIFT_TOL_M = 0.005          # 达标容差:剩余量 ≤ 5 mm 即收敛退出
 LIFT_MAX_ITERS = 12         # 迭代上限;到顶仍未收敛按实得高度如实记账,不假装成功
@@ -90,6 +94,15 @@ SERVO_ITERS = 40
 SERVO_STEP_MAX_M = 0.12
 SERVO_PROGRESS_EPS_M, SERVO_PROGRESS_EPS_DEG = 0.0015, 0.4
 SERVO_PATIENCE = 3
+
+# ---- reorient_held_axis 的闭环参数 ----
+# 角度判据**复用伺服自身的旋转容差**:执行器分辨不出比 SERVO_ROT_TOL 更小的角差,
+# 单独立一个更严的阈值只会造出永不收敛的循环。同一个数同时当三件事的判据——
+# 「已经平行了(不用转)」「转到位了(收敛退出)」「没转到位(如实记 converged=False)」,
+# 三者本来就该是同一条线,分开取值会出现「不满足收敛、但也不算未对齐」的空档。
+REORIENT_TOL_DEG = SERVO_ROT_TOL
+# 迭代上限与 lift 闭环同量级;到顶仍未收敛按实得转角如实记账,不假装成功。
+REORIENT_MAX_STEPS = LIFT_MAX_ITERS
 
 
 # ---------- 工具端四元数运算(xyzw;与 /state 里物体的 wxyz 区分开) ----------
@@ -563,7 +576,7 @@ class OracleRuntime:
         except Exception:
             return None
 
-    def _wait_grip(self, target, timeout_s=GRIP_SETTLE_S, tol=2.0):
+    def _wait_grip(self, target, timeout_s=GRIP_SETTLE_S, tol=GRIP_ANGLE_TOL_DEG):
         """等待夹爪到达目标角或被物体挡住；回读不可用时等待到超时。"""
         t0 = time.time()
         while time.time() - t0 < timeout_s:
@@ -1082,6 +1095,142 @@ class OracleRuntime:
                   load_n=None if load is None else round(load, 1),
                   gripping=grip, grip_angle=self._grip_angle(),
                   attached=attached, reason=reason)
+
+    def _held_evidence(self):
+        """非特权持物证据:夹爪角落在「夹住带」内 **且** 末端有持续外力。
+
+        判据与常量跟 `lift` 的承重记账同源:力阈直接用 ``LIFT_LOAD_FORCE_N``;角度带由
+        ``GRIP_ANGLE_TOL_DEG`` 从 ``GRIP_CLOSE``/``GRIP_OPEN`` 两端向内收——夹住东西时
+        指垫被物体挡住,既到不了全闭也不停在全开,两端各留一个回读容差。
+
+        ``is_gripping`` **只当停转信号**(语义见 `_is_gripping`:朝闭合方向走且电流限幅
+        且未到目标角),它读到 False 只说明「此刻没在顶着走」,不足以判「没夹住」,所以
+        它只进账本、不参与判定。
+
+        返回 ``(held, why, detail)``。任一信号读不到 → ``held=None``(未知),调用方按
+        拒绝处理,不 fail-open。
+        """
+        angle = self._grip_angle()
+        force = self._ee_extforce_max()
+        detail = {"grip_angle": angle,
+                  "load_n": None if force is None else round(force, 1),
+                  "gripping": self._is_gripping()}
+        if angle is None or force is None:
+            return None, "grip_or_force_unreadable", detail
+        if not (GRIP_CLOSE + GRIP_ANGLE_TOL_DEG < angle
+                < GRIP_OPEN - GRIP_ANGLE_TOL_DEG):
+            return False, "gripper_not_in_holding_band", detail
+        if force < LIFT_LOAD_FORCE_N:
+            return False, "no_sustained_load", detail
+        return True, "band_and_load", detail
+
+    def reorient_held_axis(self, obj, object_axis, target_direction):
+        """把已持有物体的 ``object_axis`` 转到与 ``target_direction`` 平行。
+
+        契约由 backend 模型在 2026-08-06 的受控提案实验中提出,人类评审修订后 admit;
+        修订项与出处见 `docs/API.md` 与 `docs/DEVLOG.md` 同日条目。
+
+        两个轴句柄解出**世界系刚体旋转**(叉积定轴、点积定角),腕部走完这段旋转、全程
+        保持夹持,**不发平移指令**(每步的 ``target_xyz`` 就是当轮回读到的 EEF 位置)。
+        长轴是**无向的直线**而不是射线,所以 ``dot < 0`` 时先把目标方向取反走短程——
+        否则会为了对齐同一条线白转 180°,还多担一次可达性风险。
+
+        目标腕姿用**左乘**合成(``_qmul(R_world, q0)``):右乘是工具系,那是另一个姿态,
+        约定见 `_flip_about_approach`。
+
+        **闭环而不是发够步数**,两条理由:与 `lift` 同一个上游事实(单条指令只交付一部分,
+        开环必然欠冲);以及 ep2/ep3 实测腕姿残差有 18° 量级。每轮回读 ``get_xquat``
+        (非特权)算剩余角,按 ``SERVO_STEP_DEG`` 限幅 slerp 一步;剩余角 ≤
+        ``REORIENT_TOL_DEG`` 收敛退出,连续 ``SERVO_PATIENCE`` 轮没有进展就**停下并如实
+        记账**(``reason="no_rotation_progress"``),不硬转;走满 ``REORIENT_MAX_STEPS``
+        记 ``reason="budget"`` 且 ``converged=False``。
+
+        三条拒绝/短路路径:
+        ① 任一轴句柄缺失或退化 → `unsupported_param` + ``reorient_refused``;
+        ② 非特权持物证据不成立**或读不到** → ``reorient_refused``(读不到也拒,不 fail-open);
+        ③ 两轴已近平行(剩余角 ≤ ``REORIENT_TOL_DEG``) → 解出的旋转是恒等,记
+           ``already_aligned`` 成功并**不发任何指令**。
+
+        剩余角是拿**腕姿**量的,不是拿物体长轴量的——前提正是路径②:物体被刚性夹住时
+        它随腕部同步转,腕姿残差即长轴残差。这也是为什么持物证据是硬前置而不是记账项。
+
+        **本实现只把 EEF 原点锁住,爪尖会随腕部旋转画弧**:真要做到抓取点零平移,得先
+        知道抓取点在工具系里的确切位置,再绕它补一段平移。这里如实记下这个近似,
+        不假装已经做到。
+
+        评审注记:模型漏提「抓取朝向影响可达性」——不做成硬前置,policy 可以先用
+        `grasp_at(axis=)` 优化抓取朝向,够不着的情形由无进展停止兜底。
+        ``target_direction`` 在插入任务里天然由 rack 孔轴(``part_axis`` + hole anchor)
+        求解,模型选 ``axis_3d`` 这个洞类型是合理的。
+        """
+        u, v = self._axis_vec(object_axis), self._axis_vec(target_direction)
+        if u is None or v is None:
+            param = "object_axis" if u is None else "target_direction"
+            value = object_axis if u is None else target_direction
+            self._unsupported(f"reorient_held_axis.{param}", value, "no_axis_vec")
+            self._log("reorient_refused", obj=str(obj),
+                      reason=f"no_axis_vec:{param}")
+            return
+        held, why, detail = self._held_evidence()
+        if held is not True:
+            self._log("reorient_refused", obj=str(obj),
+                      reason="not_holding" if held is False else "hold_unreadable",
+                      evidence=why, **detail)
+            return
+
+        nu = math.sqrt(sum(c * c for c in u))
+        nv = math.sqrt(sum(c * c for c in v))
+        u, v = [c / nu for c in u], [c / nv for c in v]
+        d = sum(a * b for a, b in zip(u, v))
+        flipped = d < 0.0
+        if flipped:                 # 长轴无向:走短程,不为对齐同一条线白转 180°
+            v, d = [-c for c in v], -d
+        angle = math.degrees(math.acos(max(-1.0, min(1.0, d))))
+        q0 = self._cur_xquat()[1]
+        if angle <= REORIENT_TOL_DEG:
+            q_target, reason, aligned = list(q0), "already_aligned", True
+        else:
+            axis = [u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0]]
+            q_target = _qnorm(_qmul(_qaxis(axis, angle), q0))
+            reason, aligned = "budget", False
+
+        best, stall, iters = _qang(q0, q_target), 0, 0
+        while not aligned and iters < REORIENT_MAX_STEPS:
+            p, q = self._cur_xquat()
+            gap = _qang(q, q_target)
+            if gap <= REORIENT_TOL_DEG:
+                reason = "reached"
+                break
+            t = min(1.0, SERVO_STEP_DEG / gap)
+            # target_xyz 用**本轮回读**的位置:既不下发平移,也顺带纠掉旋转带来的漂移。
+            self._ctrl("xquat_move", target_xyz=[round(c, 4) for c in p],
+                       target_quat=[round(c, 6) for c in _qslerp(q, q_target, t)],
+                       interpolation="linear", gpos=GRIP_CLOSE_TUBE)
+            self._wait_settle(timeout_s=18.0)
+            iters += 1
+            _, moved, turned = self._verify_moved((p, q), op="reorient")
+            gap_after = _qang(self._cur_xquat()[1], q_target)
+            self._log("reorient_step", i=iters, cmd_deg=round(gap * t, 2),
+                      turned_deg=round(turned, 2), moved_m=round(moved, 4),
+                      rot_gap_deg=round(gap_after, 2))
+            if best - gap_after > SERVO_PROGRESS_EPS_DEG:
+                best, stall = gap_after, 0
+            else:
+                stall += 1
+                if stall >= SERVO_PATIENCE:
+                    reason = "no_rotation_progress"
+                    break
+
+        rot_gap = _qang(self._cur_xquat()[1], q_target)
+        held_after, why_after, detail_after = self._held_evidence()
+        self._log("reorient_done", obj=str(obj), angle_deg=round(angle, 2),
+                  rot_gap_deg=round(rot_gap, 2),
+                  converged=rot_gap <= REORIENT_TOL_DEG, iters=iters,
+                  flipped_target=flipped, reason=reason,
+                  held_after=held_after, hold_evidence_after=why_after,
+                  **detail_after)
 
     def transport(self, obj, target):
         # `obj`(被搬运物)按参数解析并记账。携物移动的
