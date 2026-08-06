@@ -193,23 +193,30 @@ GRASP_TARGET = {"xyz": [0.45, -0.15, 0.80]}
 GRASP_AXIS = {"kind": "axis", "hole": "long_axis", "vec": [1.0, 0.0, 0.0]}
 
 
-def _grasp_rt(err_mm, arm_id=1):
+def _grasp_rt(err_mm, arm_id=1, pregrasp_drift=(0.0, 0.0, 0.0)):
     """真 OracleRuntime,只桩掉会发 HTTP 的动作。
 
     `_move` 把「到位后的实测落点」设成沿 +x 偏离目标 `err_mm` 毫米,于是
     `_xy_err_mm`/`_retry_flipped_branch`/不可达判据全部真跑。两个 IK 分支给
     同一个残差,对应「跨身体够不着」——翻转救不回来。
+
+    `pregrasp_drift` 只作用在**第一次**(预抓取)移动上,用来把下探段做成斜的:
+    这样「实测达成的接近方向」就与命令方向可分,`approach_dir` 取哪一个能被
+    测试区分开。
     """
     rt = OracleRuntime({"stages": []}, arm_id=arm_id)
     rt.moves, rt.grips = [], []
     state = {"pos": [0.0, 0.0, 0.0], "quat": list(oracle_runtime.TDX0)}
 
     def _move(xyz, quat=None, **kw):
+        first = not rt.moves
         rt.moves.append({"xyz": [float(v) for v in xyz],
                          "quat": None if quat is None else [float(v) for v in quat]})
         if quat is not None:
             state["quat"] = [float(v) for v in quat]
-        state["pos"] = [xyz[0] + err_mm / 1000.0, xyz[1], xyz[2]]
+        drift = pregrasp_drift if first else (0.0, 0.0, 0.0)
+        state["pos"] = [xyz[0] + err_mm / 1000.0 + drift[0],
+                        xyz[1] + drift[1], xyz[2] + drift[2]]
         return True
 
     def _ctrl(fn, arm_id=None, **kw):
@@ -286,6 +293,94 @@ def test_unreachable_check_happens_after_the_flip_fallback():
 
     ops = [c["op"] for c in rt.calls]
     assert ops.index("grasp_branch") < ops.index("grasp_failed")
+
+
+# ==========================================================================
+# 5. gate ctx 证据:grasp_point / approach_dir
+# ==========================================================================
+def test_grasp_point_and_approach_dir_are_logged_before_the_claw_closes():
+    """两条证据都出现在「定位完成、还没闭爪」的时刻。"""
+    rt = _grasp_rt(0.0)
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    ops = [c["op"] for c in rt.calls]
+    assert ops.index("grasp_point") < ops.index("grasp_close")
+    assert ops.index("approach_dir") < ops.index("grasp_close")
+
+
+def test_grasp_point_is_the_claw_tip_not_the_eef_origin():
+    """`pred_region_grasp` 拿 z 去比物体 AABB 的竖直跨度,所以必须是爪尖点。
+
+    管子直径才 33.6 mm,3.5 mm 的 EEF/爪尖差就是归一化坐标 s 的 10%。
+    """
+    rt = _grasp_rt(0.0)
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    xyz = _find(rt, "grasp_point")[0]["xyz"]
+    assert xyz == pytest.approx(GRASP_TARGET["xyz"], abs=1e-6), \
+        "零残差下爪尖点应回到 grasp_pose 本身,而不是差一个 CLAW_TIP_DZ_OPEN"
+    eef_z = rt.moves[-1]["xyz"][2]
+    assert xyz[2] == pytest.approx(eef_z - CLAW_TIP_DZ_OPEN)
+
+
+def test_grasp_point_follows_the_readback_not_the_command():
+    """实测落点偏了就如实记偏了的点(gate 才有牙齿)。"""
+    rt = _grasp_rt(EP2_ERR_ARM1_RIGHT_MM)
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    xyz = _find(rt, "grasp_point")[0]["xyz"]
+    assert xyz[0] == pytest.approx(GRASP_TARGET["xyz"][0] + EP2_ERR_ARM1_RIGHT_MM / 1000.0)
+
+
+def test_no_grasp_evidence_when_the_target_is_unreachable():
+    """没抓成就没有抓取点可记——不能给 gate 一个「其实没发生」的抓取点。"""
+    rt = _grasp_rt(EP2_ERR_CROSS_BODY_MM)
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    assert not _find(rt, "grasp_point")
+    assert not _find(rt, "approach_dir")
+
+
+def test_approach_dir_of_a_vertical_descent_is_straight_down():
+    """竖直下探 → 方向 ≈ [0,0,−1],`cone_angle_deg(top_down)` ≈ 0°。"""
+    from demo_graph_lab.selection import regions
+
+    rt = _grasp_rt(0.0)
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    d = _find(rt, "approach_dir")[0]["dir"]
+    assert d == pytest.approx([0.0, 0.0, -1.0], abs=1e-6)
+    assert regions.cone_angle_deg(d, "top_down") == pytest.approx(0.0, abs=0.1)
+
+
+def test_approach_dir_is_measured_not_the_commanded_direction():
+    """裁决:必须是**实测达成**的方向,不是按 cone 选定的命令方向。
+
+    把预抓取位横向漂 10 cm,下探段就成了 45° 斜线:实测方向的 x 分量非零、
+    倾角 45°。若实现改成记命令方向(竖直下探),这条会红。
+    """
+    from demo_graph_lab.selection import regions
+
+    rt = _grasp_rt(0.0, pregrasp_drift=(PREGRASP_DZ, 0.0, 0.0))
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    d = _find(rt, "approach_dir")[0]["dir"]
+    assert d[0] == pytest.approx(-(2 ** -0.5), abs=1e-3), \
+        f"实测下探是 45° 斜线,x 分量不该是 0,实得 {d}"
+    assert d[2] == pytest.approx(-(2 ** -0.5), abs=1e-3)
+    assert _find(rt, "approach_dir")[0]["source"] == "measured_descent"
+    assert regions.cone_angle_deg(d, "top_down") == pytest.approx(45.0, abs=0.5), \
+        "命令方向会给 0°;实测方向必须把这 45° 的偏差暴露给 gate"
+
+
+def test_approach_dir_is_none_when_the_descent_did_not_move():
+    """位移小到测不出方向 → 如实记 dir=None(谓词据此 UNKNOWN,不 fail-open)。"""
+    rt = _grasp_rt(0.0, pregrasp_drift=(0.0, 0.0, -PREGRASP_DZ))
+    rt.grasp_at(GRASP_TARGET, axis=GRASP_AXIS)
+
+    rec = _find(rt, "approach_dir")[0]
+    assert rec["dir"] is None
+    assert rec["reason"] == "no_measurable_displacement"
 
 
 # ==========================================================================

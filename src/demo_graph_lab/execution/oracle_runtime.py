@@ -936,6 +936,37 @@ class OracleRuntime:
                   flipped_xy_err_mm=round(err_flipped, 1),
                   reason="flip_not_better")
 
+    def _log_grasp_evidence(self, p_pre):
+        """记 ``grasp_point`` 与 ``approach_dir`` 两条 gate ctx 证据(闭爪前的定位完成时刻)。
+
+        两条**都取回读实得量,不取命令值**。这是已定裁决:gate 若拿到的是自己这条
+        链选定的命令方向,就变成「验证自己选的值」,恒 PASS,没有牙齿。
+
+        - ``grasp_point``:世界系**爪尖**点。`pred_region_grasp` 拿它的 z 去和物体
+          AABB 的竖直跨度比,所以必须是爪尖而不是 EEF 原点——管子直径才 33.6 mm,
+          3.5 mm 的偏移就是归一化坐标 s 的 10%。EEF 回读 z 减去张爪指尖偏移即爪尖
+          (与 `grasp_at` 里 `eef = tip + CLAW_TIP_DZ_OPEN` 互逆)。
+        - ``approach_dir``:**实测达成**的接近方向 = 下探段起止两次 `get_xquat` 的
+          位置差归一化。取的是**下探段**(预抓取位 → 抓取位)而不是 `approach` 原语
+          那一段:`approach` 走的是到「站位点」的转移,而站位点恰恰是沿接近方向的
+          **反向**偏置出来的,那一段位移的方向与「从哪个方向接近物体」无关(它只取
+          决于上一阶段把手臂停在了哪儿)。`regions.cone_angle_deg` 量的是方向相对
+          竖直向下的倾角,用转移段会把一次正常的竖直抓取算成 ~90° 倾角、把
+          `top_down` 判成 FAIL。位移小到测不出方向时如实记 ``dir=None``
+          (谓词据此给 UNKNOWN,不 fail-open)。
+        """
+        p, _ = self._cur_xquat()
+        self._log("grasp_point",
+                  xyz=[round(p[0], 4), round(p[1], 4),
+                       round(p[2] - CLAW_TIP_DZ_OPEN, 4)])
+        d = [p[i] - p_pre[i] for i in range(3)]
+        n = math.sqrt(sum(v * v for v in d))
+        if n < SERVO_PROGRESS_EPS_M:
+            self._log("approach_dir", dir=None, reason="no_measurable_displacement")
+            return
+        self._log("approach_dir", dir=[round(v / n, 4) for v in d],
+                  source="measured_descent")
+
     def grasp_at(self, grasp_pose, axis=None):
         """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ_OPEN
         (下探时爪子是张开的,定位常数必须与下探时的指尖同状态)。
@@ -946,12 +977,15 @@ class OracleRuntime:
         见 ``_retry_flipped_branch``。翻转兜底之后残差仍超过
         ``UNREACHABLE_XY_MM`` 说明这条臂**够不到**目标:记 ``unreachable_target``
         并**直接返回,不闭爪**——在空中闭一次爪只会把「够不到」伪装成「夹空了」。
+        定位完成、闭爪之前记 ``grasp_point`` 与 ``approach_dir`` 两条 gate ctx
+        证据(都取回读实得量),见 ``_log_grasp_evidence``。
         """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ_OPEN]
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         self._wait_grip(GRIP_OPEN)
         self._move([eef[0], eef[1], eef[2] + PREGRASP_DZ])
+        p_pre = self._cur_xquat()[0]      # 下探起点(回读实得,不是命令值)
         gq, why = self._grasp_quat(axis)
         if gq is None:
             if axis is not None:
@@ -968,6 +1002,7 @@ class OracleRuntime:
                       xy_err_mm=round(err, 1), threshold_mm=UNREACHABLE_XY_MM,
                       closed=False)
             return
+        self._log_grasp_evidence(p_pre)
         # !! 参数名只能是 angle:gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True。
         # 开合方向见模块顶部 GRIP_* 注释:
         # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
