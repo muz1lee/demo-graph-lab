@@ -2,9 +2,11 @@
 
 每个可检验谓词至少 PASS/FAIL 各一例 + margin 符号检查;覆盖 UNKNOWN 路径
 (缺参照 / 缺输入 / uncheckable_in_runtime / 词表外 / rim-handle / 谓词内部异常)。
-轴类谓词另外钉住「长轴从 AABB 最长边推断」这条语义(8/6 ep2:横躺管子的局部 +z
-仍近竖直,靠局部 +z 判 axis_vertical 会给出假 PASS),并与 `selection.binding._long_axis`
-做逐值 parity。纯逻辑,无 cv2/网络/LLM。
+轴类谓词另外钉住长轴语义:解 ``|R|·e = S`` 从世界 AABB 反求**局部**边长,取局部最长边
+所在的轴(8/6 ep2:横躺管子的局部 +z 仍近竖直,靠局部 +z 判 axis_vertical 会给出假
+PASS;8/6 ep3:拿世界边序号当局部轴序号,三根同姿态的管子会判出三种答案)。轴类实体
+一律用 ``axis_ent_from_local`` 构造,并断言**已知答案**——不再靠两侧 parity 互证。
+纯逻辑,无 cv2/网络/LLM。
 """
 
 import math
@@ -46,6 +48,17 @@ def axis_ent(extents, quat=IDENT_Q, center=(0.4, 0.1, 0.8)):
                      "max": [center[i] + half[i] for i in range(3)]}}
 
 
+def axis_ent_from_local(local_extents, quat=IDENT_Q, center=(0.4, 0.1, 0.8)):
+    """按**局部**三边长 + 姿态造自洽实体:世界跨度用 S_j = Σ_k |R[j][k]|·e_k 正向算。
+
+    姿态不轴对齐时世界 AABB 跨度 ≠ 局部边长,直接把局部边长当世界 AABB 写进快照
+    造出的是物理上不可能的实体。轴类测试必须用这个构造,否则测的是不存在的物体。
+    """
+    cols = [binding._local_axis_in_world(list(quat), k) for k in range(3)]
+    spans = [sum(abs(cols[k][j]) * local_extents[k] for k in range(3)) for j in range(3)]
+    return axis_ent(spans, quat, center)
+
+
 def C(name, **args):
     return {"name": name, "args": args}
 
@@ -61,7 +74,7 @@ def test_axis_vertical_pass():
 
 def test_axis_vertical_fail():
     # 长轴(局部 x)水平 → 与竖直夹角 90°
-    ents = {"tube": axis_ent(EP2_LYING_EXTENTS, quat=TILT_Q)}
+    ents = {"tube": axis_ent_from_local(EP2_LYING_EXTENTS, quat=TILT_Q)}
     p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
     assert p.status == P.FAIL and p.margin < 0
 
@@ -72,7 +85,7 @@ def test_axis_vertical_lying_tube_is_not_a_false_pass():
     旧实现读局部 +z → angle≈4.2° → 对一根根本没被碰过的管子报 PASS。
     换真实长轴后必须判 FAIL。
     """
-    ents = {"tube": axis_ent(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
+    ents = {"tube": axis_ent_from_local(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
     p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
     assert p.status == P.FAIL, "横躺管子必须判 FAIL,不能因为局部 +z 近竖直而假 PASS"
     assert float(p.detail.split("=")[1]) == pytest.approx(90.0, abs=0.5)
@@ -118,8 +131,8 @@ def test_axis_parallel_fail():
 
 def test_axis_parallel_lying_pair_is_not_a_false_pass():
     """两根都横躺、但局部 +z 都近竖直:旧实现判「平行」,长轴口径下 a 立 b 躺 → FAIL。"""
-    ents = {"a": axis_ent(UPRIGHT_EXTENTS, quat=NEAR_UPRIGHT_Q),
-            "b": axis_ent(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
+    ents = {"a": axis_ent_from_local(UPRIGHT_EXTENTS, quat=NEAR_UPRIGHT_Q),
+            "b": axis_ent_from_local(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
     p = P.check(C("axis_parallel", axis_a="a.z", axis_b="b.z"), ents)
     assert p.status == P.FAIL and p.margin < 0
 
@@ -143,29 +156,39 @@ def test_axis_parallel_unknown_names_the_ambiguous_side():
 
 
 # ==========================================================================
-# 长轴推断与 selection.binding._long_axis 的逐值 parity
+# 长轴推断与 selection.binding 的对接
 # ==========================================================================
-# predicates 侧是同构的小面积复制(binding 侧抛 UnsolvedHole、要 hole 参数,谓词侧
-# 要三值 reason),两份实现必须逐值一致,否则 gate 和 selection 会对同一个物体
-# 给出不同的长轴。
-_PARITY_CASES = [
-    (EP2_LYING_EXTENTS, IDENT_Q),
-    (EP2_LYING_EXTENTS, NEAR_UPRIGHT_Q),
-    (EP2_LYING_EXTENTS, TILT_Q),
-    (UPRIGHT_EXTENTS, IDENT_Q),
-    (UPRIGHT_EXTENTS, NEAR_UPRIGHT_Q),
-    ((0.037, 0.111, 0.037), TILT_Q),            # 最长边在 y
+# 【8/6 ep3 的教训,别删这段】上一版这里是两份同构实现之间的「逐值 parity」测试。
+# 它全绿,而两侧同时是错的:都把**世界** AABB 的边序号当成**局部**轴序号。parity
+# 只能保证「两侧一致」,永远保证不了「两侧正确」——用它当唯一护栏,等于把同一个
+# bug 钉死在两边。现在 `P._long_axis_world` 已经薄封装 `binding.long_axis_world`
+# (只有一份实现,一致性是结构性的),这里改成**已知答案**:先定死局部边长与姿态,
+# 用 S = |R|·e 正向造世界 AABB,再要求实现把 e 解回来。判别性用例在
+# tests/test_long_axis_band.py(三管同答案 + 反向验证)。
+_KNOWN_AXIS_CASES = [
+    (EP2_LYING_EXTENTS, IDENT_Q, 0),
+    (EP2_LYING_EXTENTS, NEAR_UPRIGHT_Q, 0),
+    (EP2_LYING_EXTENTS, TILT_Q, 0),
+    (UPRIGHT_EXTENTS, IDENT_Q, 2),
+    (UPRIGHT_EXTENTS, NEAR_UPRIGHT_Q, 2),
+    ((0.037, 0.111, 0.037), TILT_Q, 1),         # 局部最长边在 y
 ]
 
 
-@pytest.mark.parametrize("extents,quat", _PARITY_CASES)
-def test_long_axis_parity_with_binding(extents, quat):
-    entity = axis_ent(extents, quat=quat)
+@pytest.mark.parametrize("local_extents,quat,long_index", _KNOWN_AXIS_CASES)
+def test_long_axis_recovers_the_known_local_axis(local_extents, quat, long_index):
+    entity = axis_ent_from_local(local_extents, quat=quat)
+
     mine, reason = P._long_axis_world(entity)
     theirs, length = binding._long_axis(entity, {"name": "long_axis"})
+
     assert reason is None
-    assert mine == pytest.approx(theirs, abs=1e-12)
-    assert length == pytest.approx(max(extents), abs=1e-12)
+    assert mine == pytest.approx(theirs, abs=1e-12), "两侧同源,数值必须逐位相同"
+    assert length == pytest.approx(max(local_extents), abs=1e-9)
+    truth = binding._local_axis_in_world(quat, long_index)
+    norm = math.sqrt(sum(v * v for v in truth))
+    assert abs(sum(mine[i] * truth[i] / norm for i in range(3))) == pytest.approx(
+        1.0, abs=1e-9), "世界向量必须与已知的局部长轴同线"
 
 
 def test_long_axis_parity_on_rejection():
