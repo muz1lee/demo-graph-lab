@@ -12,6 +12,10 @@
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
   dgl planning-record --record-dir <dir> \\
       [--step plan|capture|ground|segment|project|predict|programs]
+  dgl planning-record --record-dir <dir> --step identity-accept \\
+      --program p1_1 --object-id rack --accepted-by <name> --basis <evidence>
+  dgl planning-record --record-dir <dir> --step project-base \\
+      --extrinsics <camera_extrinsics.json>
 """
 
 import argparse
@@ -60,7 +64,7 @@ def main(argv=None):
     record.add_argument(
         "--step",
         choices=("plan", "capture", "ground", "segment", "project", "predict",
-                 "programs"),
+                 "programs", "identity-accept", "project-base"),
         default="plan",
     )
     record.add_argument("--graph")
@@ -69,6 +73,14 @@ def main(argv=None):
         "--perception-program",
         help="published perception_program.json; required by --step programs",
     )
+    record.add_argument(
+        "--extrinsics",
+        help="camera_head_optical->robot_base record; required by --step project-base",
+    )
+    record.add_argument("--program", help="program id, e.g. p1_1")
+    record.add_argument("--object-id")
+    record.add_argument("--accepted-by")
+    record.add_argument("--basis", help="what the acceptance rests on")
     record.add_argument("--stage", type=int, default=0)
     record.add_argument("--hole")
     record.add_argument("--intrinsics")
@@ -110,6 +122,10 @@ def main(argv=None):
             segment_record,
         )
         from .execution.program_record import programs_record
+        from .execution.program_projection import (
+            accept_identity,
+            project_base_values,
+        )
 
         if args.step == "plan":
             if not all((
@@ -167,6 +183,29 @@ def main(argv=None):
                 args.record_dir,
                 perception_program_path=args.perception_program,
                 allow_model_read=args.allow_model_read,
+            )
+        elif args.step == "identity-accept":
+            # 身份接受是人做的判断,不是模型输出的推论,所以四个字段都必须显式给。
+            if not all((args.program, args.object_id, args.accepted_by, args.basis)):
+                parser.error(
+                    "planning-record --step identity-accept requires --program, "
+                    "--object-id, --accepted-by, and --basis"
+                )
+            accept_identity(
+                args.record_dir,
+                program=args.program,
+                object_id=args.object_id,
+                accepted_by=args.accepted_by,
+                basis=args.basis,
+            )
+        elif args.step == "project-base":
+            if not args.extrinsics:
+                parser.error(
+                    "planning-record --step project-base requires --extrinsics"
+                )
+            project_base_values(
+                args.record_dir,
+                extrinsics_path=args.extrinsics,
             )
         else:
             predict_record(
