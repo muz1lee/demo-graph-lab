@@ -28,6 +28,9 @@ PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
 # 也来不及在步内停。步长降到 5 mm 让接触发生在判据的采样粒度之内。
 # 证据:5090 `~/dgl-stack/evidence/taskb/`,privileged-debug 档,2026-08-06。
 LOWER_STEP, LOWER_MAX_STEPS = 0.005, 12
+# 判「停止下降」的单步最小降距,随步长按 20% 走(0.02 步长时代即 0.004)。
+# 固定 0.004 会在 5mm 步长×上游 74% 交付率(实得≈3.7mm)下第 2 步误判 plateau。
+LOWER_PLATEAU_M = 0.2 * LOWER_STEP
 GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0  # Pipeline convention: 100=open, 0=closed.
 GRIP_CLOSE_TUBE = GRIP_CLOSE
 GRIP_SETTLE_S = 4.0
@@ -1161,8 +1164,9 @@ class OracleRuntime:
                 z = self._cur_xquat()[0][2]
             except Exception:
                 continue
-            if "plateau" in enabled and prev_z is not None and prev_z - z < 0.004:
-                self._log("lower_until_done", reason="contact", steps=i + 1)
+            # plateau 触发按实情记 reason="plateau",不再冒充 contact(账本失真,ep2 修复圈正名)。
+            if "plateau" in enabled and prev_z is not None and prev_z - z < LOWER_PLATEAU_M:
+                self._log("lower_until_done", reason="plateau", steps=i + 1)
                 return
             prev_z = z
         self._log("lower_until_done", reason="budget", steps=LOWER_MAX_STEPS)
