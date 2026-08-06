@@ -171,6 +171,8 @@ typed-hole 校验、硬过滤、排序和 fixed replay 已经存在，但真实�
 
 当前 runner 失败后只重复同一个 handler。它不会 rollback、换候选或修改搜索范围。缺少 handler、hole 歧义和未知谓词都必须停止或返回 `UNKNOWN`，不能猜一个默认值继续执行。
 
+gate 的三值合取里，只有 `predicates.UNCHECKABLE_IN_RUNTIME`（`carry` / `order`，本 runtime 结构上永远查不出的跨阶段状态量）这一类 `UNKNOWN` 被排除在 hold 合取之外，并记进 `excluded_uncheckable_keys`（同时保留在 `unknown_keys` 里）；它们全部被排除时合取里没有任何证据，acceptance 仍然不是 `True`。其他任何 `UNKNOWN`（谓词异常、缺少 `grasp_point` / `approach_dir` 这类输入、参照实体解析不到、词表外的名字）照旧阻塞判定。白名单之外不得新增豁免项：往里加名字等于让那条约束再也拦不住任何 stage。`region_grasp` 与 `approach_direction` 的输入由 runner 从 runtime 本阶段的执行记录取，经 `gates.snapshot / evaluate` 的 `ctx` 传给谓词；runtime 没有记录这些值时两条谓词维持 `UNKNOWN`。
+
 当前 Oracle 从 simulator state 直接得到 world-frame 几何，因此数值 handle 明确标为 `frame="world"`，同时保留 graph 请求的 `requested_frame` 供检查。非特权 runtime 不能照搬这个捷径，必须使用相机与机器人标定完成真正的 frame transform。
 
 Oracle 的 `scalar` 和 `runtime_condition` 可以返回延迟描述子；非特权 planning runtime 尚未实现对应 resolver，因此当前会 fail-closed，而不是让 candidate 或 VLM 猜值。插入阶段由 deterministic enrich 补 `purpose=lower_stop` 的控制洞；StageProgram validator 只允许这类洞接到 `lower_until`。它目前只声明应读取非特权 contact/motion-plateau 信号，不生成阈值；明确的停止信号路由仍是执行前 TODO。
