@@ -23,7 +23,11 @@ ORACLE_BANNER = "PRIVILEGED_ORACLE"
 
 # Calibrated motion and gripper constants used by the Oracle bring-up runtime.
 PREGRASP_DZ, LIFT_DZ, ALIGN_DZ = 0.10, 0.12, 0.06
-LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
+# 下探细步:8/6 任务 B 实测,间隙只剩 1.5 mm 时单步 20 mm 下探的**第 1 步**就打出
+# 656 N(接触判据阈 CONTACT_FORCE_N=20 N,冲击超 30 倍)——一步就撞穿了,判据再灵
+# 也来不及在步内停。步长降到 5 mm 让接触发生在判据的采样粒度之内。
+# 证据:5090 `~/dgl-stack/evidence/taskb/`,privileged-debug 档,2026-08-06。
+LOWER_STEP, LOWER_MAX_STEPS = 0.005, 12
 GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0  # Pipeline convention: 100=open, 0=closed.
 GRIP_CLOSE_TUBE = GRIP_CLOSE
 GRIP_SETTLE_S = 4.0
