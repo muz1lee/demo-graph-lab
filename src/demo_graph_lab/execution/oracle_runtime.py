@@ -35,7 +35,15 @@ LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
 TDX0 = [0.0, 1.0, 0.0, 0.0]  # Ry(180): tool +z points down.
 APPROACH_AXIS_IDX = 2
 FINGER_AXIS_IDX = 1
-CLAW_TIP_DZ = -0.010
+# 爪尖相对 EEF 帧的 z 偏移(m),取**张爪**状态的指尖:`grasp_at` 是以
+# `gpos=GRIP_OPEN` 张着爪下探的,定位常数必须与下探时的指尖状态同语义。
+# 8/6 v4 三方交叉实测:自由腕姿张爪 **−3.34 mm**、抓取腕姿张爪 **−3.57 mm**
+# ——两者只差 0.23 mm,互为独立佐证;同一抓取腕姿**闭爪**为 **+18.35 mm**,
+# 即开合一次指尖的垂直行程有 21.9 mm,**闭爪值不可用作定位常数**。
+# v3 的 −0.010 疑为同一「张爪」语义,但当时没做闭爪交叉验证,遗留待核。
+# 证据:5090 `~/dgl-stack/evidence/slip/claw_tip_dz_remeasure.json`,
+# privileged-debug 档,2026-08-06。
+CLAW_TIP_DZ = -0.0035
 
 # 抓取到位后仍可接受的笛卡尔 xy 残差(mm);超过则试另一个 IK 分支(见 _retry_flipped_branch)。
 # 来源:8/6 v4 单世界栈实测——同一个物理抓取,默认分支 xy 误差 15.3 mm、最小关节裕度
