@@ -417,10 +417,24 @@ class OracleRuntime:
         self._wait_settle(arm_id=idle, timeout_s=6.0)
 
     def _arm_qpos(self, arm_id=None):
-        """某条臂的 7 个关节角(默认本臂)。/state 的 robot_qpos 是两臂交错排布:
-        左臂在偶数下标、右臂在奇数下标,之后才是 lifting + 12 个爪子自由度。"""
+        """某条臂的 7 个关节角(默认本臂),取自 pipeline ``info:get_qpos``——**按臂**的
+        既有接口,与 robot_api 的收敛核对同源,是被验证过的关节真值。
+
+        **不要**改回从 eval ``/state`` 的 ``robot_qpos`` 切片。那条旧路径假设两臂交错
+        (左偶右奇,``[a::2][:7]``),8/6 v4 单世界栈实测证伪:``robot_qpos`` 长度 29,
+        右臂的真实下标是 ``1,3,6,9,11,13,15``(间隔 +2/+3/+3/+2/+2/+2,并不等距)。
+        判别依据是物理不可能性——交错切片取出的 j6 = -2.1813,落在该关节自身限位
+        [-1.308, +1.570] 之外,关节不可能越过自己的限位;同一瞬间 ``get_qpos`` 返回的
+        7 元组全部在限位内。布局随机器人代次变化,这里不猜索引:读不到规定形状就抛错,
+        由调用方按"读不到"处理,不返回错值。
+        """
         a = self.arm_id if arm_id is None else arm_id
-        return self.eval.state()["robot_qpos"][a::2][:7]
+        q = [float(v) for v in self.pipe.call("info", "get_qpos", {"arm_id": a})]
+        if len(q) != robot_api.JOINTS_PER_WAYPOINT:      # 7-DoF 单臂
+            raise ValueError(
+                f"get_qpos(arm={a}) 返回 {len(q)} 个关节,"
+                f"期望 {robot_api.JOINTS_PER_WAYPOINT}")
+        return q
 
     def _wait_settle(self, target_xyz=None, tol=0.012, timeout_s=25.0, still_n=3,
                      arm_id=None):

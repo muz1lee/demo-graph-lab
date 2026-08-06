@@ -1,4 +1,4 @@
-"""OracleRuntime._move 的运动规划接线单测。
+"""OracleRuntime 运动路径单测:_move 的规划接线、关节回读来源、抓取 IK 分支。
 
 Behavioral contract:
   - `_move` **默认走 MP 路径**:调 reasoning:motion_planning_stereo 规划,再逐航点 ctrl:qpos_move
@@ -6,6 +6,8 @@ Behavioral contract:
   - 规划失败(PlanFailed)时**退回手写伺服**,并显式记账 `mp_fallback`(degraded=true)——
      退化路径不得静默使用。
   - MP 路径按 cartesian_goal 下发,目标位姿 = 调用者给的 xyz + quat(quat=None 时取竖直姿态)。
+  - `_arm_qpos` 的关节真值**只来自 pipeline `info:get_qpos`**;不从 `/state` 的
+     `robot_qpos` 按固定步长切片猜索引,形状不对就抛错(fail-closed),不返回错值。
 
 离线:复用 tests/fixtures/mp_fixture_joint_goal.json 的真实响应,不触 sim/网络/LLM。
 """
@@ -62,12 +64,22 @@ class MovePipe:
         return [n for a, n, _ in self.calls if action is None or a == action]
 
 
+# 8/6 v4 单世界栈实测的 /state 布局:robot_qpos 长 29,右臂真实下标不等距。
+V4_QPOS_LEN = 29
+V4_RIGHT_ARM_SLOTS = (1, 3, 6, 9, 11, 13, 15)
+V4_RIGHT_ARM_Q = [0.10, -0.20, 0.30, -0.40, 0.50, -0.60, 0.70]
+# 旧实现的交错切片 [1::2][:7] 会命中 5/7 两个**非本臂**槽位;实测取出的 j6 是这个值,
+# 它落在该关节自身限位之外——关节不可能越过自己的限位,这正是切错的判别依据。
+V4_J6_OUT_OF_LIMIT = -2.1813
+V4_J6_LIMIT = (-1.308, 1.570)
+
+
 class StillEval:
-    """EvalClient 替身:robot_qpos 恒定 → _wait_settle 立刻判「静止」,不空等 18 s 超时窗。
-    形状按 OracleRuntime._arm_qpos 的切片口径(两臂交错 + 后续自由度)给足。"""
+    """EvalClient 替身。`_wait_settle` 的关节回读已改走 pipeline `info:get_qpos`
+    (见 test_arm_qpos_* ),这里只是让 rt.eval 有个不发 HTTP 的占位对象。"""
 
     def state(self):
-        return {"robot_qpos": [0.0] * 32, "entities": {}, "probes": []}
+        return {"robot_qpos": [0.0] * V4_QPOS_LEN, "entities": {}, "probes": []}
 
 
 def _rt(pipe):
@@ -180,3 +192,77 @@ def test_cone_dict_is_accepted_by_regions_ranking():
     assert name in vocab.APPROACH_CONES
     ranked = regions.rank_by_cone(rt._APPROACH_DIR_CANDIDATES, name)
     assert ranked[0]["id"] == "down"        # top_down 锥的 top-1 是竖直下探
+
+
+# ---------------------------------------------------------------------------
+# _arm_qpos:关节真值只来自 pipeline get_qpos,不从 /state 的 robot_qpos 猜索引。
+# ---------------------------------------------------------------------------
+class TrapEval:
+    """EvalClient 替身:按 8/6 v4 实测布局摆右臂关节值,并在旧交错切片会命中的
+    非本臂槽位(5、7)埋越限位的值。任何仍从 /state 切片的实现都会取到错值。"""
+
+    def __init__(self):
+        self.qpos = [0.0] * V4_QPOS_LEN
+        for slot, v in zip(V4_RIGHT_ARM_SLOTS, V4_RIGHT_ARM_Q):
+            self.qpos[slot] = v
+        self.qpos[5] = V4_J6_OUT_OF_LIMIT
+        self.qpos[7] = V4_J6_OUT_OF_LIMIT
+
+    def state(self):
+        return {"robot_qpos": list(self.qpos), "entities": {}, "probes": []}
+
+
+def _qpos_rt(pipe):
+    rt = _rt(pipe)
+    rt.eval = TrapEval()
+    return rt
+
+
+def test_arm_qpos_reads_pipeline_get_qpos_not_state_slice():
+    """真值来自 info:get_qpos;同一瞬间 /state 的交错切片给的是越限位的错值。"""
+    pipe = MovePipe(_mp_result(), START_XQUAT)
+    pipe._qpos[1] = list(V4_RIGHT_ARM_Q)
+    rt = _qpos_rt(pipe)
+
+    q = rt._arm_qpos()
+
+    assert q == pytest.approx(V4_RIGHT_ARM_Q)
+    assert "get_qpos" in pipe.names("info")
+    # 旧路径的反证:交错切片取出的值越过了关节自身限位,物理上不可能。
+    interleaved = rt.eval.state()["robot_qpos"][1::2][:7]
+    assert interleaved != pytest.approx(V4_RIGHT_ARM_Q)
+    assert min(interleaved) < V4_J6_LIMIT[0]
+    assert min(q) > V4_J6_LIMIT[0] and max(q) < V4_J6_LIMIT[1]
+
+
+def test_arm_qpos_reads_the_requested_arm():
+    """arm_id 显式传入时读那条臂(_park_idle_arm 靠这条读闲臂)。"""
+    pipe = MovePipe(_mp_result(), START_XQUAT)
+    pipe._qpos[0] = [0.9] * 7
+    pipe._qpos[1] = list(V4_RIGHT_ARM_Q)
+    rt = _qpos_rt(pipe)
+
+    assert rt._arm_qpos(0) == pytest.approx([0.9] * 7)
+    assert rt._arm_qpos(1) == pytest.approx(V4_RIGHT_ARM_Q)
+    assert [kw["arm_id"] for a, n, kw in pipe.calls if n == "get_qpos"] == [0, 1]
+
+
+class BadLenPipe:
+    """get_qpos 返回整条 robot_qpos(29 个数)的坏底座:形状不对必须抛错,不能截前 7 个用。"""
+
+    def call(self, action, name, kwargs):
+        if action == "info" and name == "get_qpos":
+            return [0.0] * V4_QPOS_LEN
+        raise AssertionError(f"unexpected call {action}:{name}")
+
+    def names(self, action=None):
+        return []
+
+
+def test_arm_qpos_fails_closed_on_unknown_layout():
+    """读不到规定的 7 元组 → 抛错;`_wait_settle` 因此退化成 timeout,而不是用错值判静止。"""
+    rt = _qpos_rt(BadLenPipe())
+
+    with pytest.raises(ValueError):
+        rt._arm_qpos()
+    assert rt._wait_settle(timeout_s=0.5) == "timeout"
