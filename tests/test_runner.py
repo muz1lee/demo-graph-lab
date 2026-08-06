@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from demo_graph_lab.evaluation import predicates
 from demo_graph_lab.execution.oracle_runtime import OracleRuntime
 from demo_graph_lab.execution.runner import run_policy
 from demo_graph_lab.policy.fake_runtime import FakeRuntime
@@ -187,3 +188,103 @@ def test_gate_effect_works_end_to_end_with_the_oracle_resolver() -> None:
         "最右那根图名必须映到最右那个实体,而不是塌到 tube0_prop"
     assert gate["effect_status"] == "PASS"
     assert gate["manip_displacement_m"] == pytest.approx(0.12, abs=1e-9)
+
+
+# ==========================================================================
+# ctx 接线:runner 把 runtime 本阶段记下的抓取点/接近方向交给 gate。
+# 没有这一步,region_grasp / approach_direction 的几何实现虽然完整,却因为拿不到
+# 输入而永远 UNKNOWN(ep1/ep2 两集实测)。
+# ==========================================================================
+class _RecordingRuntime:
+    """带 ``calls`` 记录的最小 runtime;verify3 直通真谓词,ctx 到没到一目了然。"""
+
+    _TUBE = {"tube0": {"pos": [0.4, 0.2, 0.8],
+                       "aabb": {"min": [0.0, 0.0, 0.0], "max": [0.1, 0.1, 1.0]}}}
+
+    def __init__(self) -> None:
+        self.calls: list = []
+        self.positions = {"tube0_prop": [0.4, 0.2, 0.80]}
+
+    def _entities(self, max_age_s: float = 0.0) -> dict:
+        return {key: {"pos": list(value)} for key, value in self.positions.items()}
+
+    def verify3(self, constraint: dict, **ctx):
+        return predicates.check(constraint, self._TUBE, **ctx)
+
+
+def _grasp_stage() -> dict:
+    return {"index": 0, "name": "grasp", "holes": [], "constraints": [],
+            "stage_objects": {},
+            "acceptance": [{"name": "region_grasp",
+                            "args": {"obj": "tube0", "region": "upper_body"}}]}
+
+
+def _run_grasp(handler) -> dict:
+    runtime = _RecordingRuntime()
+    result = run_policy({0: handler}, {"stages": [_grasp_stage()]}, runtime,
+                        max_attempts=1)
+    return result["stages"][0]["gate"]
+
+
+def test_runner_feeds_the_recorded_grasp_point_to_the_gate() -> None:
+    def handler(rt) -> None:
+        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    gate = _run_grasp(handler)
+    assert gate["acceptance_hold"] is True          # 抓在上段 → 真的判出 PASS
+    assert gate["n_unknown"] == 0
+
+
+def test_runner_ctx_does_not_make_the_gate_lenient() -> None:
+    """拿到抓取点不等于放行:抓在下段就该 FAIL。"""
+    def handler(rt) -> None:
+        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.10]})
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    gate = _run_grasp(handler)
+    assert gate["acceptance_hold"] is False
+    assert gate["passed"] is False
+
+
+def test_runner_without_a_recorded_grasp_point_keeps_the_unknown_verdict() -> None:
+    """runtime 没记抓取点 → 维持现状:UNKNOWN,不猜一个点。"""
+    def handler(rt) -> None:
+        rt.calls.append({"op": "grasp_close", "angle": 0.0})
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    gate = _run_grasp(handler)
+    assert gate["acceptance_hold"] is None
+    assert gate["n_unknown"] == 1
+    assert gate["passed"] is False
+
+
+def test_runner_ignores_records_from_before_this_stage_attempt() -> None:
+    """窗口按 attempt 划:上一阶段留下的抓取点不能拿来给这一阶段验收。"""
+    runtime = _RecordingRuntime()
+    runtime.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
+
+    def handler(rt) -> None:
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    result = run_policy({0: handler}, {"stages": [_grasp_stage()]}, runtime,
+                        max_attempts=1)
+    assert result["stages"][0]["gate"]["acceptance_hold"] is None
+
+
+def test_runner_takes_the_latest_record_and_rejects_malformed_ones() -> None:
+    """同一阶段记了多次 → 取最近一次;形态不对的记录当作没记。"""
+    def handler(rt) -> None:
+        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.10]})
+        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
+        rt.calls.append({"op": "approach", "approach_dir": "down"})   # 不是向量
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    gate = _run_grasp(handler)
+    assert gate["acceptance_hold"] is True          # 用了最后那次(上段)
+
+    def only_bad(rt) -> None:
+        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, "x", 0.90]})
+        rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
+
+    assert _run_grasp(only_bad)["acceptance_hold"] is None

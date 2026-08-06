@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demo_graph_lab.evaluation import gates
+from demo_graph_lab.evaluation import gates, predicates
 
 
 class FakeRT:
@@ -138,15 +138,17 @@ def test_no_constraints_key_is_vacuously_true():
 
 
 def test_pass_plus_unknown_acceptance_is_undetermined():
+    """普通 UNKNOWN(这里用缺 ctx 的 region_grasp)照旧阻塞:PASS + UNKNOWN → 判不了。"""
     stage = {
         "index": 0, "name": "release", "stage_objects": {},
         "acceptance": [{"name": "above", "args": {}},
-                       {"name": "carry", "args": {}}],
+                       {"name": "region_grasp", "args": {}}],
         "constraints": [],
     }
-    verdict = _run(FakeRT({"above": gates.PASS, "carry": gates.UNKNOWN}), stage)
+    verdict = _run(FakeRT({"above": gates.PASS, "region_grasp": gates.UNKNOWN}), stage)
     assert verdict["acceptance_hold"] is None
     assert verdict["passed"] is False
+    assert verdict["excluded_uncheckable_keys"] == []   # 白名单外,不豁免
 
 
 def test_pass_plus_unknown_constraint_is_undetermined():
@@ -155,16 +157,17 @@ def test_pass_plus_unknown_constraint_is_undetermined():
         "acceptance": [{"name": "above", "args": {}}],
         "constraints": [
             {"name": "center_align", "args": {}, "holds": "at_end"},
-            {"name": "carry", "args": {}, "holds": "at_end"},
+            {"name": "region_grasp", "args": {}, "holds": "at_end"},
         ],
     }
     verdict = _run(FakeRT({
         "above": gates.PASS,
         "center_align": gates.PASS,
-        "carry": gates.UNKNOWN,
+        "region_grasp": gates.UNKNOWN,
     }), stage)
     assert verdict["constraints_hold"] is None
     assert verdict["passed"] is False
+    assert verdict["excluded_uncheckable_keys"] == []
 
 
 def test_strict_gate_rejects_unobservable_effect() -> None:
@@ -231,11 +234,11 @@ def test_throughout_unknown_at_entry_cannot_pass_at_exit():
     stage = {
         "index": 1, "name": "release", "stage_objects": {},
         "acceptance": [{"name": "above", "args": {}}],
-        "constraints": [{"name": "carry", "args": {}, "holds": "throughout"}],
+        "constraints": [{"name": "region_grasp", "args": {}, "holds": "throughout"}],
     }
     runtime = FakeRT(
-        verdicts={"above": gates.PASS, "carry": gates.PASS},
-        pre_verdicts={"carry": gates.UNKNOWN},
+        verdicts={"above": gates.PASS, "region_grasp": gates.PASS},
+        pre_verdicts={"region_grasp": gates.UNKNOWN},
     )
     verdict = _run(runtime, stage)
     assert verdict["constraints_hold"] is None
@@ -247,19 +250,19 @@ def test_same_predicate_with_different_holds_cannot_overwrite_unknown():
         "index": 1, "name": "release", "stage_objects": {},
         "acceptance": [{"name": "above", "args": {}}],
         "constraints": [
-            {"name": "carry", "args": {"relation": "tube0_in_gripper"},
+            {"name": "region_grasp", "args": {"obj": "tube0", "region": "upper_body"},
              "holds": "throughout"},
-            {"name": "carry", "args": {"relation": "tube0_in_gripper"},
+            {"name": "region_grasp", "args": {"obj": "tube0", "region": "upper_body"},
              "holds": "at_end"},
         ],
     }
     runtime = FakeRT(
         verdicts={
             "above": gates.PASS,
-            ("carry", "throughout"): gates.PASS,
-            ("carry", "at_end"): gates.PASS,
+            ("region_grasp", "throughout"): gates.PASS,
+            ("region_grasp", "at_end"): gates.PASS,
         },
-        pre_verdicts={("carry", "throughout"): gates.UNKNOWN},
+        pre_verdicts={("region_grasp", "throughout"): gates.UNKNOWN},
     )
     verdict = _run(runtime, stage)
     assert verdict["constraints_hold"] is None
@@ -407,3 +410,189 @@ def test_prefix_matching_still_works_without_a_resolver():
                           positions={"bowl0_prop": [0.5, 0.0, 0.79]}), stage)
     assert verdict["manipulated_entity"] == "bowl0_prop"
     assert verdict["effect_status"] == gates.PASS
+
+
+# ==========================================================================
+# 结构性不可查项(carry / order)不再死锁整条判定。
+# 实测(8/6 ep1+ep2):acceptance 里的 carry 在 UNCHECKABLE_IN_RUNTIME 里,三值合取
+# UNKNOWN→None→passed 恒非 True——只要 acceptance 含 carry,任何 stage 永远过不了。
+# 现在这一类**从合取中排除但完整记账**;豁免面用 predicates 的白名单钉死。
+# ==========================================================================
+def _carry_stage(extra_acceptance=(), constraints=()):
+    return {
+        "index": 1, "name": "lift",
+        "stage_objects": {"manipulated": "bowl0"},
+        "acceptance": [{"name": "carry", "args": {"relation": "bowl0_in_gripper"}},
+                       *extra_acceptance],
+        "constraints": list(constraints),
+    }
+
+
+def test_uncheckable_acceptance_is_excluded_and_accounted():
+    """acceptance 含 carry(UNKNOWN)、其余全 PASS → passed=True,且 carry 被点名记账。"""
+    stage = _carry_stage(extra_acceptance=[{"name": "above", "args": {}}])
+    rt = FakeRT(verdicts={"above": gates.PASS, "carry": gates.UNKNOWN},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})
+    verdict = _run(rt, stage)
+
+    assert verdict["acceptance_hold"] is True
+    assert verdict["passed"] is True
+    excluded = verdict["excluded_uncheckable_keys"]
+    assert len(excluded) == 1 and "carry" in excluded[0]
+    assert verdict["n_excluded_uncheckable"] == 1
+    # 记账要完整:被豁免不等于被查过,它仍然留在 unknown_keys 里。
+    assert excluded[0] in verdict["unknown_keys"]
+    assert verdict["n_unknown"] == 1
+
+
+def test_uncheckable_constraint_is_excluded_from_the_conjunction():
+    stage = _carry_stage(
+        extra_acceptance=[{"name": "above", "args": {}}],
+        constraints=[{"name": "carry", "args": {}, "holds": "throughout"},
+                     {"name": "center_align", "args": {}, "holds": "at_end"}])
+    rt = FakeRT(verdicts={"above": gates.PASS, "center_align": gates.PASS,
+                          "carry": gates.UNKNOWN},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})
+    verdict = _run(rt, stage)
+
+    assert verdict["constraints_hold"] is True
+    assert verdict["passed"] is True
+    assert verdict["n_constraints"] == 2          # 记账不缩水:两条都还在
+    assert verdict["n_excluded_uncheckable"] == 2  # acceptance 与 constraint 各一条
+
+
+def test_ordinary_unknown_still_blocks_next_to_an_excluded_one():
+    """白名单外的 UNKNOWN 照旧阻塞,不因为同阶段有豁免项就一起放行。"""
+    stage = _carry_stage(extra_acceptance=[{"name": "region_grasp", "args": {}}])
+    rt = FakeRT(verdicts={"region_grasp": gates.UNKNOWN, "carry": gates.UNKNOWN},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})
+    verdict = _run(rt, stage)
+
+    assert verdict["acceptance_hold"] is None
+    assert verdict["passed"] is False
+    assert verdict["n_excluded_uncheckable"] == 1   # 只豁免了 carry
+    assert "region_grasp" in verdict["reason"]      # 阻塞原因点名真正挡路的那条
+
+
+def test_only_uncheckable_acceptance_does_not_pass():
+    """全部 acceptance 都被豁免 → 合取里没有任何证据 → 仍非 True(豁免不凭空造 True)。"""
+    rt = FakeRT(verdicts={"carry": gates.UNKNOWN},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})
+    verdict = _run(rt, _carry_stage())
+
+    assert verdict["acceptance_hold"] is None
+    assert verdict["passed"] is False
+    assert verdict["n_excluded_uncheckable"] == 1
+
+
+def test_uncheckable_that_the_runtime_can_answer_is_not_excluded():
+    """豁免只吃 UNKNOWN:runtime 真能判 carry 时,FAIL 照旧否决。"""
+    stage = _carry_stage(extra_acceptance=[{"name": "above", "args": {}}])
+    rt = FakeRT(verdicts={"above": gates.PASS, "carry": gates.FAIL},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})
+    verdict = _run(rt, stage)
+
+    assert verdict["acceptance_hold"] is False
+    assert verdict["passed"] is False
+    assert verdict["excluded_uncheckable_keys"] == []
+
+
+def test_exemption_whitelist_is_pinned_to_the_predicate_module():
+    """护栏:豁免面只有这两个名字,而且与 predicates 同一个真源。
+
+    往白名单里塞第三个名字 = 给 gate 开后门(那条约束就再也挡不住任何 stage),
+    这条断言逼将来的人先来改测试、把这个决定摆到台面上。
+    """
+    assert gates.EXCLUDABLE_UNCHECKABLE is predicates.UNCHECKABLE_IN_RUNTIME
+    assert predicates.UNCHECKABLE_IN_RUNTIME == {"carry", "order"}
+
+
+def test_predicate_outside_the_whitelist_cannot_be_exempted():
+    """行为侧护栏:名字不在白名单里,就算 UNKNOWN 也不许被排除。"""
+    for name in ("region_grasp", "approach_direction", "inside", "frobnicate"):
+        stage = {"index": 0, "name": "release", "stage_objects": {},
+                 "acceptance": [{"name": name, "args": {}}], "constraints": []}
+        verdict = _run(FakeRT({name: gates.UNKNOWN}), stage)
+        assert verdict["excluded_uncheckable_keys"] == [], name
+        assert verdict["passed"] is False, name
+
+
+# ==========================================================================
+# ctx 接线:region_grasp 要 grasp_point、approach_direction 要 approach_dir。
+# gate 不传 ctx 时这两条**永远** UNKNOWN(几何实现其实是完整的),ep1/ep2 两集里
+# 就是这样一直判不了;现在由 runner 从 runtime 侧取值经 gate 传进谓词。
+# ==========================================================================
+class _PredicateRT:
+    """verify3 直通真谓词的最小 runtime,用来钉住 ctx 确实到达了谓词。"""
+
+    def __init__(self, entities):
+        self.entities = entities
+        self.positions = {"tube0_prop": [0.4, 0.2, 0.80]}
+
+    def _entities(self, max_age_s=0.0):
+        return {k: {"pos": list(v)} for k, v in self.positions.items()}
+
+    def verify3(self, constraint, **ctx):
+        return predicates.check(constraint, self.entities, **ctx)
+
+
+_TUBE = {"tube0": {"pos": [0.4, 0.2, 0.8],
+                   "aabb": {"min": [0.0, 0.0, 0.0], "max": [0.1, 0.1, 1.0]}}}
+
+
+def _ctx_stage(constraint):
+    return {"index": 0, "name": "release", "stage_objects": {},
+            "acceptance": [constraint], "constraints": []}
+
+
+def _evaluate_with_ctx(stage, ctx):
+    rt = _PredicateRT(_TUBE)
+    entry = gates.snapshot(rt, stage)
+    return gates.evaluate(rt, stage, entry, ctx=ctx)
+
+
+def test_region_grasp_is_decided_once_the_grasp_point_reaches_the_predicate():
+    stage = _ctx_stage({"name": "region_grasp",
+                        "args": {"obj": "tube0", "region": "upper_body"}})
+    # 抓在上段 → PASS;抓在下段 → FAIL。两侧都要真的判出来,不是一律 UNKNOWN。
+    assert _evaluate_with_ctx(stage, {"grasp_point": [0.05, 0.05, 0.9]})[
+        "acceptance_hold"] is True
+    assert _evaluate_with_ctx(stage, {"grasp_point": [0.05, 0.05, 0.1]})[
+        "acceptance_hold"] is False
+
+
+def test_approach_direction_is_decided_once_the_direction_reaches_the_predicate():
+    stage = _ctx_stage({"name": "approach_direction",
+                        "args": {"cone": "top_down", "target": "tube0"}})
+    assert _evaluate_with_ctx(stage, {"approach_dir": [0, 0, -1]})[
+        "acceptance_hold"] is True
+    assert _evaluate_with_ctx(stage, {"approach_dir": [1, 0, 0]})[
+        "acceptance_hold"] is False
+
+
+def test_without_ctx_the_two_predicates_stay_unknown():
+    """没有 ctx 时与现状逐位一致:两条谓词仍是 UNKNOWN,判定仍是 None。"""
+    for constraint, reason in (
+        ({"name": "region_grasp", "args": {"obj": "tube0", "region": "upper_body"}},
+         "no_grasp_point"),
+        ({"name": "approach_direction", "args": {"cone": "top_down"}},
+         "no_approach_dir"),
+    ):
+        stage = _ctx_stage(constraint)
+        none_ctx = _evaluate_with_ctx(stage, None)
+        empty_ctx = _evaluate_with_ctx(stage, {})
+        assert none_ctx == empty_ctx                  # 空 ctx 不改变任何一位
+        assert none_ctx["acceptance_hold"] is None
+        assert none_ctx["n_unknown"] == 1
+        assert none_ctx["excluded_uncheckable_keys"] == []   # 缺输入 ≠ 结构性不可查
+        assert predicates.check(constraint, _TUBE).reason == reason
+
+
+def test_runtime_that_does_not_accept_ctx_keeps_the_current_behaviour():
+    """老 runtime 的 verify3 不收 ctx → 退回不带 ctx 的调用,逐位与现状一致。"""
+    stage = _ctx_stage({"name": "above", "args": {}})
+    rt = FakeRT(verdicts={"above": gates.PASS},
+                positions={"bowl0_prop": [0.5, 0.0, 0.79]})   # FakeRT.verify3 无 **ctx
+    entry = gates.snapshot(rt, stage)
+    assert gates.evaluate(rt, stage, entry, ctx={"grasp_point": [0, 0, 1]}) == \
+        gates.evaluate(rt, stage, entry)

@@ -9,8 +9,17 @@ from __future__ import annotations
 
 import math
 
+from .predicates import UNCHECKABLE_IN_RUNTIME
+
 # 三值与 evaluation.predicates 保持一致；这里独立列出以免强耦合导入顺序。
 PASS, FAIL, UNKNOWN = "PASS", "FAIL", "UNKNOWN"
+
+# 唯一可以被排除在 hold 合取之外的一类 UNKNOWN:本 runtime **结构上**永远查不出的
+# 约束(carry 需跨阶段附着状态、order 需执行序,单帧几何快照都读不出)。三值合取里
+# UNKNOWN→None→passed 恒非 True，因此只要 acceptance 里出现一条 carry，任何 stage
+# 都永远过不了——这是死锁，不是严格。豁免面用 predicates 的白名单钉死(单一真源)，
+# 其他任何 UNKNOWN(谓词异常、缺 ctx、缺参照实体、词表外)照旧阻塞。
+EXCLUDABLE_UNCHECKABLE = UNCHECKABLE_IN_RUNTIME
 
 # 需要观测到物体位移才算数的阶段(名字取自 vocab.STAGE_VOCAB 与 trace 的 motion_type)
 EFFECTFUL_STAGES = {
@@ -37,14 +46,26 @@ def _and3(entry: str, exit_: str) -> str:
     return UNKNOWN
 
 
-def _verify3(rt, constraint: dict) -> str:
+def _verify3(rt, constraint: dict, ctx: dict | None = None) -> str:
     """优先调用三值 ``verify3``；bool ``verify`` 用于简单 runtime。
+
+    ``ctx`` 是谓词专用输入(``grasp_point`` / ``approach_dir``，见
+    ``evaluation.predicates``)，由 runner 从 runtime 侧取本 stage 实际记录的值。
+    ``verify3`` 不接受这些关键字时退回不带 ctx 的调用，行为与未接线前逐位一致
+    （那两条谓词照旧 UNKNOWN，不放松）。
 
     任一接口抛出异常都返回 UNKNOWN，不猜测 PASS 或 FAIL。
     """
     v3 = getattr(rt, "verify3", None)
     if callable(v3):
         try:
+            return v3(constraint, **(ctx or {})).status
+        except TypeError:
+            if not ctx:              # 不是 ctx 引起的签名不匹配 → 与既有一致,记 UNKNOWN
+                return UNKNOWN
+        except Exception:
+            return UNKNOWN
+        try:                         # verify3 不收 ctx:退回未接线前的调用形态
             return v3(constraint).status
         except Exception:
             return UNKNOWN
@@ -52,6 +73,16 @@ def _verify3(rt, constraint: dict) -> str:
         return PASS if bool(rt.verify(constraint)) else FAIL
     except Exception:
         return UNKNOWN
+
+
+def _excludable(constraint: dict, status: str) -> bool:
+    """这一项能否被排除在 hold 合取之外。
+
+    两个条件都要满足：约束名在 ``EXCLUDABLE_UNCHECKABLE`` 白名单里，**并且**本次
+    判定确实是 UNKNOWN。后一条让将来真能查 carry 的 runtime 说了算：它给 PASS 就
+    算 PASS、给 FAIL 就照旧否决，豁免只吃"结构上查不出"这一种情形。
+    """
+    return status == UNKNOWN and constraint.get("name") in EXCLUDABLE_UNCHECKABLE
 
 
 def object_positions(rt) -> dict:
@@ -94,15 +125,20 @@ def manipulated_entity_key(manip, moved: dict, resolve_object=None):
     return None
 
 
-def snapshot(rt, stage: dict) -> dict:
-    """阶段入口快照:位置、验收初值及 throughout 项的入口三值。"""
+def snapshot(rt, stage: dict, ctx: dict | None = None) -> dict:
+    """阶段入口快照:位置、验收初值及 throughout 项的入口三值。
+
+    ``ctx`` 同 ``evaluate``:谓词专用输入。入口探针发生在本阶段动作之前,runner
+    此时**不**传抓取点/接近方向(还没发生),于是 throughout 的 region_grasp /
+    approach_direction 入口仍是 UNKNOWN、合取后整条 UNKNOWN——fail-closed,不放松。
+    """
     idx = stage.get("index")
     # pre_true[k] = True 仅当入口三值检验为 PASS(UNKNOWN/FAIL 均非"已为真",不误判空洞)。
     pre_true = {}
     entry_acceptance = {}
     for c in stage.get("acceptance", []) or []:
         key = _key(c)
-        status = _verify3(rt, dict(c, _stage=idx, _probe="pre"))
+        status = _verify3(rt, dict(c, _stage=idx, _probe="pre"), ctx)
         pre_true[key] = status == PASS
         if str(c.get("holds")) == "throughout":
             entry_acceptance[key] = status
@@ -110,28 +146,34 @@ def snapshot(rt, stage: dict) -> dict:
     entry_constraint = {}
     for c in stage.get("constraints", []) or []:
         if str(c.get("holds")) == "throughout":
-            entry_constraint[_key(c)] = _verify3(rt, dict(c, _stage=idx, _probe="pre"))
+            entry_constraint[_key(c)] = _verify3(
+                rt, dict(c, _stage=idx, _probe="pre"), ctx)
     return {"objects": object_positions(rt), "pre_true": pre_true,
             "entry_acceptance": entry_acceptance,
             "entry_constraint": entry_constraint}
 
 
 def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
-             resolve_object=None) -> dict:
+             resolve_object=None, ctx: dict | None = None) -> dict:
     """阶段结束时判定。返回含 passed 与全部诊断字段的字典。
 
     ``resolve_object`` 是可选的图对象名 → 实体键解析(见 ``manipulated_entity_key``);
-    不给时行为与既有一致。
+    不给时行为与既有一致。``ctx`` 是谓词专用输入(``grasp_point`` / ``approach_dir``),
+    由 runner 从 runtime 侧取本 stage 实际记录的值;不给时那两条谓词照旧 UNKNOWN。
+
+    结构性不可查项(``EXCLUDABLE_UNCHECKABLE``)见 ``_excludable``:它们不参与 hold
+    合取,但完整记账在 ``excluded_uncheckable_keys`` 与 ``unknown_keys`` 里。
     """
     idx = stage.get("index")
     acceptance = stage.get("acceptance", []) or []
     # throughout acceptance 必须入口和出口都成立；其他 acceptance 只看出口。
     held = {}
+    excluded_acceptance = set()
     acceptance_violated_midway = []
     entry_acceptance = entry.get("entry_acceptance", {})
     for c in acceptance:
         key = _key(c)
-        exit_v = _verify3(rt, dict(c, _stage=idx))
+        exit_v = _verify3(rt, dict(c, _stage=idx), ctx)
         if str(c.get("holds")) == "throughout":
             entry_v = entry_acceptance.get(key, UNKNOWN)
             held[key] = _and3(entry_v, exit_v)
@@ -139,11 +181,16 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
                 acceptance_violated_midway.append(key)
         else:
             held[key] = exit_v
+        if _excludable(c, held[key]):
+            excluded_acceptance.add(key)
 
     # 三值合取：任一 FAIL→False；全部 PASS→True；含 UNKNOWN→None。
-    if any(value == FAIL for value in held.values()):
+    # 结构性不可查项先剔除(它们只可能是 UNKNOWN,不影响 FAIL 一侧)；全部被剔除时
+    # 合取里没有任何证据 → 仍是 None,豁免不凭空造出一个 True。
+    graded = {k: v for k, v in held.items() if k not in excluded_acceptance}
+    if any(value == FAIL for value in graded.values()):
         acceptance_hold = False
-    elif held and all(value == PASS for value in held.values()):
+    elif graded and all(value == PASS for value in graded.values()):
         acceptance_hold = True
     else:
         acceptance_hold = None
@@ -155,10 +202,11 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
     # throughout 在入口和出口检查；其他约束只在出口检查。
     entry_constraint = entry.get("entry_constraint", {})
     constraint_held = {}
+    excluded_constraints = set()
     constraint_violated_midway = []
     for c in stage.get("constraints", []) or []:
         k = _key(c)
-        exit_v = _verify3(rt, dict(c, _stage=idx))
+        exit_v = _verify3(rt, dict(c, _stage=idx), ctx)
         if str(c.get("holds")) == "throughout":
             entry_v = entry_constraint.get(k, UNKNOWN)
             constraint_held[k] = _and3(entry_v, exit_v)
@@ -166,16 +214,18 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
                 constraint_violated_midway.append(k)
         else:
             constraint_held[k] = exit_v
-    c_fail = (any(v == FAIL for v in constraint_held.values())
+        if _excludable(c, constraint_held[k]):
+            excluded_constraints.add(k)
+    graded_c = {k: v for k, v in constraint_held.items()
+                if k not in excluded_constraints}
+    c_fail = (any(v == FAIL for v in graded_c.values())
               or bool(constraint_violated_midway))
-    if not constraint_held:
-        constraints_hold = True          # 无约束时空合取为真
-    elif c_fail:
+    if c_fail:
         constraints_hold = False
-    elif all(value == PASS for value in constraint_held.values()):
-        constraints_hold = True
+    elif all(value == PASS for value in graded_c.values()):
+        constraints_hold = True          # 空合取为真(无约束,或全部结构性不可查)
     else:
-        constraints_hold = None          # 至少一个 UNKNOWN → 判不了
+        constraints_hold = None          # 至少一个可查项 UNKNOWN → 判不了
     c_unknown = sorted(k for k, v in constraint_held.items() if v == UNKNOWN)
 
     post = object_positions(rt)
@@ -206,8 +256,10 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
         effect_status = FAIL
     effect_ok = (effect_status == PASS)
 
-    # UNKNOWN 单独记账，不折入 PASS/FAIL。
+    # UNKNOWN 单独记账，不折入 PASS/FAIL。被豁免的结构性不可查项**仍然**留在
+    # unknown_keys 里（它们确实没被查过），只是另外点名在 excluded 里。
     unknown_keys = sorted(set(a_unknown) | set(c_unknown))
+    excluded_keys = sorted(excluded_acceptance | excluded_constraints)
     n_checks = len(held) + len(constraint_held)
     unknown_frac = (len(unknown_keys) / n_checks) if n_checks else 0.0
 
@@ -223,6 +275,9 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
         "vacuous_keys": vacuous,
         "unknown_keys": unknown_keys,          # 三值记账:检查不了的约束(不静默计入 pass/fail)
         "n_unknown": len(unknown_keys),
+        # 结构性不可查、因而被排除在合取之外的键(白名单内且本次确为 UNKNOWN)。
+        "excluded_uncheckable_keys": excluded_keys,
+        "n_excluded_uncheckable": len(excluded_keys),
         "unknown_frac": round(unknown_frac, 4),
         "needs_effect": needs_effect,
         "effect_observable": observable,
@@ -250,6 +305,10 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
         verdict["reason"] = (f"vacuous: constraints hold but world unchanged "
                              f"(max Δ={max_move:.4f} m < {MIN_DISPLACEMENT_M})")
     elif not verdict["passed"]:
-        verdict["reason"] = (f"undetermined: unknown checks={unknown_keys[:3]} "
+        # 只点名**真正挡住判定**的 UNKNOWN;被豁免的那些另计,免得把已豁免的键
+        # 写成阻塞原因。
+        blocking = [k for k in unknown_keys if k not in set(excluded_keys)]
+        verdict["reason"] = (f"undetermined: unknown checks={blocking[:3]} "
+                             f"excluded_uncheckable={len(excluded_keys)} "
                              f"effect={effect_status}")
     return verdict
