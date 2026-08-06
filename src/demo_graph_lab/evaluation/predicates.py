@@ -21,6 +21,11 @@
 不持有 runtime、不发网络、运行期零 LLM。`region_grasp` 复用 `binding` 的归一化
 竖直带；`approach_direction` 复用 `regions.cone_angle_deg`。阈值是任务无关的几何容差，
 不是场景坐标。
+
+轴类谓词(`axis_vertical` / `axis_parallel`)判的是物体的**真实长轴**：从 AABB 最长边
+定出局部轴序号，再经实体四元数变换到世界系(见 `_long_axis_world`)。不能直接拿物体
+局部 +z：8/6 ep2 实测里横躺的管子(AABB 111×85×37 mm)局部 +z 仍近竖直，
+`axis_vertical` 会对一根根本没被碰过的横管报 4.2° 的假 PASS。
 """
 
 from __future__ import annotations
@@ -43,6 +48,10 @@ _ANGLE_TOL_DEG = 20.0        # 轴竖直/平行的容差
 _ALIGN_TOL_M = 0.05          # center_align 的 xy 容差
 _INSIDE_PAD_M = 0.02         # inside 的 AABB 外扩容差
 _CONE_TOL_DEG = 25.0         # approach 方向落在 cone 内的容差
+# 长轴判据:次长边 / 最长边 超过此比值 → 近立方/近方形,主方向不可辨 → UNKNOWN。
+# 与 selection.binding._AXIS_DOMINANCE_MAX_RATIO 同口径(数值与判定由
+# tests/test_predicates.py 的 parity 测试逐值钉住,两侧不得单边漂移)。
+_AXIS_DOMINANCE_MAX_RATIO = 0.8
 
 
 class Predicate:
@@ -104,10 +113,44 @@ def _ent(entities, name):
     return entities.get(name)
 
 
-def _quat_z_axis(q):
-    """物体局部 +z 在世界系的方向(wxyz)。"""
+def _local_axis_in_world(q, index):
+    """物体四元数(wxyz)旋转矩阵的第 ``index`` 列 = 该局部轴在世界系的方向。
+
+    与 `selection.binding._local_axis_in_world` 同构(逐项相同);``index == 2`` 就是
+    旧实现里内联的那条局部 +z 表达式。
+    """
     w, x, y, z = q
+    if index == 0:
+        return [1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)]
+    if index == 1:
+        return [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)]
     return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
+
+
+def _long_axis_world(ent):
+    """实体真实长轴的世界系单位向量。返回 ``(vec, None)`` 或 ``(None, reason)``。
+
+    与 `selection.binding._long_axis` 同构:AABB 三边取最长边的局部轴序号,再经四元数
+    变到世界系。两处拒绝都不给静默出口(谓词侧表现为 UNKNOWN + reason,不猜):
+      - 次长/最长 > ``_AXIS_DOMINANCE_MAX_RATIO`` → ``axis_ambiguous_extents``;
+      - 四元数退化(旋转列长度为零)→ ``axis_unobserved``;
+      - 快照没有可读 AABB → ``no_aabb``。
+    binding 侧同一情形抛 `UnsolvedHole`,reason 字符串一致;两侧数值由 parity 测试对照。
+    """
+    try:
+        lo, hi = binding._aabb_bounds(ent)
+        extents = [float(hi[i]) - float(lo[i]) for i in range(3)]
+    except Exception:
+        return None, "no_aabb"
+    order = sorted(range(3), key=lambda i: extents[i], reverse=True)
+    longest, second = extents[order[0]], extents[order[1]]
+    if longest <= 0.0 or second / longest > _AXIS_DOMINANCE_MAX_RATIO:
+        return None, "axis_ambiguous_extents"
+    vec = _local_axis_in_world(ent["quat"], order[0])
+    norm = math.sqrt(sum(item * item for item in vec))
+    if norm < 1e-9:
+        return None, "axis_unobserved"
+    return [item / norm for item in vec], None
 
 
 def _angle_deg(a, b):
@@ -122,17 +165,22 @@ def _angle_deg(a, b):
 # ctx 里可带 grasp_point(region_grasp 用)、approach_dir(approach_direction 用)。
 # ==========================================================================
 def pred_axis_vertical(c, entities, **ctx):
+    """物体**真实长轴**与世界 +z 的最小夹角 ≤ 容差。长轴见 `_long_axis_world`。"""
     a = _args(c)
     obj = _obj_base(a.get("axis") or next(iter(a.values()), None))
     ent = _ent(entities, obj)
     if ent is None or "quat" not in ent:
         return _unknown("axis_vertical", "ref_unresolved", f"obj={obj}")
-    ang = _angle_deg(_quat_z_axis(ent["quat"]), [0, 0, 1])
+    axis, reason = _long_axis_world(ent)
+    if axis is None:
+        return _unknown("axis_vertical", reason, f"obj={obj}")
+    ang = _angle_deg(axis, [0, 0, 1])
     ang = min(ang, 180 - ang)                       # 轴无向:取到竖直的最小夹角
     return _from_margin("axis_vertical", _ANGLE_TOL_DEG - ang, f"angle={ang:.1f}")
 
 
 def pred_axis_parallel(c, entities, **ctx):
+    """两物体**真实长轴**的最小夹角 ≤ 容差。长轴见 `_long_axis_world`。"""
     a = _args(c)
     va = _obj_base(a.get("axis_a"))
     vb = _obj_base(a.get("axis_b"))
@@ -141,8 +189,12 @@ def pred_axis_parallel(c, entities, **ctx):
         return _unknown("axis_parallel", "ref_unresolved", f"axis_a={va}")
     if eb is None or "quat" not in eb:
         return _unknown("axis_parallel", "ref_unresolved", f"axis_b={vb}")
-    axa = _quat_z_axis(ea["quat"])
-    axb = _quat_z_axis(eb["quat"])
+    axa, reason_a = _long_axis_world(ea)
+    if axa is None:
+        return _unknown("axis_parallel", reason_a, f"axis_a={va}")
+    axb, reason_b = _long_axis_world(eb)
+    if axb is None:
+        return _unknown("axis_parallel", reason_b, f"axis_b={vb}")
     ang = _angle_deg(axa, axb)
     ang = min(ang, 180 - ang)
     return _from_margin("axis_parallel", _ANGLE_TOL_DEG - ang, f"angle={ang:.1f}")

@@ -2,10 +2,17 @@
 
 每个可检验谓词至少 PASS/FAIL 各一例 + margin 符号检查;覆盖 UNKNOWN 路径
 (缺参照 / 缺输入 / uncheckable_in_runtime / 词表外 / rim-handle / 谓词内部异常)。
-纯逻辑,无 cv2/网络/LLM。
+轴类谓词另外钉住「长轴从 AABB 最长边推断」这条语义(8/6 ep2:横躺管子的局部 +z
+仍近竖直,靠局部 +z 判 axis_vertical 会给出假 PASS),并与 `selection.binding._long_axis`
+做逐值 parity。纯逻辑,无 cv2/网络/LLM。
 """
 
+import math
+
+import pytest
+
 from demo_graph_lab.evaluation import predicates as P
+from demo_graph_lab.selection import binding
 
 
 # ---- 实体快照工具:pos + 可选 quat(wxyz) + 可选 aabb ----
@@ -21,6 +28,22 @@ def ent(pos, quat=None, aabb=None):
 IDENT_Q = [1.0, 0.0, 0.0, 0.0]                 # 单位四元数:局部 +z = 世界 +z
 # 绕 x 轴转 90°(wxyz):局部 +z 转到世界 -y(轴变水平)
 TILT_Q = [0.70710678, 0.70710678, 0.0, 0.0]
+# 绕 x 轴转 4.2°:局部 +z 只偏离竖直 4.2°——ep2 实测那根**横躺**管子的姿态。
+_HALF = math.radians(4.2) / 2.0
+NEAR_UPRIGHT_Q = [math.cos(_HALF), math.sin(_HALF), 0.0, 0.0]
+
+# ep2 实测:那根没被碰过的管子,世界 AABB 111×85×37 mm(最长边在 x,是横躺的)。
+EP2_LYING_EXTENTS = (0.111, 0.085, 0.037)
+UPRIGHT_EXTENTS = (0.037, 0.037, 0.111)         # 同一根管子立起来
+CUBOID_EXTENTS = (0.100, 0.090, 0.090)          # 近立方:次/最长 = 0.9 > 0.8
+
+
+def axis_ent(extents, quat=IDENT_Q, center=(0.4, 0.1, 0.8)):
+    """按世界 AABB 边长造实体(pos 取 AABB 中心,与仿真资产一致)。"""
+    half = [item / 2.0 for item in extents]
+    return {"pos": list(center), "quat": list(quat),
+            "aabb": {"min": [center[i] - half[i] for i in range(3)],
+                     "max": [center[i] + half[i] for i in range(3)]}}
 
 
 def C(name, **args):
@@ -28,18 +51,46 @@ def C(name, **args):
 
 
 # ==========================================================================
-# axis_vertical
+# axis_vertical(判据是**真实长轴**,不是物体局部 +z)
 # ==========================================================================
 def test_axis_vertical_pass():
-    ents = {"tube": ent([0, 0, 1], quat=IDENT_Q)}
+    ents = {"tube": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q)}
     p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
     assert p.status == P.PASS and p.margin > 0
 
 
 def test_axis_vertical_fail():
-    ents = {"tube": ent([0, 0, 1], quat=TILT_Q)}     # 轴水平 → 与竖直夹角 90°
+    # 长轴(局部 x)水平 → 与竖直夹角 90°
+    ents = {"tube": axis_ent(EP2_LYING_EXTENTS, quat=TILT_Q)}
     p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
     assert p.status == P.FAIL and p.margin < 0
+
+
+def test_axis_vertical_lying_tube_is_not_a_false_pass():
+    """ep2 靶子:管子横躺(长轴在 x),但资产局部 +z 只偏离竖直 4.2°。
+
+    旧实现读局部 +z → angle≈4.2° → 对一根根本没被碰过的管子报 PASS。
+    换真实长轴后必须判 FAIL。
+    """
+    ents = {"tube": axis_ent(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
+    p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
+    assert p.status == P.FAIL, "横躺管子必须判 FAIL,不能因为局部 +z 近竖直而假 PASS"
+    assert float(p.detail.split("=")[1]) == pytest.approx(90.0, abs=0.5)
+
+
+def test_axis_vertical_unknown_when_extents_are_ambiguous():
+    """近立方:主方向不可辨 → UNKNOWN 带 reason,不猜一个轴。"""
+    ents = {"box": axis_ent(CUBOID_EXTENTS, quat=IDENT_Q)}
+    p = P.check(C("axis_vertical", axis="box.long_axis"), ents)
+    assert p.status == P.UNKNOWN and p.reason == "axis_ambiguous_extents"
+    assert p.margin is None
+
+
+def test_axis_vertical_unknown_without_aabb():
+    """只有 quat 没有 AABB → 长轴读不出来 → UNKNOWN(不退回局部 +z)。"""
+    ents = {"tube": ent([0, 0, 1], quat=IDENT_Q)}
+    p = P.check(C("axis_vertical", axis="tube.long_axis"), ents)
+    assert p.status == P.UNKNOWN and p.reason == "no_aabb"
 
 
 def test_axis_vertical_unknown_missing_ref():
@@ -48,16 +99,27 @@ def test_axis_vertical_unknown_missing_ref():
 
 
 # ==========================================================================
-# axis_parallel
+# axis_parallel(同样消费真实长轴)
 # ==========================================================================
 def test_axis_parallel_pass():
-    ents = {"a": ent([0, 0, 0], quat=IDENT_Q), "b": ent([1, 0, 0], quat=IDENT_Q)}
+    ents = {"a": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q),
+            "b": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q)}
     p = P.check(C("axis_parallel", axis_a="a.z", axis_b="b.z"), ents)
     assert p.status == P.PASS and p.margin > 0
 
 
 def test_axis_parallel_fail():
-    ents = {"a": ent([0, 0, 0], quat=IDENT_Q), "b": ent([1, 0, 0], quat=TILT_Q)}
+    # a 立着(长轴局部 z),b 横躺(长轴局部 x)→ 夹角 90°
+    ents = {"a": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q),
+            "b": axis_ent(EP2_LYING_EXTENTS, quat=IDENT_Q)}
+    p = P.check(C("axis_parallel", axis_a="a.z", axis_b="b.z"), ents)
+    assert p.status == P.FAIL and p.margin < 0
+
+
+def test_axis_parallel_lying_pair_is_not_a_false_pass():
+    """两根都横躺、但局部 +z 都近竖直:旧实现判「平行」,长轴口径下 a 立 b 躺 → FAIL。"""
+    ents = {"a": axis_ent(UPRIGHT_EXTENTS, quat=NEAR_UPRIGHT_Q),
+            "b": axis_ent(EP2_LYING_EXTENTS, quat=NEAR_UPRIGHT_Q)}
     p = P.check(C("axis_parallel", axis_a="a.z", axis_b="b.z"), ents)
     assert p.status == P.FAIL and p.margin < 0
 
@@ -66,9 +128,67 @@ def test_axis_parallel_unknown():
     p = P.check(C("axis_parallel", axis_a="ghost.z", axis_b="b.z"), {})
     assert p.status == P.UNKNOWN
 
-    only_a = {"a": ent([0, 0, 0], quat=IDENT_Q)}
+    only_a = {"a": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q)}
     p = P.check(C("axis_parallel", axis_a="a.z", axis_b="ghost.z"), only_a)
     assert p.status == P.UNKNOWN and p.reason == "ref_unresolved"
+
+
+def test_axis_parallel_unknown_names_the_ambiguous_side():
+    """哪一侧分不出主方向就报哪一侧,reason 不被另一侧掩盖。"""
+    ents = {"a": axis_ent(UPRIGHT_EXTENTS, quat=IDENT_Q),
+            "b": axis_ent(CUBOID_EXTENTS, quat=IDENT_Q)}
+    p = P.check(C("axis_parallel", axis_a="a.z", axis_b="b.z"), ents)
+    assert p.status == P.UNKNOWN and p.reason == "axis_ambiguous_extents"
+    assert "axis_b=b" in p.detail
+
+
+# ==========================================================================
+# 长轴推断与 selection.binding._long_axis 的逐值 parity
+# ==========================================================================
+# predicates 侧是同构的小面积复制(binding 侧抛 UnsolvedHole、要 hole 参数,谓词侧
+# 要三值 reason),两份实现必须逐值一致,否则 gate 和 selection 会对同一个物体
+# 给出不同的长轴。
+_PARITY_CASES = [
+    (EP2_LYING_EXTENTS, IDENT_Q),
+    (EP2_LYING_EXTENTS, NEAR_UPRIGHT_Q),
+    (EP2_LYING_EXTENTS, TILT_Q),
+    (UPRIGHT_EXTENTS, IDENT_Q),
+    (UPRIGHT_EXTENTS, NEAR_UPRIGHT_Q),
+    ((0.037, 0.111, 0.037), TILT_Q),            # 最长边在 y
+]
+
+
+@pytest.mark.parametrize("extents,quat", _PARITY_CASES)
+def test_long_axis_parity_with_binding(extents, quat):
+    entity = axis_ent(extents, quat=quat)
+    mine, reason = P._long_axis_world(entity)
+    theirs, length = binding._long_axis(entity, {"name": "long_axis"})
+    assert reason is None
+    assert mine == pytest.approx(theirs, abs=1e-12)
+    assert length == pytest.approx(max(extents), abs=1e-12)
+
+
+def test_long_axis_parity_on_rejection():
+    """拒绝面也要 parity:binding 抛 UnsolvedHole 的情形,谓词侧给同名 reason。"""
+    entity = axis_ent(CUBOID_EXTENTS, quat=IDENT_Q)
+    mine, reason = P._long_axis_world(entity)
+    assert mine is None and reason == "axis_ambiguous_extents"
+    with pytest.raises(binding.UnsolvedHole) as error:
+        binding._long_axis(entity, {"name": "long_axis"})
+    assert error.value.reason == reason
+
+    # 非单位四元数,第 2 列退化成零向量:姿态读不出来,长轴方向无从谈起。
+    degenerate = axis_ent(UPRIGHT_EXTENTS, quat=[0.0, 0.5, 0.5, 0.0])
+    mine, reason = P._long_axis_world(degenerate)
+    assert mine is None and reason == "axis_unobserved"
+    with pytest.raises(binding.UnsolvedHole) as error:
+        binding._long_axis(degenerate, {"name": "long_axis"})
+    assert error.value.reason == reason
+
+
+def test_long_axis_dominance_ratio_matches_binding():
+    """判据常量本身也对齐:阈值单边漂移会让两侧对同一物体给不同结论。"""
+    assert P._AXIS_DOMINANCE_MAX_RATIO == binding._AXIS_DOMINANCE_MAX_RATIO
 
 
 # ==========================================================================
