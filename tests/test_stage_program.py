@@ -200,6 +200,33 @@ def test_reorient_held_axis_sits_between_lift_and_transport():
                for error in validate_program(illegal, _graph()))
 
 
+def test_compile_prompt_renders_the_closed_set_from_code():
+    """compile prompt 的原语闭集由代码渲染,prompt 文件里不留第二份手写副本。"""
+    from demo_graph_lab.common import artifacts
+    from demo_graph_lab.policy.compiler import compile_prompt
+
+    prompt = compile_prompt(_graph())
+
+    # 每个原语都进 prompt,链序也从 PRIMITIVES 渲染。
+    for primitive in PRIMITIVES:
+        assert f"| `{primitive}` |" in prompt
+    assert " → ".join(f"`{op}`" for op in PRIMITIVES) in prompt
+    # 模型提案入库的新原语与它两个必填 axis_3d 参数:靠渲染进 prompt,
+    # 不靠有人记得往 prompt 文件里补一行。
+    assert "| `reorient_held_axis` | `object_axis` | hole of type `axis_3d` |" in prompt
+    assert ("| `reorient_held_axis` | `target_direction` | hole of type `axis_3d` |"
+            in prompt)
+    assert "| `approach` | `cone` (optional) | one of `oblique`, `side`, `top_down` |" \
+        in prompt
+    assert "hole `purpose` must be `lower_stop`" in prompt
+
+    # prompt 源文件不再枚举原语:只有 JSON 示例里的 approach/grasp_at 和
+    # 几条表格表达不了的硬规则会提到原语名。
+    source = (artifacts.PROMPT_ROOT / "compile_policy.md").read_text()
+    for primitive in ("lift", "reorient_held_axis", "transport", "align"):
+        assert primitive not in source
+
+
 @pytest.mark.parametrize("actions", [
     [
         {"op": "lower_until", "args": {

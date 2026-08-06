@@ -357,6 +357,9 @@ class PlanningOnlyRuntime:
     def lift(self, obj) -> None:
         self._blocked("lift")
 
+    def reorient_held_axis(self, obj, object_axis, target_direction) -> None:
+        self._blocked("reorient_held_axis")
+
     def transport(self, obj, target) -> None:
         self._blocked("transport")
 

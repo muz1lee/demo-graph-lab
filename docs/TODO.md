@@ -50,7 +50,6 @@
 - 解决抬升时物体滑脱，并删除剩余固定 sleep，统一用状态回读判断动作结束。
 - `lower_stop` 的 runtime descriptor 要明确路由到非特权 contact / motion plateau，而不是自由文本猜测。
 - 实现可信 retreat target solver：从当前 EEF、接近路径和碰撞检查生成候选；禁止回退到对象质心，完成前保持 Oracle 硬停。
-- 给 `PlanningOnlyRuntime` 补 `reorient_held_axis` 的 `ExecutionDisabled` 硬停；同时把 `prompts/compile_policy.md` 里手写的原语闭集改成由 `PRIMITIVES / ARGUMENT_SPECS / RuntimeAPI` 渲染（`repair.py::_render_primitive_table` 已经这么做，compile 侧还留着第二份手写副本，新原语进不了 compile prompt）。
 - `reorient_held_axis` 目前只锁住 EEF 原点，爪尖随腕部旋转画弧；要做到契约写的「不平移抓取点」，先要拿到抓取点在工具系里的位置，再绕它补一段平移。
 
 完成定义：至少一个稳定持握可重复，第一失败动作能由 decision/action/gate 日志定位。

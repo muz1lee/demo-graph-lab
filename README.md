@@ -66,7 +66,7 @@ approach → grasp_at → lift → transport → align → lower_until → relea
 - `OracleRuntime` 会读取 simulator `/state`，只能用于集成调试。
 - `retreat` 目前只有独立 opcode 和编译契约；可信 runtime solver 尚未实现，含该动作的 Oracle episode 会在 reset 和任何控制前拒绝启动。
 
-当前 `PlanningOnlyRuntime` 的 runtime backend 固定关闭，所有八个控制原语都会抛出 `ExecutionDisabled`。计划中的运行时 VLM 只能做有限的离散选择、修正建议和视觉证据描述，不能输出连续控制量。完整接口见 [docs/API.md](docs/API.md)。
+当前 `PlanningOnlyRuntime` 的 runtime backend 固定关闭，所有九个控制原语都会抛出 `ExecutionDisabled`。计划中的运行时 VLM 只能做有限的离散选择、修正建议和视觉证据描述，不能输出连续控制量。完整接口见 [docs/API.md](docs/API.md)。
 
 候选几何值使用一个闭合格式：
 

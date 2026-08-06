@@ -22,6 +22,7 @@ from demo_graph_lab.selection.candidates import (
     deterministic_select,
     hard_filter,
 )
+from demo_graph_lab.policy.program import PRIMITIVES
 
 
 def _observation() -> ObservationPacket:
@@ -380,12 +381,17 @@ def test_every_control_primitive_is_explicitly_disabled(tmp_path: Path) -> None:
         (runtime.approach, (handle,), {}),
         (runtime.grasp_at, (handle,), {}),
         (runtime.lift, ("object",), {}),
+        (runtime.reorient_held_axis, ("object", handle, handle), {}),
         (runtime.transport, ("object", handle), {}),
         (runtime.align, ("object", handle), {}),
         (runtime.lower_until, (handle,), {}),
         (runtime.release, (), {}),
         (runtime.retreat, (handle,), {}),
     ]
+
+    # 硬停清单必须覆盖整个原语闭集:漏一个就退化成 AttributeError,
+    # 那是偶然的 fail-closed,不是本 runtime 声明的规划期停机。
+    assert {primitive.__name__ for primitive, _, _ in calls} == set(PRIMITIVES)
 
     for primitive, args, kwargs in calls:
         with pytest.raises(ExecutionDisabled, match="stops before execution"):

@@ -2,6 +2,17 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-06：补上 `reorient_held_axis` 的两个缺口——compile prompt 闭集改从代码渲染 + planning-only 硬停
+
+上一条留下的两个缺口，本轮各补一处。两处都只动接缝，不动这条原语的语义。
+
+- **compile prompt 的原语闭集不再有第二份手写副本。** `prompts/compile_policy.md` 里那段链序串加逐条参数表被删掉，改成一句「权威闭集见下方 `## PRIMITIVE TABLE`」；`_render_primitive_table` 从 `repair.py` **上提到 `compiler.py`**（compile 与 repair 两条 prompt 现在共用同一个渲染器，repair 侧只是改成 import，渲染输出逐字节不变），compile 侧新增 `compile_prompt(graph)` 把静态正文、渲染出来的链序与参数表、`CONTRACT SOURCE`、`GRAPH JSON` 拼起来。表达不了的两条语义（`lower_until` 不接标量深度或 release/grasp 条件、`retreat` 只在 `release` 之后）保留为 hard rule 文字。prompt 现在真的依赖 `policy/program.py` 的两张表，所以 compile 调用的 `input_refs` 补上 `package:policy/program.py`（与感知段列 `package:perception/program.py` 同一口径）；
+- **这是 prompt 运行资产变更，对生成结果有预期影响**（D-13 口径）：backend 在**首次编译**时第一次看得见 `reorient_held_axis` 和它两个必填 `axis_3d` 参数，也第一次看到把它排在 `lift` 与 `transport` 之间的链序位。所以这次改动**会改变模型的候选动作集**——此前只有走修复回路才可能用到这条原语，现在首编译就可能提案它。已发布产物一行没动，本轮**没有调用 backend**，因此这条预期影响目前是推断，尚无任何编译样本佐证；
+- **`PlanningOnlyRuntime` 补 `reorient_held_axis` 的 `ExecutionDisabled`**：此前调到它抛 `AttributeError`——仍然 fail-closed，但错误类型不是契约里那个显式规划期停机。顺手把那条测试从手写清单改成**对闭集全覆盖**（`{method.__name__} == set(PRIMITIVES)`），下一条新原语再漏就直接红，不用等有人想起来；
+- 测试 `693 passed`（基线 692 + `tests/test_stage_program.py` 一条 compile prompt 渲染断言：九条原语全在、链序串按 `PRIMITIVES` 渲染、`reorient_held_axis` 两个 `axis_3d` 参数在表里，且 `compile_policy.md` 源文件里 grep 不到 `lift/transport/align/reorient_held_axis`），两个 CLI `--help` 通过。
+
+当前停点：`docs/TODO.md` 里那条「两个缺口」待办已删除。**明确没做**：这条原语的 gate 谓词 `held_axis_parallel`、谓词词表里可查的「持有」谓词、抓取点零平移补偿——三项仍然欠着，验收口径不变（本轮仍只有第 2 档离线单测，没有 episode、没有成功率）。repair prompt 的正文一个字没改。
+
 ## 2026-08-06：第一条模型提出、人类评审、修订后 admit 的原语 `reorient_held_axis`
 
 - **这一条的分量在流程，不在功能。** 项目此前所有原语都是人写的，backend 模型只在既定闭集里选序列和接线。这次是**模型自己提出一条新原语的契约**（今天的受控提案实验，零泄题条件下一次产出，提案证据在 5090 `evidence/reorient_proposal/`），人类评审后**修订三处再 admit**。口径要说准：**admit 的是契约与实现，不是任何执行效果**——本轮只有第 2 档（离线单测），没有跑过仿真、没有 episode、没有成功率；

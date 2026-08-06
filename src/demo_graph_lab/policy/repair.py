@@ -16,19 +16,18 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 from pathlib import Path
 
 from ..common import artifacts
-from .compiler import compile_perception, dry_run, report_ready, static_check
-from .program import (
-    ARGUMENT_SPECS,
-    PRIMITIVES,
-    compile_program,
-    unwired_holes,
-    validate_program,
+from .compiler import (
+    _render_primitive_table,
+    compile_perception,
+    dry_run,
+    report_ready,
+    static_check,
 )
+from .program import compile_program, unwired_holes, validate_program
 
 # 每个 run 目录最多三次修复:计的是**尝试**次数,被拒的修订同样占一格。
 MAX_REPAIRS = 3
@@ -124,41 +123,6 @@ def summarize_episode(report: dict) -> dict:
             for call in calls[-SUMMARY_TAIL_CALLS:]
         ],
     }
-
-
-def _render_primitive_table() -> str:
-    """Render the primitive closed set from code; the prompt keeps no second copy."""
-    from .api import RuntimeAPI
-
-    lines = ["| primitive | argument | accepts |", "|---|---|---|"]
-    for op in PRIMITIVES:
-        specs = ARGUMENT_SPECS[op]
-        if not specs:
-            lines.append(f"| `{op}` | — | no arguments |")
-            continue
-        signature = inspect.signature(getattr(RuntimeAPI, op))
-        optional = {
-            name for name, parameter in signature.parameters.items()
-            if parameter.default is not inspect.Parameter.empty
-        }
-        for name in specs:
-            spec = specs[name]
-            accepts = []
-            if spec.get("holes"):
-                accepts.append("hole of type " + " / ".join(
-                    f"`{hole_type}`" for hole_type in sorted(spec["holes"])))
-            if spec.get("object"):
-                accepts.append("stage object")
-            if spec.get("values"):
-                accepts.append("one of " + ", ".join(
-                    f"`{value}`" for value in sorted(spec["values"])))
-            if spec.get("purpose"):
-                accepts.append(f"hole `purpose` must be `{spec['purpose']}`")
-            if spec.get("semantic") == "retreat_target":
-                accepts.append("hole must declare retract/retreat semantics")
-            suffix = " (optional)" if name in optional else ""
-            lines.append(f"| `{op}` | `{name}`{suffix} | {'; '.join(accepts)} |")
-    return "\n".join(lines)
 
 
 def _source_program_dir(run_dir: Path, report: dict) -> Path:

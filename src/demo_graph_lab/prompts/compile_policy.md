@@ -38,25 +38,11 @@ Output exactly one JSON object with this shape:
 
 Include every graph stage exactly once and in graph order. Copy each stage's `index` and `name` exactly.
 Every stage needs at least one action. Preserve action order, which must be a non-decreasing
-subsequence of:
+subsequence of the chain order given below.
 
-`approach → grasp_at → lift → transport → align → lower_until → release → retreat`
-
-Allowed primitives and argument types:
-
-- `approach(target, cone=None)`: target = stage object or `pose_se3` / `point_3d` hole;
-  cone = `top_down`, `side`, or `oblique`.
-- `grasp_at(grasp_pose, axis=None)`: grasp_pose = `pose_se3` hole; axis = `axis_3d` hole.
-- `lift(obj)`: obj = stage object.
-- `transport(obj, target)`: obj = stage object; target = stage object or
-  `pose_se3` / `point_3d` hole.
-- `align(obj, target, axis=None)`: obj = stage object; target = stage object or
-  `pose_se3` / `point_3d` hole; axis = `axis_3d` hole.
-- `lower_until(stop_condition)`: stop_condition = `runtime_condition` hole whose
-  `purpose` is exactly `lower_stop`; never wire a scalar depth or a release/grasp condition.
-- `release()`: no arguments.
-- `retreat(target)`: target = `pose_se3` / `point_3d` retract or retreat hole; use only
-  after release.
+The authoritative primitive closed set — every primitive, its arguments, which are optional
+and what each one accepts — is the `## PRIMITIVE TABLE` section below. It is rendered from
+the compiler's own tables, so only what appears there exists.
 
 References are explicit:
 
@@ -69,9 +55,12 @@ Hard rules:
 - `solve` is not an action. The deterministic compiler inserts one `rt.solve` per used
   hole and reuses its opaque handle.
 - Do not invent holes, objects, primitives, parameters, helper fields, or explanations.
-- For cleanup or retreat, use `retreat` only when the graph declares a compatible
-  retract/retreat pose hole. If no safe primitive can represent a stage, do not substitute
-  `release`; emit an empty `actions` list for that stage so validation fails explicitly.
+- `lower_until` only accepts a stop condition whose `purpose` is exactly `lower_stop`;
+  never wire a scalar depth or a release/grasp condition.
+- For cleanup or retreat, use `retreat` only after `release`, and only when the graph
+  declares a compatible retract/retreat pose hole. If no safe primitive can represent a
+  stage, do not substitute `release`; emit an empty `actions` list for that stage so
+  validation fails explicitly.
 - Do not use coordinates, distances, angles, thresholds, or any other numeric literal.
   Stage `index` is the only allowed number.
 - Omit unused optional arguments. Never use `null` as an argument.

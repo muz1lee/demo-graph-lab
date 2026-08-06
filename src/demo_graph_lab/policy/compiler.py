@@ -17,6 +17,8 @@ from ..graph import validate as graph_validate, vocab
 from ..perception import program as perception_program
 from ..perception.fake_runtime import FakePerceptionRuntime
 from .program import (
+    ARGUMENT_SPECS,
+    PRIMITIVES,
     compile_program,
     unwired_holes,
     validate_program,
@@ -155,6 +157,45 @@ def perception_targets(program: dict, graph: dict) -> dict[int, tuple[dict, ...]
     return targets
 
 
+def _render_primitive_table() -> str:
+    """Render the primitive closed set from code; the prompts keep no second copy.
+
+    compile 与 repair 两条 prompt 共用这一个渲染器:新原语一旦进 ``PRIMITIVES /
+    ARGUMENT_SPECS``,两边同时看见,不靠有人记得手动补 prompt。
+    """
+    from .api import RuntimeAPI
+
+    lines = ["| primitive | argument | accepts |", "|---|---|---|"]
+    for op in PRIMITIVES:
+        specs = ARGUMENT_SPECS[op]
+        if not specs:
+            lines.append(f"| `{op}` | — | no arguments |")
+            continue
+        signature = inspect.signature(getattr(RuntimeAPI, op))
+        optional = {
+            name for name, parameter in signature.parameters.items()
+            if parameter.default is not inspect.Parameter.empty
+        }
+        for name in specs:
+            spec = specs[name]
+            accepts = []
+            if spec.get("holes"):
+                accepts.append("hole of type " + " / ".join(
+                    f"`{hole_type}`" for hole_type in sorted(spec["holes"])))
+            if spec.get("object"):
+                accepts.append("stage object")
+            if spec.get("values"):
+                accepts.append("one of " + ", ".join(
+                    f"`{value}`" for value in sorted(spec["values"])))
+            if spec.get("purpose"):
+                accepts.append(f"hole `purpose` must be `{spec['purpose']}`")
+            if spec.get("semantic") == "retreat_target":
+                accepts.append("hole must declare retract/retreat semantics")
+            suffix = " (optional)" if name in optional else ""
+            lines.append(f"| `{op}` | `{name}`{suffix} | {'; '.join(accepts)} |")
+    return "\n".join(lines)
+
+
 def _render_operator_table() -> str:
     """Render the operator closed set from code; the prompt keeps no second copy."""
     lines = ["| operator | consumes | produces | published fields |", "|---|---|---|---|"]
@@ -261,9 +302,23 @@ def compile_perception(
     return section
 
 
+def compile_prompt(graph: dict) -> str:
+    """Assemble the StageProgram prompt: static text + rendered closed set + graph."""
+    from . import api
+
+    body = (artifacts.PROMPT_ROOT / "compile_policy.md").read_text().split("---", 1)[1]
+    return (body
+            + "\n\n## PRIMITIVE TABLE\nChain order (a stage's actions must be a "
+            + "non-decreasing subsequence of):\n\n"
+            + " → ".join(f"`{op}`" for op in PRIMITIVES) + "\n\n"
+            + _render_primitive_table()
+            + "\n\n## CONTRACT SOURCE\n```python\n" + inspect.getsource(api) + "```"
+            + "\n\n## GRAPH JSON\n```json\n"
+            + json.dumps(graph, ensure_ascii=False, indent=1) + "\n```")
+
+
 def run(task: str, model: str | None = None) -> Path:
     from ..common import llm
-    from . import api
     run_dir = artifacts.latest_run_dir(task)
     policy_path = run_dir / "policy.py"
     program_path = run_dir / "stage_program.json"
@@ -317,14 +372,10 @@ def run(task: str, model: str | None = None) -> Path:
         print(f"[compile] {task}: FAIL validated inputs could not be frozen")
         return run_dir / "compile_report.json"
 
-    prompt = (artifacts.PROMPT_ROOT / "compile_policy.md").read_text().split("---", 1)[1]
-    msg = (prompt
-           + "\n\n## CONTRACT SOURCE\n```python\n" + inspect.getsource(api) + "```"
-           + "\n\n## GRAPH JSON\n```json\n"
-           + json.dumps(graph, ensure_ascii=False, indent=1) + "\n```")
     tag = "compile"
-    messages = [{"role": "user", "content": msg}]
+    messages = [{"role": "user", "content": compile_prompt(graph)}]
     input_refs = ["graph.json", "package:policy/api.py",
+                  "package:policy/program.py",
                   "package:prompts/compile_policy.md"]
     request = llm.request_record(
         messages, tag=tag, role="policy_program", model=llm.resolve_model(model),
