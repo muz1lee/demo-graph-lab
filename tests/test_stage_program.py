@@ -488,7 +488,7 @@ def test_oracle_episode_exit_code_matches_policy_result(
         probes=lambda: [],
         calls=[],
     )
-    monkeypatch.setattr(cli, "_load_artifacts", lambda _run_dir: (
+    monkeypatch.setattr(cli, "_load_artifacts", lambda _run_dir, _program_dir: (
         {"task": "mini", "stages": []}, [], {},
     ))
     monkeypatch.setattr(cli, "OracleRuntime", lambda *_args, **_kwargs: runtime)
@@ -497,11 +497,14 @@ def test_oracle_episode_exit_code_matches_policy_result(
         "stages": [{"index": 0, "status": "passed" if ok else "failed"}],
     })
     args = SimpleNamespace(
-        run_dir=str(tmp_path), task_id="task-0",
+        run_dir=str(tmp_path), program_dir=None, task_id="task-0",
         eval_url="unused", pipe_url="unused", arm=1, max_attempts=2,
     )
 
     assert cli.episode(args) == expected
     reports = list(tmp_path.glob("episode_*.json"))
     assert len(reports) == 1
-    assert json.loads(reports[0].read_text())["result"]["ok"] is ok
+    report = json.loads(reports[0].read_text())
+    assert report["result"]["ok"] is ok
+    # 默认执行的就是 run 目录自己那份产物;修复回路靠这个字段知道是哪份程序失败的。
+    assert report["program_dir"] == "."

@@ -183,14 +183,21 @@ def compile_perception(
     graph: dict,
     program: dict,
     model: str | None = None,
+    *,
+    out_dir: Path | None = None,
+    tag: str = "compile_perception",
 ) -> dict:
     """Ask the backend for a PerceptionProgram; publish only after validate + dry-run.
 
     单轮无修复回路,与 StageProgram 编译一致。任何一步失败都只写 violations,不写
     ``perception_program.json``;raw reply 与校验结论照常留在 ``model_calls/``。
+
+    ``out_dir`` 与 ``tag`` 让修复回路把修订版感知程序写进 ``repairs/r<N>/``,同时把调用
+    记账留在原 run 目录的独立 tag 下:原发布产物和原调用记录都不被覆盖。
     """
     from ..common import llm
 
+    out_dir = run_dir if out_dir is None else Path(out_dir)
     section: dict = {"status": "skipped", "ref": None, "violations": [], "coverage": []}
     targets = perception_targets(program, graph)
     if not targets:
@@ -213,9 +220,9 @@ def compile_perception(
            + "\n\n## RESOLVER BINDINGS\n" + _render_resolver_bindings()
            + "\n\n## TARGET HOLES\n```json\n"
            + json.dumps(document, ensure_ascii=False, indent=1) + "\n```")
-    tag = "compile_perception"
     messages = [{"role": "user", "content": msg}]
-    input_refs = ["graph.json", "stage_program.json",
+    input_refs = ["graph.json",
+                  str((out_dir / "stage_program.json").relative_to(run_dir)),
                   "package:perception/program.py",
                   "package:prompts/compile_perception.md"]
     request = llm.request_record(
@@ -245,7 +252,7 @@ def compile_perception(
         section["violations"] = [f"dry-run failed: {type(error).__name__}: {error}"]
         return section
 
-    artifacts.write_json(run_dir / "perception_program.json", doc)
+    artifacts.write_json(out_dir / "perception_program.json", doc)
     section.update(
         status="published",
         ref="perception_program.json",
