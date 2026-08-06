@@ -2,6 +2,22 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-06：模型看自己 episode 的失败轨迹改自己的程序（T-COR v0，第 6 个调用点）
+
+新增 `dgl repair --run-dir <dir> --episode <episode.json>`：把一份**失败** episode 交回给提出该 program 的 backend model，让它改**自己写的那份 StageProgram**。这是 workflow 里第一条回路，也是 backend model 被允许出现的第 6 个调用点（`docs/API.md` 第 8 节）。口径是**第 1 档「静态检查或 fake dry-run」+ 第 2 档「离线 fixture 单测」**——本轮一次真实模型调用都没有发生，所有回复都是 canned，没有跑 simulator、Qwen、SAM3、GraspNet、planner。
+
+- **改的是程序，不是判据。** 模型的输出 schema 只有两个字段：`attribution`（一句失败归因）和 `program`（完整 StageProgram）。graph、stage 名、holes、`constraints`、`acceptance` 和 gate 判据**根本不在这个 schema 里**——「改约束」不是被禁止的行为，而是结构上写不出来的东西；真塞进去，`validate_program` 的顶层未知字段检查会拒。可改集合只有两项：stage 内的动作序列、以及哪个已声明 hole/object 接进哪个 primitive 参数。原语闭集与参数表由 `repair.py::_render_primitive_table` 从 `PRIMITIVES / ARGUMENT_SPECS / RuntimeAPI` 签名渲染，prompt 里不留第二份副本；
+- **发布门与 compile 逐条相同**，判据就是同一个 `compiler.report_ready`：零 program violation → 确定性重编译 → AST 静态检查 → `FakeRuntime` 正常与注入失败两条干跑。接线变了意味着可发布几何 hole 集合可能变，所以发布之后照 `dgl compile` 的规矩追加一段 `PerceptionProgram` 编译（`compile_perception` 新增 `out_dir` / `tag` 两个可选参数，产物进修复目录、记账留在原 run 目录的独立 tag）；
+- **摘要而不是整份报告。** `summarize_episode` 是确定性提炼器：第一失败 stage、gate 判据结论（12 个字段，不含世界坐标与位移数值）、每 stage verdict、探针前后、调用流水尾部 `SUMMARY_TAIL_CALLS=12` 条。**墙钟字段被丢掉**（调用记录的 `t`、`wall_sec`）——同一次失败不能因为时间戳看起来像"另一次"，这条由单测钉住（把时间戳整体改掉，摘要必须逐字节相同）；
+- **原产物不覆盖。** 修订版落在 `repairs/r<N>/`（`stage_program.json` + `policy.py` + 编译快照 + `compile_report.json` + `attribution.txt` + 条件 `perception_program.json`），归因只进留档不进任何被执行的产物。想执行修订版必须显式 `dgl-oracle episode --program-dir <run>/repairs/r1`；`--run-dir` 语义一行没动，不给 `--program-dir` 时行为与改动前逐字节一致。执行前那 8 道一致性门对修复目录同样全跑（`_load_artifacts` 加可选 `program_dir`：graph/validation/objects 仍只从 run 目录读，编译快照换成指定目录，所以比的是「修订版是不是对同一份示范的编译」）；
+- **链式修复读的是真正失败的那份程序。** episode 报告新记一个 `program_dir` 字段，`dgl repair` 据此决定输入程序是原产物还是 `repairs/r<N>`。没有这条，第二轮就会拿着 r1 的失败轨迹去改原始程序——这是 3 次上限下的常规用法，不是边角情形。字段只接受 `.` 或 `repairs/r<N>`，越界直接拒绝；
+- **记账与上限。** `repairs/repair_ledger.json` 每次尝试一条（序号、来源程序、episode 名与规范化指纹、`banner`、归因、是否发布、violations、感知段状态）。**每个 run 目录 3 次**，计的是尝试数——被拒的修订同样占一格（它花了钱、留了记录），超限拒绝并如实报错，不再调用 backend。成本与缓存走 `common/llm.py` 既有机制，tag 为 `repair_r<N>` / `repair_perception_r<N>`；
+- **口径继承。** episode 目前只可能来自 `OracleRuntime`，`banner` 因此一路带进摘要与台账：由特权调试 episode 驱动的修复继承**第 3 档**，不构成任何阶段或任务成功率；
+- 测试：新增 `tests/test_policy_repair.py`（21），另在 `tests/test_stage_program.py` 更新 2 处（`_load_artifacts` 新签名、episode 报告的 `program_dir`）。本地 `574 passed`（基线 553 + 21），两个 CLI `--help` 通过；全部离线；
+- **反向验证**（改动摘掉后必须变红）：no-op 修订不再判违规 → 2 红；产物写回原 run 目录 → 6 红（"原产物一行不动"是被钉住的，不是靠自觉）；上限检查摘掉 → 1 红；摘要保留墙钟时间戳 → 2 红；忽略 episode 记录的程序来源 → 2 红（链式修复 + 越界拒绝）；执行侧一致性门不认修订目录 → 1 红。每条都只打红它自己那几条，定位是精确的。
+
+当前停点：这条回路**只被离线 canned 测试钉住**——没有任何真实模型提出过修订，也没有任何修订版被执行过。它证明的是「修复走的是同一道发布门、且改不到判据」，不证明模型真能修好任何东西。下一步要在 5090 上拿 ep1 的真实失败报告跑一次 `dgl repair`，看归因与修订是否可读，再用 `--program-dir` 跑一次对照。**明确没做**：自动重跑（跑不跑修订版是显式的下一条命令）、修复效果的任何统计口径、感知程序的独立修复回路。**与方案的一处偏离**：方案里"可改感知链组合"这一条没有做成"修复调用直接产出 PerceptionProgram"，而是让修订版发布后由既有 `compile_perception` 段按新接线重编——理由是感知侧本来就有自己的闭集 prompt、validator 和干跑门，把它塞进同一次修复回复会把输出 schema 和校验面加倍，而收益只是省一次调用。**已知接缝**：`calls_tail` 里的调用记录带着 oracle 调试路径产生的数值（残差、位移量级等），模型输出侧写不出数字（validator + AST 双拦），但它的**选择**可能被特权信息影响——这正是上面那条口径继承存在的原因；另外 8/6 之前写出的 episode 报告没有 `program_dir` 字段，会被当作"原产物失败"，用旧报告做链式修复前要自己确认这一点。
+
 ## 2026-08-06：第一集 episode 的三个实测 bug + 一个同源 gate 映射
 
 四项全部来自 **8/6 ep1 两次稳定复现的真实 episode**，证据在 5090 的 `~/dgl-stack/evidence/ep1/`。口径是**第 3 档「privileged Oracle 调试」**——改的是 oracle/selection/evaluation 的调试与选择路径，不是方法路径，也不构成任何阶段或任务成功率。感知链（`frames` / `program_projection` / `program_record`）与 compiler/prompts 一行未动。

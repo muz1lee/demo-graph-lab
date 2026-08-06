@@ -23,8 +23,9 @@
 | 约束抽取 | 单阶段关键帧、指令、对象 registry | `constraints / acceptance / holes` | 每阶段调用 `k` 次，再确定性合并 |
 | Program 提议 | 已校验 graph、`RuntimeAPI` 源码 | `StageProgram`：primitive sequence + hole wiring | 每个 graph 一次；backend 不写 Python |
 | PerceptionProgram 提议 | `StageProgram` 接线出的几何 hole 契约、从代码渲染的算子闭集与 resolver 绑定表 | `PerceptionProgram`：感知链组合 + hole 发布 | 每个 graph 一次；只在 `StageProgram` 发布后调用，无可发布 hole 时不调用 |
+| StageProgram 修复 | 已校验 graph、当前 `StageProgram`、一份失败 episode 的确定性摘要 | 一句失败归因 + 修订版 `StageProgram` | 每个 run 目录最多 3 次；只在有失败 episode 时调用 |
 
-表中这 **5 个调用点**是 backend model 在整个 workflow 中被允许出现的全部位置（此前是 4 个，`PerceptionProgram` 提议是新增的第 5 个）。新调用点和其余四个受同一条边界约束：它输出的是受限 JSON，不是 Python、查询文本、逐步参数或任何数值——model 只从闭集算子里选链并声明哪个字段发布哪个 hole，`localize` 的查询由可信代码从 hole 已有的 anchor 渲染。
+表中这 **6 个调用点**是 backend model 在整个 workflow 中被允许出现的全部位置（此前是 5 个，`StageProgram` 修复是新增的第 6 个）。新调用点和其余五个受同一条边界约束：它输出的是受限 JSON，不是 Python、逐步参数或任何数值——model 改的只是自己那份 program 的动作序列与 hole 接线，边界细节见第 8 节。
 
 视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。在线 hole 求解、候选排序、运动执行、predicate 和 gate 目前也没有 backend model 调用。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
 
@@ -43,6 +44,8 @@ video + optional trace
   → AST check + fake dry-run
   → backend PerceptionProgram proposal
   → deterministic validation + fake perception dry-run
+  → (episode failed) backend StageProgram repair
+  → same deterministic validation / compilation / dry-run gate, published beside the original
 ```
 
 Backend 输出始终是不可信 proposal。stage、registry、constraint sample、`StageProgram` 和 `PerceptionProgram` 都经过严格 schema；无效 sample 不参加投票，分母固定为请求次数。同名阶段的约束只有达到严格多数才传播。`StageProgram` 只决定高层 primitive sequence 和 hole/object 接线，validator 检查动作顺序、API 签名、hole 类型与 purpose、对象引用和数字字面量，可信 compiler 再生成 Python。`PerceptionProgram` 只决定哪条闭集算子链发布哪个几何 hole，validator 检查链的类型衔接、字段与 hole 类型、resolver 绑定、`(stage, hole)` 唯一性和数字字面量，fake runtime 再干跑一遍；它未通过时不发布，`StageProgram` 与 `policy.py` 的发布不受影响。每次调用的脱敏请求、raw reply、parsed result 和 validator 结论都保存在 `model_calls/<tag>/`；同 tag 的再次调用保留在 `history/`，不会把不同请求和回复混在一起。
@@ -416,3 +419,36 @@ dgl planning-record --record-dir <dir> --step identity-accept \
 ### 现在能说什么
 
 `base_frame_values.json` 加上一条 acceptance 记录后，`execution/program_projection.py::base_frame_sources` 直接充当 `PlanningOnlyRuntime` 的 observation/candidate provider，离线测试可以从冻结记录一路走到 `solve()` 并拿到 base 系 `point_3d/axis_3d`。这证明的是**合约打通**：frame、calibration、observation 绑定、identity 闸门和 typed-hole 校验在一条真实数值上自洽。它**不**证明真实链已经跑通——第 2 节「执行前门槛」的四项一条都没变，reachability/collision/gripper-width 仍是未接入的 checker，`execution_enabled` 保持 `False`；`pose_se3`（grasp）洞不走本节路径，仍要独立的 tool transform 与 evidence artifact。
+
+## 8. StageProgram 修复回路
+
+第 6 个调用点。`dgl repair --run-dir <dir> --episode <episode_*.json>` 把一份失败 episode 交回给提出该 program 的 backend model，让它改**自己写的那份 program**。实现在 `src/demo_graph_lab/policy/repair.py`，prompt 是 `prompts/repair_policy.md`。
+
+### 信息边界：模型能改什么
+
+| 对象 | 修复时的地位 |
+|---|---|
+| `StageProgram` 的动作序列与 hole/object 接线 | **可改**，且只能在闭集原语与该 stage 已声明的 hole/object 内改 |
+| graph：stage、名字、holes、stage objects | 不可改，也不在输出 schema 里 |
+| stage 的 `constraints` 与 `acceptance` | 不可改。它们是示范的证词，不是可以改写的代码 |
+| gate 判据、`evaluation/` 的实现、成功口径 | 不可改。修的是程序，不是判它的人 |
+| 可信层：`compile_program`、`static_check`、fake dry-run、`policy/api.py` | 不可改 |
+| 数值 | 不可写。坐标、距离、角度、阈值一律禁止，`index` 是唯一允许的数字 |
+
+模型的回复只有两个字段：`attribution`（一句失败归因，进 `model_calls/` 与 `repairs/r<N>/attribution.txt` 留档，**不进**任何被执行的产物）和 `program`（完整 StageProgram）。graph 不在这个 schema 里，所以「改约束」在结构上就写不出来；真写了，`validate_program` 的顶层未知字段检查会拒。
+
+### 发布门与产物隔离
+
+修订版走**与 `dgl compile` 完全相同**的发布门：`validate_program` 零违规 → 确定性重编译 → AST 静态检查 → `FakeRuntime` 正常与注入失败两条干跑。全过才发布，判据是同一个 `compiler.report_ready`。接线变了意味着可发布几何 hole 集合可能变，因此发布之后照 `dgl compile` 的规矩追加一段 `PerceptionProgram` 编译，产物同样落在修复目录里。
+
+原发布产物**不覆盖**：修订版写进 `repairs/r<N>/`（`stage_program.json`、`policy.py`、编译快照、`compile_report.json`、`attribution.txt`、可选 `perception_program.json`）。要执行修订版必须显式 `dgl-oracle episode --run-dir <run> --program-dir <run>/repairs/r1`；`--run-dir` 的语义不变，执行前的 8 道一致性门（validation、compile report ready、graph/objects 快照、StageProgram 与 report 一致、program 合约、retreat 硬停、policy 与 program 逐字节一致）对修复目录同样全跑。
+
+### 记账与上限
+
+`repairs/repair_ledger.json` 每次尝试一条：序号、来源程序（`.` 或 `repairs/r<N>`）、episode 文件名与规范化指纹、`banner`、归因、是否发布、违规列表、感知段状态。**每个 run 目录上限 3 次**，计的是尝试数——被拒的修订同样占一格，超限直接拒绝并如实报错。模型调用走 `common/llm.py` 的既有成本上限与请求指纹缓存，tag 是独立的 `repair_r<N>` / `repair_perception_r<N>`，原 compile 的调用记录不被覆盖。
+
+### 口径
+
+episode 报告当前来自 `OracleRuntime`（第 5 节的特权调试路径）。由这种 episode 驱动的修复继承**第 3 档「privileged Oracle 调试」**，不构成任何阶段或任务成功率；`banner` 因此一路带进摘要与台账。摘要本身是确定性提炼（第一失败 stage、gate 判据结论、每 stage verdict、探针前后、调用流水尾部），丢掉墙钟字段，不含世界坐标或位姿数值——整份 episode 报告不会灌进 prompt。
+
+修复回路只作用在离线产物上：它不改 runtime、不改 gate、不重试真实执行，也没有实现自动重跑。跑不跑修订版、认不认它的结果，都是显式的下一条命令。

@@ -19,7 +19,7 @@ dgl all --task <task>
 dgl compile --task <task>
 ```
 
-`dgl all` 负责从视频生成并验证约束图，`dgl compile` 负责生成 `StageProgram`、确定性编译 policy 和 fake dry-run，并在 policy 发布之后追加一段 `PerceptionProgram` 编译。
+`dgl all` 负责从视频生成并验证约束图，`dgl compile` 负责生成 `StageProgram`、确定性编译 policy 和 fake dry-run，并在 policy 发布之后追加一段 `PerceptionProgram` 编译。执行过一次并且失败之后，还有一条可选的第三条命令 `dgl repair`（第 11 步），它走同一个发布门，产物写在原产物旁边。
 
 ## 总体流程
 
@@ -37,6 +37,8 @@ video + optional trace
   → static check + FakeRuntime dry-run
   → PerceptionProgram proposal
   → validation + FakePerceptionRuntime dry-run
+  → (optional, needs one failed episode) StageProgram repair
+  → same publish gate, published beside the original
 ```
 
 | 步骤 | Backend model | 主要产物 |
@@ -51,6 +53,7 @@ video + optional trace
 | StageProgram 提议 | 调用 | `stage_program.json` |
 | 确定性编译与 dry-run | 否 | `policy.py`、`compile_report.json`、编译快照 |
 | PerceptionProgram 提议 | policy 发布后调用一次；无可发布 hole 时不调用 | `perception_program.json` |
+| StageProgram 修复 | 只在有失败 episode 时调用；每个 run 目录最多 3 次 | `repairs/r<N>/`、`repairs/repair_ledger.json` |
 
 ## 1. 视频导入
 
@@ -427,6 +430,47 @@ dgl planning-record --record-dir <dir> --step project-base \
 
 `project-base` 需要一份 `demo_graph_lab.camera_extrinsics.v1` 记录（不在 record 目录里，是独立的标定产物），并从该次 observation 自己的 `proprioception.json` 读 `lift_position_m`：拿不到同时刻的升降读数时 `point_3d` 洞记 `UNKNOWN`，`axis_3d` 洞不受影响（方向只吃 `R`）。manifest 推进到 `BASE_VALUES_PROJECTED`，重跑允许——多接受一个身份就该能多出一个候选值，不必重采。schema、拒绝规则、质心禁令与身份闸门见 `docs/API.md` 第 7 节。
 
+## 11. StageProgram 修复（可选，需要一份失败 episode）
+
+前十步是单向的：backend 提出 program，可信 compiler 发布，执行是另一条命令。第 11 步是唯一的回路——把一份**失败** episode 交回给提出该 program 的 model，让它改自己写的那份 program。契约与信息边界见 `docs/API.md` 第 8 节。
+
+```bash
+dgl repair --run-dir runs/<task>/<ts> --episode runs/<task>/<ts>/episode_<ts>.json
+```
+
+输入是 run 目录里已发布的编译产物加那份 episode 报告。代码从报告里**确定性提炼**摘要——第一失败 stage、gate 判据结论、每 stage verdict、探针前后、调用流水尾部（12 条），丢掉墙钟字段——整份报告不进 prompt。模型回复只有 `attribution`（一句失败归因）与 `program`（完整修订版 StageProgram）。
+
+修订版走与第 9 步**同一个**发布门（同一个 `report_ready`），发布后照第 10 步的规矩追加一段 `PerceptionProgram` 编译。产物写进 `repairs/r<N>/`，原发布产物不覆盖：
+
+```text
+runs/<task>/<ts>/
+├── repairs/
+│   ├── repair_ledger.json      每次尝试一条:序号、来源程序、episode 指纹、归因、
+│   │                           是否发布、violations、感知段状态
+│   └── r1/
+│       ├── stage_program.json      修订版程序
+│       ├── policy.py               对它的确定性重编译
+│       ├── compiled_graph.json     发布时冻结的 graph/objects 快照
+│       ├── compiled_objects.json
+│       ├── compile_report.json     同一份 compile 报告形状,外加 repair 段
+│       ├── attribution.txt         归因原文(不进任何被执行的产物)
+│       └── perception_program.json 条件产物,接线有可发布目标且发布门通过时才有
+└── model_calls/
+    ├── repair_r1/                  独立 tag,原 compile 的调用记录不被覆盖
+    └── repair_perception_r1/
+```
+
+**每个 run 目录上限 3 次**，计的是尝试数——被拒的修订同样占一格，超限直接拒绝。要执行修订版必须显式指过去，`--run-dir` 的语义不变：
+
+```bash
+dgl-oracle episode --run-dir runs/<task>/<ts> \
+  --program-dir runs/<task>/<ts>/repairs/r1 --task-id <task_id>
+```
+
+执行前的一致性门对修复目录同样全跑，episode 报告会记下它实际执行的是哪份产物，下一轮修复因此读的是「真正失败的那份程序」。
+
+口径提醒：episode 目前来自 `OracleRuntime`，所以这条回路产出的修订版继承第 3 档「privileged Oracle 调试」，不构成阶段或任务成功率。
+
 ## Backend 调用公共产物
 
 每次 backend 调用都记录在：
@@ -474,8 +518,12 @@ runs/<task>/<timestamp>/
 ├── compile_report.json
 ├── compiled_graph.json
 ├── compiled_objects.json
+├── episode_<ts>.json
+├── repairs/
+│   ├── repair_ledger.json
+│   └── r1/
 ├── model_calls/
 └── cost.jsonl
 ```
 
-其中 `trace.json`、`stages_proposed.json`、`metrics.json` 和 `perception_program.json` 是条件产物，不保证每个 run 都存在。编译失败时也不会发布 `policy.py` 和编译快照；感知编译失败或被跳过时不会发布 `perception_program.json`。
+其中 `trace.json`、`stages_proposed.json`、`metrics.json` 和 `perception_program.json` 是条件产物，不保证每个 run 都存在。编译失败时也不会发布 `policy.py` 和编译快照；感知编译失败或被跳过时不会发布 `perception_program.json`。`episode_<ts>.json` 由 `dgl-oracle episode` 写出，`repairs/` 只有跑过 `dgl repair` 才存在（见第 11 步）。
