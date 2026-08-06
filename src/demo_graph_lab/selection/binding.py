@@ -312,6 +312,60 @@ def _aabb_bounds(entity):
     return bx[0], bx[1]
 
 
+# 长轴判据:次长边 / 最长边 超过此比值 → 近立方/近方形,主方向不可辨,拒绝。
+# 口径与 perception.operators.fit_principal_axis 的 PCA 判据一致(次/主 > 0.8 即歧义)。
+_AXIS_DOMINANCE_MAX_RATIO = 0.8
+# 长轴与世界 z 的方向余弦 ≥ 此值才算「立着」;此时 region 的上下端才有可靠含义
+# (0.9 ≈ 与竖直夹角 25.8°)。横躺资产的局部 +z 只偏离竖直 4.3°,靠它区分不了。
+_AXIS_VERTICAL_DOT = 0.9
+
+
+def _local_axis_in_world(quat, index):
+    """物体四元数(``/state`` 的 wxyz)旋转矩阵的第 ``index`` 列 = 局部轴的世界方向。
+
+    ``index == 2`` 就是旧实现里直接内联的那条局部 +z 表达式,逐项相同。
+    """
+    w, x, y, z = quat
+    if index == 0:
+        return [1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)]
+    if index == 1:
+        return [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)]
+    return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
+
+
+def _long_axis(ent, hole):
+    """实体的**真实长轴**:世界系单位向量 + 沿该轴的长度(m)。
+
+    做法是从 AABB 三边长里取最长边所在的**局部**轴序号,再经实体四元数变换到世界系。
+    实测背景(8/6 ep1):管子横躺,AABB 的 z 跨度只有直径 33.6 mm,但资产的局部 +z
+    仍近竖直(偏离 4.3°)——直接拿局部 +z 当长轴,yaw 就跟着这 4.3° 的方位角抖,
+    两次 attempt 的抓取四元数能差几十度。
+
+    两处拒绝,都不给静默出口:
+      - 最长边与次长边之比不足(次/主 > ``_AXIS_DOMINANCE_MAX_RATIO``)→ 近立方或
+        近方形,主方向不可辨。物体绕竖直轴转 45° 时 AABB 会被撑成近方形,这条判据
+        同时兜住了"AABB 边长不等于局部边长"的失真情形;
+      - 四元数退化(旋转列长度为零)→ 姿态读不出来。
+    """
+    lo, hi = _aabb_bounds(ent)
+    extents = [float(hi[i]) - float(lo[i]) for i in range(3)]
+    order = sorted(range(3), key=lambda i: extents[i], reverse=True)
+    longest, second = extents[order[0]], extents[order[1]]
+    if longest <= 0.0 or second / longest > _AXIS_DOMINANCE_MAX_RATIO:
+        raise UnsolvedHole(
+            f"hole {hole.get('name')!r}: AABB 边长 {extents} 分不出主方向"
+            f"(次/主 = {second / longest if longest > 0 else float('inf'):.3f}"
+            f" > {_AXIS_DOMINANCE_MAX_RATIO})",
+            hole=hole, reason="axis_ambiguous_extents")
+    vec = _local_axis_in_world(ent["quat"], order[0])
+    norm = math.sqrt(sum(item * item for item in vec))
+    if norm < 1e-9:
+        raise UnsolvedHole(
+            f"hole {hole.get('name')!r}: 实体四元数退化,长轴方向读不出来",
+            hole=hole, reason="axis_unobserved")
+    return [item / norm for item in vec], longest
+
+
 # 5 个求解器。签名统一 (hole, stage, constraints, rt) → 句柄 dict。
 # 每个句柄带 kind + hole + ref_source,便于 gate/评测侧审计参照物来源。
 
@@ -412,11 +466,27 @@ def solve_pose_se3(hole, stage, constraints, rt):
 
     lo, hi = _aabb_bounds(ent)
     x, y = ent["pos"][0], ent["pos"][1]
-    # 竖直归一化区带 → 世界 z。region 缺省(非抓取语义)取质心高度;
-    # 词表外 region 不静默退化成质心(与 regions.region_preference 同规)。
+    # 归一化区带 → **沿真实长轴**取段(s∈[0,1]),不再沿世界 z。region 缺省
+    # (非抓取语义)取质心高度;词表外 region 不静默退化成质心(与
+    # regions.region_preference 同规)。
+    end_ambiguous = None
     if region in _REGION_BAND_CENTER:
         s = _REGION_BAND_CENTER[region]
-        z = lo[2] + s * (hi[2] - lo[2])
+        axis, length = _long_axis(ent, hole)
+        if axis[2] < 0.0:
+            axis = [-item for item in axis]      # 端序只由世界 +z 定,翻转不改变轴
+        # s=0.5 的段中点:xy 取质心、z 取 AABB 竖直中点,与旧实现的 s=0.5 同一点。
+        mid = [x, y, 0.5 * (lo[2] + hi[2])]
+        end_ambiguous = abs(axis[2]) < _AXIS_VERTICAL_DOT
+        if end_ambiguous:
+            # 横躺:没有可靠信号说明哪一端算 upper,取段中点,不猜。副产品正是
+            # 「抓取高度 = 质心高度」——横躺圆柱在赤道处夹,而不是赤道以上(实测
+            # 8/6 ep1:upper_body 沿世界 z 取点高出赤道 12.7 mm,半径才 16.8 mm,
+            # 光滑圆柱在赤道以上夹必滑出)。
+            offset = 0.0
+        else:
+            offset = (s - 0.5) * length
+        x, y, z = (mid[i] + offset * axis[i] for i in range(3))
         region_status = "band"
     elif region in _REGION_UNCHECKABLE:
         z, region_status = ent["pos"][2], "uncheckable"
@@ -430,7 +500,7 @@ def solve_pose_se3(hole, stage, constraints, rt):
     handle = {"kind": "pose", "hole": hole.get("name"), "xyz": xyz, "quat": None,
               "frame": "world", "requested_frame": hole.get("frame"),
               "ref": obj, "ref_source": ref_source, "region": region,
-              "region_status": region_status}
+              "region_status": region_status, "end_ambiguous": end_ambiguous}
     if world_is_base:
         # 数值仍然是 world 系算出来的;能交给 robot_base 洞是因为断言了两系重合。
         handle["anchor_source"] = ref_source
@@ -439,7 +509,12 @@ def solve_pose_se3(hole, stage, constraints, rt):
 
 
 def solve_axis_3d(hole, stage, constraints, rt):
-    """axis_3d:方向向量。参照物取自 axis_* / approach_direction 约束;从物体局部 +z 派生。"""
+    """axis_3d:方向向量。参照物取自 axis_* / approach_direction 约束。
+
+    长轴由 ``_long_axis`` 从 AABB 最长边推断,不再无条件取物体局部 +z:横躺资产的
+    局部 +z 仍近竖直,拿它当长轴会让下游 ``_grasp_quat`` 的 yaw 跟着噪声抖。
+    物体立着时最长边就是局部 +z,结果与旧实现一致。
+    """
     so = (stage or {}).get("stage_objects") or {}
     av = _constraint(constraints, "axis_vertical")
     ap = _constraint(constraints, "axis_parallel")
@@ -454,17 +529,17 @@ def solve_axis_3d(hole, stage, constraints, rt):
         ref_source = "stage_objects"
 
     ent = _resolve_ref(rt, obj)
-    if ent is None or "quat" not in ent:
+    if ent is None or "quat" not in ent or ent.get("aabb") is None:
         raise UnsolvedHole(
             f"axis_3d hole {hole.get('name')!r}: 参照物 {obj!r} 的姿态无法解析",
             hole=hole,
             reason="axis_unobserved",
         )
-    w, x, y, z = ent["quat"]                           # /state 物体四元数 wxyz
-    vec = [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
+    vec, _length = _long_axis(ent, hole)
     return {"kind": "axis", "hole": hole.get("name"), "vec": vec,
             "frame": "world", "requested_frame": hole.get("frame"),
-            "ref": obj, "ref_source": ref_source}
+            "ref": obj, "ref_source": ref_source,
+            "axis_source": "aabb_longest_edge"}
 
 
 def solve_point_3d(hole, stage, constraints, rt):
