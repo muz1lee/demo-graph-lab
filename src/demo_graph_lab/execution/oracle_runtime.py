@@ -33,6 +33,11 @@ LIFT_MAX_ITERS = 12         # 迭代上限;到顶仍未收敛按实得高度如�
 LIFT_STEP_MAX_M = LIFT_DZ   # 单步指令上限:读数异常导致剩余量爆掉时不发超过一次标称抬升
 LIFT_CREEP_S = 1.5          # _wait_settle 返回后还会继续爬 1.3-1.9 mm,额外短等吸收
 IDLE_ARM = {0: 1, 1: 0}
+ARM_LEFT, ARM_RIGHT = 0, 1
+# 目标 y 的选臂死区(m):|y| 小于它时左右分不开,保持当前臂,不猜。
+# 8/6 ep2 2×2 矩阵实测两根管在 y=+0.258 / −0.365,离死区远得很;死区只兜住
+# 「目标恰在身体正前方」这一类没有左右信号的情形。
+ARM_SELECT_DEADZONE_Y_M = 0.05
 CONTACT_FORCE_N = 20.0
 LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
 
@@ -54,6 +59,16 @@ CLAW_TIP_DZ = -0.0035
 # 来源:8/6 v4 单世界栈实测——同一个物理抓取,默认分支 xy 误差 15.3 mm、最小关节裕度
 # 0.297 rad;绕工具接近轴翻转 180° 后 3.6 mm、0.700 rad。阈值取两次实测之间。
 GRASP_XY_RETRY_MM = 8.0
+
+# 抓取定位(含 `_retry_flipped_branch` 翻转兜底)之后仍剩的 xy 残差超过这个量,
+# 就判**目标够不着**:记 `unreachable_target` 失败并且**不闭爪**。
+# 来源:8/6 ep2 的 2×2 选臂矩阵实测(证据 5090 `~/dgl-stack/evidence/ep2/`),
+# 两簇完全分开——同侧够得着:arm0→左管(y=+0.258) **4.9 mm**、arm1→右管
+# (y=−0.365) **9.0 mm**;跨身体够不着:**25–69 mm**。阈值取两簇之间。
+# 立这条的理由是**失败类要分得开**:此前够不到也照样在空中闭爪,最后由 `lift`
+# 以 `attached=empty` 结案,于是「够不到」和「夹了滑掉」两种物理事件被压成同一
+# 个 reason,归因无从下手。
+UNREACHABLE_XY_MM = 15.0
 
 SERVO_STEP_M, SERVO_STEP_DEG = 0.05, 14.0
 SERVO_POS_TOL, SERVO_ROT_TOL = 0.015, 8.0
@@ -208,6 +223,9 @@ class OracleRuntime:
                 holes[name] = hole
             self._holes_by_stage[stage_index] = holes
         self._active_stage_index: int | None = None
+        # 持物态:闭爪后为 True,`release` 后回 False。持物期间臂跟随不换(见
+        # `_select_arm_for_stage`)。
+        self._holding = False
 
     def begin_stage(self, stage: dict) -> None:
         """Bind subsequent ``solve(name)`` calls to the current stage."""
@@ -216,6 +234,58 @@ class OracleRuntime:
         if stage_index not in self._holes_by_stage:
             raise ValueError(f"stage {stage_index} is not declared in graph")
         self._active_stage_index = stage_index
+        self._select_arm_for_stage(stage)
+
+    # ---------- 选臂(按目标位置,不按命令行默认值) ----------
+    def _stage_target_name(self, stage: dict):
+        """这一阶段手臂要去够的物体名:优先被操作物,没有就用参照物。"""
+        so = stage.get("stage_objects") or {}
+        return so.get("manipulated") or so.get("target")
+
+    def _select_arm_for_stage(self, stage: dict) -> None:
+        """按目标实体的 y 符号选臂(机器人系 +y 为左 → arm0,−y 为右 → arm1)。
+
+        立这条的理由是 8/6 ep2 的 2×2 矩阵实测:选臂与目标同侧时 xy 残差
+        **4.9 / 9.0 mm**,跨身体时 **25–69 mm**——同一副机械臂,够不够得着完全由
+        「目标在哪一侧」决定。此前臂来自命令行 `--arm`(默认 1=右),目标在左时
+        就是 31 mm 够不着,还照样往下走。
+
+        三条克制:
+        ① **持物期间不换臂**——手上有东西时换臂等于把物体丢在半空,只有 `release`
+           之后才允许重选;
+        ② **死区内保持当前臂**——|y| < ``ARM_SELECT_DEADZONE_Y_M`` 时左右分不开,
+           保持现状,不猜;
+        ③ **解析不到目标就保持当前臂**并记原因,不 fail-open 成「随便挑一只」。
+
+        换臂时用现有 ``_park_idle_arm`` 把刚空出来的那条臂归位(它按新的
+        ``arm_id`` 取闲臂,所以必须在赋值之后调用)。
+        """
+        if self._holding:
+            self._log("arm_select", arm=self.arm_id, switched=False,
+                      reason="holding_object")
+            return
+        name = self._stage_target_name(stage)
+        if not name:
+            self._log("arm_select", arm=self.arm_id, switched=False,
+                      reason="no_stage_object")
+            return
+        try:
+            y = float(self._ent(name)["pos"][1])
+        except Exception as e:
+            self._log("arm_select", arm=self.arm_id, switched=False, obj=str(name),
+                      reason=f"unresolved:{type(e).__name__}")
+            return
+        if abs(y) < ARM_SELECT_DEADZONE_Y_M:
+            self._log("arm_select", arm=self.arm_id, switched=False, obj=str(name),
+                      y=round(y, 4), reason="deadzone_keep_current")
+            return
+        want = ARM_LEFT if y > 0 else ARM_RIGHT
+        prev = self.arm_id
+        self.arm_id = want
+        self._log("arm_select", arm=want, prev_arm=prev, switched=want != prev,
+                  obj=str(name), y=round(y, 4), reason="target_y_sign")
+        if want != prev:
+            self._park_idle_arm()
 
     # ---------- 日志 ----------
     def _log(self, op, **kw):
@@ -832,7 +902,9 @@ class OracleRuntime:
         若提供物体长轴 ``axis``，工具开合方向与其水平投影正交。轴缺失或
         近竖直时保持当前腕姿，并在无法消费参数时记录 UNSUPPORTED。
         下探到位后 xy 残差超过 ``GRASP_XY_RETRY_MM`` 时翻转一次 IK 分支再闭爪，
-        见 ``_retry_flipped_branch``。
+        见 ``_retry_flipped_branch``。翻转兜底之后残差仍超过
+        ``UNREACHABLE_XY_MM`` 说明这条臂**够不到**目标:记 ``unreachable_target``
+        并**直接返回,不闭爪**——在空中闭一次爪只会把「够不到」伪装成「夹空了」。
         """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
@@ -848,11 +920,21 @@ class OracleRuntime:
             self._log("grasp_axis", why=why, quat=[round(v, 4) for v in gq])
         self._move(eef, quat=gq, gpos=GRIP_OPEN)  # 下探时锁住抓取腕姿,只走 z
         self._retry_flipped_branch(eef, gq)       # xy 残差过大 → 试对称的另一个 IK 分支
+        # 翻转也救不回来 → 这条臂够不到,记独立失败类并停在这里(不闭爪)。
+        err = self._xy_err_mm(eef)
+        if err > UNREACHABLE_XY_MM:
+            self._log("grasp_failed", reason="unreachable_target", arm=self.arm_id,
+                      xy_err_mm=round(err, 1), threshold_mm=UNREACHABLE_XY_MM,
+                      closed=False)
+            return
         # !! 参数名只能是 angle:gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True。
         # 开合方向见模块顶部 GRIP_* 注释:
         # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
         self._ctrl("set_gripper", angle=GRIP_CLOSE_TUBE)
         self._wait_grip(GRIP_CLOSE_TUBE)
+        # 闭过爪就算持物态:此后到 `release` 之前不换臂。这里**不看**夹持回读——
+        # 「夹到没夹到」由 lift 的承重证据判,而不论夹没夹到,换臂都是危险动作。
+        self._holding = True
         # 记录角度和夹持回读；抓取结果由 lift 的承重证据和 gate 判定。
         self._log("grasp_close", target=GRIP_CLOSE_TUBE,
                   angle=self._grip_angle(), gripping=self._is_gripping())
@@ -1012,6 +1094,7 @@ class OracleRuntime:
     def release(self):
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         self._wait_grip(GRIP_OPEN)
+        self._holding = False      # 松手之后才允许下一阶段重新选臂
 
     def retreat(self, target):
         """Refuse motion until a trusted solver can produce a safe retreat pose."""
