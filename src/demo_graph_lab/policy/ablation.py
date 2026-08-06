@@ -36,7 +36,9 @@ def _attempt(
             output_dir,
             tag=tag,
             model=model,
-            max_tokens=5000,
+            # Reasoning models can consume several thousand internal tokens
+            # before emitting the six-stage JSON program.
+            max_tokens=20000,
             temperature=0.1,
             role="cap_selection_ablation",
             input_refs=["graph.json", "package:prompts/compile_policy.md"],
