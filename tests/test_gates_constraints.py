@@ -9,6 +9,8 @@ gate 必须判 passed=False。
 
 from types import SimpleNamespace
 
+import pytest
+
 from demo_graph_lab.evaluation import gates
 
 
@@ -323,3 +325,85 @@ def test_at_end_only_checks_exit():
     assert v["constraints_hold"] is True
     assert v["violated_midway"] == []
     assert v["passed"] is True
+
+
+# ==========================================================================
+# manipulated 名 → 实体键映射:注入解析后位移才可观测。
+# 实测(8/6 ep1):图对象名 tube_left,实体字典键 tube0_prop,位移检查拿前者查后者
+# 永远查不到 → effect_status=UNKNOWN → 任何 effectful stage 结构性过不了。
+# ==========================================================================
+def _tube_stage():
+    return {
+        "index": 1, "name": "lift",
+        "stage_objects": {"manipulated": "tube_left"},
+        "acceptance": [{"name": "above", "args": {}}],
+        "constraints": [],
+    }
+
+
+def _tube_rt():
+    return FakeRT(verdicts={"above": gates.PASS},
+                  positions={"tube0_prop": [0.4, 0.2, 0.80],
+                             "tube1_prop": [0.4, 0.0, 0.80]})
+
+
+def _run_with_resolver(rt, stage, resolve_object):
+    entry = gates.snapshot(rt, stage)
+    rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]      # 只有被操作的那根动了
+    return gates.evaluate(rt, stage, entry, resolve_object=resolve_object)
+
+
+def test_unmapped_manipulated_name_stays_unknown():
+    """没有映射时维持现状:图名查不到实体 → 不可观测 → UNKNOWN,不放松。"""
+    verdict = _run_with_resolver(_tube_rt(), _tube_stage(), None)
+    assert verdict["manipulated_entity"] is None
+    assert verdict["manip_displacement_m"] is None
+    assert verdict["effect_status"] == gates.UNKNOWN
+    assert verdict["passed"] is False
+
+
+def test_injected_resolver_makes_manipulated_displacement_observable():
+    """注入 name→entity 解析后位移可观测,effect 判定才真的生效。"""
+    verdict = _run_with_resolver(_tube_rt(), _tube_stage(),
+                                 {"tube_left": "tube0_prop"}.get)
+    assert verdict["manipulated_entity"] == "tube0_prop"
+    assert verdict["manip_displacement_m"] == pytest.approx(0.12, abs=1e-9)
+    assert verdict["effect_status"] == gates.PASS
+    assert verdict["passed"] is True
+
+
+def test_injected_resolver_does_not_credit_another_object_motion():
+    """解析到的是没动的那根 → FAIL(位移检查仍有牙齿,不是"有映射就过")。"""
+    verdict = _run_with_resolver(_tube_rt(), _tube_stage(),
+                                 {"tube_left": "tube1_prop"}.get)
+    assert verdict["manipulated_entity"] == "tube1_prop"
+    assert verdict["effect_status"] == gates.FAIL
+    assert verdict["passed"] is False
+
+
+def test_resolver_failure_falls_back_and_stays_fail_closed():
+    """解析抛异常(如对象名有歧义)→ 当作拿不到映射,退回前缀匹配,仍 UNKNOWN。"""
+    def _raises(_name):
+        raise RuntimeError("ambiguous_object_reference")
+
+    verdict = _run_with_resolver(_tube_rt(), _tube_stage(), _raises)
+    assert verdict["manipulated_entity"] is None
+    assert verdict["effect_status"] == gates.UNKNOWN
+
+
+def test_resolver_pointing_outside_the_position_table_is_ignored():
+    """映射指向位移表里没有的键 → 不认,退回前缀匹配,不凭空造一个位移。"""
+    verdict = _run_with_resolver(_tube_rt(), _tube_stage(),
+                                 {"tube_left": "ghost_prop"}.get)
+    assert verdict["manipulated_entity"] is None
+    assert verdict["effect_status"] == gates.UNKNOWN
+
+
+def test_prefix_matching_still_works_without_a_resolver():
+    """既有的 id/前缀匹配不受影响:bowl0 → bowl0_prop 仍可观测。"""
+    stage = {"index": 1, "name": "lift", "stage_objects": {"manipulated": "bowl0"},
+             "acceptance": [{"name": "above", "args": {}}], "constraints": []}
+    verdict = _run(FakeRT(verdicts={"above": gates.PASS},
+                          positions={"bowl0_prop": [0.5, 0.0, 0.79]}), stage)
+    assert verdict["manipulated_entity"] == "bowl0_prop"
+    assert verdict["effect_status"] == gates.PASS

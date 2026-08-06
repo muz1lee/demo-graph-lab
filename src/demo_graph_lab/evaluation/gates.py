@@ -70,6 +70,30 @@ def object_positions(rt) -> dict:
         return {}
 
 
+def manipulated_entity_key(manip, moved: dict, resolve_object=None):
+    """图对象名 → 位移表里的实体键;拿不到就返回 ``None``。
+
+    实测(8/6 ep1):图对象名是 ``tube_left``,实体字典的键是 ``tube0_prop``,位移
+    检查拿前者查后者永远查不到 → ``effect_status=UNKNOWN`` → 任何 effectful stage
+    结构性过不了。修法是接受一个**可注入**的 name→entity 解析(runner 从 runtime
+    取,见 ``execution.runner.run_policy``);gate 侧自己不猜名字,拿不到映射就维持
+    既有的 id/前缀匹配,再拿不到就返回 ``None`` 让上层记 UNKNOWN(fail-closed 不放松)。
+    """
+    if resolve_object is not None:
+        try:
+            key = resolve_object(manip)
+        except Exception:
+            key = None                 # 解析不出/有歧义都当"拿不到",不猜一个
+        if isinstance(key, str) and key in moved:
+            return key
+    manip_id = str(manip).split(".")[0].lower()
+    for key, _ in moved.items():
+        entity_id = key.lower()
+        if entity_id == manip_id or entity_id.startswith(f"{manip_id}_"):
+            return key
+    return None
+
+
 def snapshot(rt, stage: dict) -> dict:
     """阶段入口快照:位置、验收初值及 throughout 项的入口三值。"""
     idx = stage.get("index")
@@ -92,8 +116,13 @@ def snapshot(rt, stage: dict) -> dict:
             "entry_constraint": entry_constraint}
 
 
-def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT) -> dict:
-    """阶段结束时判定。返回含 passed 与全部诊断字段的字典。"""
+def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT,
+             resolve_object=None) -> dict:
+    """阶段结束时判定。返回含 passed 与全部诊断字段的字典。
+
+    ``resolve_object`` 是可选的图对象名 → 实体键解析(见 ``manipulated_entity_key``);
+    不给时行为与既有一致。
+    """
     idx = stage.get("index")
     acceptance = stage.get("acceptance", []) or []
     # throughout acceptance 必须入口和出口都成立；其他 acceptance 只看出口。
@@ -159,14 +188,11 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT) -> dic
     stage_name = str(stage.get("name", "")).lower()
     needs_effect = any(tok in stage_name for tok in EFFECTFUL_STAGES)
     manip = (stage.get("stage_objects") or {}).get("manipulated")
-    manip_move = None
+    manip_move, manip_key = None, None
     if manip:
-        manip_id = str(manip).split(".")[0].lower()
-        for k, d in moved.items():
-            entity_id = k.lower()
-            if entity_id == manip_id or entity_id.startswith(f"{manip_id}_"):
-                manip_move = d
-                break
+        manip_key = manipulated_entity_key(manip, moved, resolve_object)
+        if manip_key is not None:
+            manip_move = moved[manip_key]
     effect_move = manip_move if manip is not None else max_move
     observable = manip_move is not None if manip is not None else bool(post)
     # 不需位移的阶段为 PASS；不可观测为 UNKNOWN；其余按位移阈值判定。
@@ -203,6 +229,7 @@ def evaluate(rt, stage: dict, entry: dict, strict: bool = STRICT_DEFAULT) -> dic
         "effect_status": effect_status,        # PASS/FAIL/UNKNOWN(不可观测=UNKNOWN,不再静默放行)
         "effect_ok": effect_ok,
         "manipulated": manip,
+        "manipulated_entity": manip_key,       # 图名映到了哪个实体键(拿不到=None)
         "manip_displacement_m": manip_move,
         "max_displacement_m": max_move,
         "top_mover": top_mover,

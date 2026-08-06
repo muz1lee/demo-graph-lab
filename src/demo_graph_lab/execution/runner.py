@@ -11,16 +11,25 @@ def run_policy(
     runtime,
     max_attempts: int = 2,
     strict_gates: bool = True,
+    resolve_object=None,
 ) -> dict:
     """Execute ``snapshot → handler → gate`` for each stage.
 
     A failed stage is retried with the same handler.  No rollback or candidate
     change is implemented, so the report says ``failed_at`` rather than implying
     recovery that did not happen.
+
+    ``resolve_object`` 把图对象名映成实体字典的键,供 gate 的位移检查使用;不给时
+    从 runtime 取它自己的 ``_resolve``(``OracleRuntime`` 有,``FakeRuntime`` 没有,
+    取不到就保持既有行为)。映射由 runtime 提供而不是 gate 自己猜,见
+    ``evaluation.gates.manipulated_entity_key``。
     """
 
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
+
+    if resolve_object is None:
+        resolve_object = getattr(runtime, "_resolve", None)
 
     result = {"stages": [], "ok": True}
     for stage in graph["stages"]:
@@ -42,7 +51,8 @@ def run_policy(
         for attempt in range(max_attempts):
             entry = gates.snapshot(runtime, stage)
             handler(runtime)
-            verdict = gates.evaluate(runtime, stage, entry, strict=strict_gates)
+            verdict = gates.evaluate(runtime, stage, entry, strict=strict_gates,
+                                     resolve_object=resolve_object)
             if verdict["passed"]:
                 status = "passed" if attempt == 0 else f"passed_retry{attempt}"
                 break
