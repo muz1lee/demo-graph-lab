@@ -8,7 +8,8 @@
 - 下游回传规则保持最小：只取后续阶段中 manipulated object 相同、且参数确实提到该对象的非 derived constraint；constraint ref 是可读的 `s<stage>:c<offset>:<name>`，没有 SHA 或额外协议。
 - 新增配对实验 `dgl cap-ablate`：`vanilla` 不看约束、`local` 只写当前 constraint、`backchain` 再写下游 constraint。实验固定 graph、模型和 primitive contract，产出每次 StageProgram、policy 与 `summary.json`。
 - synthetic 反例已验证：局部排序最高但 `axis_parallel=FAIL` 的抓取会被 backchain 淘汰，选择另一个可插入候选。该结果只证明算法接线，不是实际机器人效果。
-- 本地全量回归 `634 passed, 15 skipped`；CLI help 与 Python compile 通过。5090 旧 run `runs/insert_tubes/20260804_122155/graph.json` 的 hole 没有 resolver，不能直接做三组消融；隔夜代码生成实验改用仓库内 reviewed `tests/fixtures/graphs/insert_tubes.graph.json`，它能产生两个 grasp stage 的 local/backchain 差异。
+- 首轮 5090 有效样本反向审计出 fixture 语义错误：stage 4 实际重新抓 `tube_left`，但 `tube_left_grasp_pose` 被标成 `motion_derived`，导致生成 policy 走普通 `solve() → grasp_at`，绕过 selection。fixture 已改为 `grasp_candidate`；显式 CaP 模式的 validator 现在也会拒绝任何从非候选 pose 发起的 `grasp_at`，防止同类假绿。reviewed fixture 目前有 stage 0/2/4 三个 grasp stage，全部带 local/backchain context。
+- 本地全量回归 `636 passed, 15 skipped`；CLI help 与 Python compile 通过。5090 旧 run `runs/insert_tubes/20260804_122155/graph.json` 的 hole 没有 resolver，不能直接做三组消融；隔夜代码生成实验使用修正后的 `tests/fixtures/graphs/insert_tubes.graph.json`。
 
 当前停点：真实 `future_constraints` 还没有由几何/规划器计算，只有 synthetic fixture；下一步先跑代码生成合法率，再把真实 compatibility 接进同一个 API，不能把 fixture 标签当方法成功率。
 

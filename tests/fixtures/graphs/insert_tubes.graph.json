@@ -907,9 +907,9 @@
         {
           "name": "tube_left_grasp_pose",
           "type": "pose_se3",
-          "solver_hint": "gripper pose holding tube during transport",
+          "solver_hint": "GraspNet candidates on the full tube before transport; prefer upper-body grasps",
           "frame": "robot_base",
-          "resolver": "motion_derived",
+          "resolver": "grasp_candidate",
           "anchor": {
             "object_id": "tube_left",
             "part": "whole"

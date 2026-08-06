@@ -173,6 +173,35 @@ def test_selected_hole_must_feed_the_grasp_primitive() -> None:
     assert any("must feed grasp_at.grasp_pose" in error for error in errors)
 
 
+def test_explicit_cap_rejects_grasp_from_a_non_candidate_pose() -> None:
+    graph = _graph()
+    graph["stages"][0]["holes"][0]["resolver"] = "motion_derived"
+
+    errors = validate_program(
+        _program(), graph, selection_mode="backchain",
+    )
+
+    assert any("resolver='grasp_candidate'" in error for error in errors)
+
+
+def test_reviewed_insert_tubes_routes_all_three_grasps_through_selection() -> None:
+    fixture = (
+        Path(__file__).parent
+        / "fixtures" / "graphs" / "insert_tubes.graph.json"
+    )
+    graph = json.loads(fixture.read_text())
+    context = selection_context(graph, mode="backchain")
+
+    assert set(context) == {0, 2, 4}
+    assert context[4]["current_constraints"] == ["s4:c3:region_grasp"]
+    assert context[4]["downstream_constraints"] == [
+        "s5:c0:inside",
+        "s5:c1:axis_vertical",
+        "s5:c2:axis_parallel",
+        "s5:c3:center_align",
+    ]
+
+
 def test_three_arm_ablation_changes_generated_selection_code(
     tmp_path: Path, monkeypatch,
 ) -> None:

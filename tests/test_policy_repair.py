@@ -26,7 +26,12 @@ def _graph() -> dict:
                 "constraints": [],
                 "acceptance": [{"name": "carry", "args": {}}],
                 "holes": [
-                    {"name": "tube_grasp_pose", "type": "pose_se3"},
+                    {
+                        "name": "tube_grasp_pose",
+                        "type": "pose_se3",
+                        "resolver": "grasp_candidate",
+                        "anchor": {"object_id": "tube0", "part": "whole"},
+                    },
                     {"name": "tube_axis", "type": "axis_3d"},
                 ],
             },
@@ -49,7 +54,16 @@ def _graph() -> dict:
 
 def _program(grasp_actions: list[dict]) -> dict:
     return {"stages": [
-        {"index": 0, "name": "grasp", "actions": grasp_actions},
+        {
+            "index": 0,
+            "name": "grasp",
+            "selection": {
+                "grasp_hole": "tube_grasp_pose",
+                "current_constraints": [],
+                "downstream_constraints": [],
+            },
+            "actions": grasp_actions,
+        },
         {"index": 1, "name": "transfer", "actions": [
             {"op": "transport", "args": {"obj": {"object": "tube0"},
                                          "target": {"hole": "target_point"}}},

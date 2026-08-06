@@ -420,6 +420,20 @@ def validate_program(
                 errors.append(f"{action_path}.args: 必须是对象")
                 continue
 
+            if op == "grasp_at" and selection_mode is not None:
+                grasp_value = args.get("grasp_pose")
+                grasp_name = (
+                    grasp_value.get("hole")
+                    if isinstance(grasp_value, dict)
+                    else None
+                )
+                if (grasp_name in holes
+                        and holes[grasp_name].get("resolver") != "grasp_candidate"):
+                    errors.append(
+                        f"{action_path}.args.grasp_pose: explicit CaP grasp must "
+                        "reference a resolver='grasp_candidate' hole"
+                    )
+
             required, allowed, _ = _primitive_parameters(op)
             missing_args = sorted(required - set(args))
             extra_args = sorted(set(args) - allowed)
