@@ -45,15 +45,21 @@ LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
 TDX0 = [0.0, 1.0, 0.0, 0.0]  # Ry(180): tool +z points down.
 APPROACH_AXIS_IDX = 2
 FINGER_AXIS_IDX = 1
-# 爪尖相对 EEF 帧的 z 偏移(m),取**张爪**状态的指尖:`grasp_at` 是以
-# `gpos=GRIP_OPEN` 张着爪下探的,定位常数必须与下探时的指尖状态同语义。
+# 爪尖相对 EEF 帧的 z 偏移(m)。**开合状态不同,同一副爪子差 21.9 mm**,所以必须
+# 分成两个常数,按消费点当时的爪子状态取用:
+#   张爪 `CLAW_TIP_DZ_OPEN`   → `grasp_at`(以 `gpos=GRIP_OPEN` 张着爪下探定位)、
+#                               `approach`(预抓取偏置,此时还没闭爪);
+#   闭爪 `CLAW_TIP_DZ_CLOSED` → `transport` / `align`(夹着物体移动,爪子是闭的)。
 # 8/6 v4 三方交叉实测:自由腕姿张爪 **−3.34 mm**、抓取腕姿张爪 **−3.57 mm**
-# ——两者只差 0.23 mm,互为独立佐证;同一抓取腕姿**闭爪**为 **+18.35 mm**,
-# 即开合一次指尖的垂直行程有 21.9 mm,**闭爪值不可用作定位常数**。
+# ——两者只差 0.23 mm,互为独立佐证;同一抓取腕姿**闭爪**为 **+18.35 mm**。
+# 8/6 任务 B 实测背书这次拆分:`align` 的总错配 **−27.2 mm**,其中 **−21.9 mm**
+# 正是张/闭爪指尖差(此前两处都沿用张爪值);沿用张爪值时管底与 rack 顶只剩
+# **+1.5 mm** 余量,而名义应有 **+23.4 mm**。
 # v3 的 −0.010 疑为同一「张爪」语义,但当时没做闭爪交叉验证,遗留待核。
-# 证据:5090 `~/dgl-stack/evidence/slip/claw_tip_dz_remeasure.json`,
-# privileged-debug 档,2026-08-06。
-CLAW_TIP_DZ = -0.0035
+# 证据:5090 `~/dgl-stack/evidence/slip/claw_tip_dz_remeasure.json` 与
+# `~/dgl-stack/evidence/taskb/`,privileged-debug 档,2026-08-06。
+CLAW_TIP_DZ_OPEN = -0.0035
+CLAW_TIP_DZ_CLOSED = 0.01835
 
 # 抓取到位后仍可接受的笛卡尔 xy 残差(mm);超过则试另一个 IK 分支(见 _retry_flipped_branch)。
 # 来源:8/6 v4 单世界栈实测——同一个物理抓取,默认分支 xy 误差 15.3 mm、最小关节裕度
@@ -842,7 +848,7 @@ class OracleRuntime:
         """
         self._park_idle_arm()
         xyz = self._target_xyz(target)
-        off = PREGRASP_DZ + CLAW_TIP_DZ
+        off = PREGRASP_DZ + CLAW_TIP_DZ_OPEN    # 预抓取时爪子还张着
         cone_name = self._cone_name(cone)       # 形状归一:policy 传的是约束 args 整块
         if cone_name is None:
             if cone is not None:                # 给了 cone 却取不出锥名 → 记账,不静默当无 cone
@@ -897,7 +903,8 @@ class OracleRuntime:
                   reason="flip_not_better")
 
     def grasp_at(self, grasp_pose, axis=None):
-        """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ。
+        """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ_OPEN
+        (下探时爪子是张开的,定位常数必须与下探时的指尖同状态)。
 
         若提供物体长轴 ``axis``，工具开合方向与其水平投影正交。轴缺失或
         近竖直时保持当前腕姿，并在无法消费参数时记录 UNSUPPORTED。
@@ -907,7 +914,7 @@ class OracleRuntime:
         并**直接返回,不闭爪**——在空中闭一次爪只会把「够不到」伪装成「夹空了」。
         """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
-        eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
+        eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ_OPEN]
         self._ctrl("set_gripper", angle=GRIP_OPEN)
         self._wait_grip(GRIP_OPEN)
         self._move([eef[0], eef[1], eef[2] + PREGRASP_DZ])
@@ -1009,7 +1016,7 @@ class OracleRuntime:
         # 落点由 target 决定,obj 用于审计「这条 transport 作用在哪个实体」;解析失败记 UNSUPPORTED。
         self._consume_obj(obj, op="transport")
         xyz = self._target_xyz(target)
-        xyz[2] += PREGRASP_DZ + CLAW_TIP_DZ
+        xyz[2] += PREGRASP_DZ + CLAW_TIP_DZ_CLOSED   # 携物移动:爪子闭合
         self._move(xyz)
 
     def align(self, obj, target, axis=None):
@@ -1019,7 +1026,7 @@ class OracleRuntime:
         """
         self._consume_obj(obj, op="align")
         xyz = self._target_xyz(target)
-        xyz[2] += ALIGN_DZ + CLAW_TIP_DZ
+        xyz[2] += ALIGN_DZ + CLAW_TIP_DZ_CLOSED      # 对准时夹着物体:爪子闭合
         quat, why = self._align_quat(axis)
         if quat is None:
             if axis is not None:
