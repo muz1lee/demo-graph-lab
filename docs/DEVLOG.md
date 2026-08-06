@@ -2,6 +2,18 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-06：第二集 episode 的 evaluation 侧三修（gate 死锁 + 假 PASS）
+
+动机证据来自 **8/6 ep2**（连同 ep1 的复现）：gate 有四条结构性 UNKNOWN，使任何 stage 的 `passed` 永远不可能是 `True`；同时 `axis_vertical` 对一根**根本没被碰过**的横躺管子报 PASS（`angle=4.2°`）。口径仍是**第 3 档「privileged Oracle 调试」**——改的是 `evaluation/` 与 runner 的判定接线，不是方法路径，不构成任何阶段或任务成功率。本轮**没有重跑 episode**，全部结论只到离线单测这一档。改动面严格限制在 `evaluation/{predicates,gates}.py`、`execution/runner.py` 与其测试（`oracle_runtime.py` 由并行的另一条线在改，本轮一行未动）。
+
+- **靶子 1：gate 的 ctx 接线（纯接线，几何实现本来就完整）。** `pred_region_grasp` 要 `grasp_point`、`pred_approach_direction` 要 `approach_dir`，而 `gates.evaluate` 调 `_verify3` 时不传任何 ctx → 这两条**永远** UNKNOWN。改法：`gates.snapshot / evaluate` 增加可选 `ctx`，`_verify3` 透传给 `verify3(constraint, **ctx)`；runner 每次 attempt 从 runtime 自己的调用记录里取本阶段实际记下的抓取点与接近方向（`runner._stage_ctx`，只看本次 attempt 新增的记录、取最近一次、只接受三分量世界系向量）。runner 只做搬运：runtime 没记就是空 ctx → 两条谓词维持 UNKNOWN，fail-closed 没有放松；`verify3` 不接受这些关键字的老 runtime 退回原调用形态，逐位与现状一致。入口探针**不**传 ctx（动作还没发生），所以 `throughout` 的这两条仍是 UNKNOWN；
+- **靶子 2：结构性不可查谓词不再死锁整条判定（裁决落地）。** `carry` / `order` 在 `predicates.UNCHECKABLE_IN_RUNTIME` 里，三值合取 UNKNOWN→None→`passed` 恒非 True——只要 acceptance 含一条 `carry`，任何 stage 永远过不了。这不是「严格」而是「死锁」。改法：判定时把**白名单内且本次确为 UNKNOWN**的项排除出 hold 合取，但记账完整：verdict 新增 `excluded_uncheckable_keys` 与 `n_excluded_uncheckable`，这些键**仍然**留在 `unknown_keys` 里（被豁免 ≠ 被查过），`reason` 只点名真正挡路的 UNKNOWN。豁免面用 `predicates.UNCHECKABLE_IN_RUNTIME` 单一真源钉死：其他任何 UNKNOWN（谓词异常、缺 ctx、参照实体解析不到、词表外）照旧阻塞；runtime 若真能判 `carry`，PASS/FAIL 都照原样生效（豁免只吃 UNKNOWN）；acceptance 全部被豁免时合取里没有任何证据 → 仍是 `None`，豁免不凭空造 True。护栏测试断言白名单就是 `{"carry","order"}` 且与 predicates 同一对象，往里塞名字必须先来改测试；
+- **靶子 3：`axis_vertical` / `axis_parallel` 换真实长轴（binding 侧同源问题已在 bf6f4bd 修，谓词侧补上）。** 谓词读的是物体**局部 +z**，而 ep2 那根管子横躺（世界 AABB 111×85×37 mm）时局部 +z 仍近竖直 → `angle=4.2°` 的假 PASS。改法：predicates 内实现与 `selection.binding._long_axis` **同构**的 `_long_axis_world`（AABB 最长边定局部轴序号 → 经四元数变到世界系），次长/最长 > 0.8（近立方）、四元数退化、无 AABB 三种情形返回 UNKNOWN + reason，不猜轴。这是有意的小面积复制（binding 侧抛 `UnsolvedHole`、要 hole 参数，谓词侧要三值 reason），按仓内惯例配**逐值 parity 测试**：6 组姿态的长轴向量与长度、两处拒绝的 reason、判据常量本身都与 binding 对照，防两侧单边漂移；
+- 测试：`test_predicates.py` +13、`test_gates_constraints.py` +11、`test_runner.py` +5；另把 4 条原先拿 `carry` 当「普通 UNKNOWN」样本的 gate 用例换成白名单外的 `region_grasp`（它们要钉的语义是「普通 UNKNOWN 阻塞」，那条语义没有变）。本地 `582 passed`（基线 553 + 29），两个 CLI `--help` 通过；全部离线，没有调用模型、相机、simulator；
+- **反向验证**（改动摘掉后必须变红）：`_long_axis_world` 按回局部 +z → 轴类 11 条红，ep2 那条复现出 `PASS angle=4.2°` 的原始假阳性（长轴口径下是 `FAIL angle=90.0°`）；`_excludable` 的白名单条件去掉、豁免面放宽成「任何 UNKNOWN」→ 7 条普通-UNKNOWN 阻塞用例红；`_verify3` 收下 ctx 但不透传（= 未接线前的行为）→ 5 条 ctx 判定用例红。
+
+当前停点：三项都只在**离线单测**上钉住，ep2 尚未重跑。**已知接缝（下一步的真正瓶颈）**：`oracle_runtime` 目前**没有**把抓取点与接近方向记进 `_log`（只有 `grasp_axis` 的四元数、`grasp_close` 的角度、`approach_cone` 的 cone 名与候选 id），所以靶子 1 在真实 oracle episode 上仍然取不到值、那两条谓词仍是 UNKNOWN——接线已经就位，缺的是 runtime 侧一行记录，属并行那条线的改动面。另外，若将来由 runtime 记录「执行前**选定**的 approach 方向」，`approach_direction` 就成了自我验证（方向本来就是按同一个 cone 排序选出来的）；要让这条 gate 有牙齿，记录的应当是**实际达成**的接近方向（EEF 位姿差），这一点必须在接 runtime 记录时定下来。
+
 ## 2026-08-06：第一集 episode 的三个实测 bug + 一个同源 gate 映射
 
 四项全部来自 **8/6 ep1 两次稳定复现的真实 episode**，证据在 5090 的 `~/dgl-stack/evidence/ep1/`。口径是**第 3 档「privileged Oracle 调试」**——改的是 oracle/selection/evaluation 的调试与选择路径，不是方法路径，也不构成任何阶段或任务成功率。感知链（`frames` / `program_projection` / `program_record`）与 compiler/prompts 一行未动。
