@@ -15,6 +15,40 @@
 - 测试：新增 `tests/test_frames.py`（18）与 `tests/test_program_projection.py`（16），另在 `tests/test_planning_record.py` 加 3 条 q_lift 入账用例。端到端那条从冻结 record 一路 `begin_stage → solve`，断言：decision log 里 observation frame 是 `robot_base`、typed-hole 校验 `PASS`、洞值键集恰好是四元闭集、开口中心 base z = 0.75069（即 7.1mm → 0.69mm 的实测复算）、开口轴与 base 竖直差 <0.1°、`identity_status` 只出现在 provenance；另有 `UNKNOWN` 传播（缺 q_lift → 中心洞 `missing_required_value` → 物理 checker 一个都没跑）与未接受身份不出候选两条。本地 `496 passed`（基线 459 + 37），两个 CLI `--help` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
 
 当前停点：这证明的是**合约打通**——frame、calibration、observation 绑定、identity 闸门与 typed-hole 校验在一条真实标定数值上自洽；它**不**证明真实链跑通。三个 hard checker 仍未接入（端到端测试里用的是 PASS 桩，只为让 typed-binding 路径可跑），`execution_enabled` 保持 `False`，「执行前门槛」四项一条未变。明确没做：动 `oracle_runtime`、gates、compiler/prompts、真实网络；grasp（`pose_se3`）洞不在本轮，投影会记 `hole_type_not_projected:pose_se3`，它仍需要独立的 tool transform 与 evidence artifact。已知接缝：一个 base 系数值同时依赖内参与外参，而 envelope 只有一个 `calibration_ref` 位置，现在的取舍是「指向外参、内参留 `source_calibration_ref`」；要不要引入一份合并的 calibration bundle 记录留给下一轮裁决。
+## 2026-08-06：Oracle 抬升两项落库（`CLAW_TIP_DZ` 重标、`lift` 闭环化）
+
+两项都来自 **8/6 v4 单世界栈实测且 3/3 判据通过**（含 `release` 解焊 PASS），证据在 5090 的 `~/dgl-stack/evidence/slip/`，口径仍是**第 3 档「privileged Oracle 调试」**——改的是特权调试路径 `execution/oracle_runtime.py`，不是方法路径，也不构成任何阶段或任务成功率。
+
+- **`CLAW_TIP_DZ`：−0.010 → −0.0035。** 语义钉死为**张爪**状态的指尖偏移——`grasp_at` 是以 `gpos=GRIP_OPEN` 张着爪下探的，定位常数必须与下探时的指尖同状态。三方交叉实测：自由腕姿张爪 **−3.34 mm**、抓取腕姿张爪 **−3.57 mm**（两者只差 0.23 mm，互为独立佐证）、同一抓取腕姿**闭爪 +18.35 mm**——开合一次指尖垂直行程 **21.9 mm**，**闭爪值不可用作定位常数**。v3 的 −0.010 疑为同一「张爪」语义但当时没做闭爪交叉验证，作为遗留待核写进注释。证据 `evidence/slip/claw_tip_dz_remeasure.json`；
+- **`lift` 从开环固定步数改成闭环「抬到目标高度」。** 旧实现发 `LIFT_DZ/0.02` 条固定 20 mm 指令，每步 `_verify_moved` 的返回值被丢弃。新实现每轮回读 EEF 高度（非特权 `get_xquat`）算剩余量，`≤ LIFT_TOL_M = 5 mm` 即收敛退出，否则按剩余量再发一条 `delta_move`（`LIFT_STEP_MAX_M` 封顶）；`LIFT_MAX_ITERS = 12` 到顶仍未收敛就按实得高度**如实记账**（`converged=False` + `iters` + `ee_dz`），不假装成功。每轮进 `lift_step` 账本（`cmd_dz/achieved_dz/remaining_dz`，风格照 `mp_refine`），承重记账（外力 + 夹持回读 + `attached/reason` 三值）原样叠在闭环之上；
+- **为什么必须闭环（实测定性）**：上游控制器每条 `delta_move` 只交付约 **74%** 的指令量，**空载与带载相同 → 负载无关，证伪了「重力把手臂压下去」的假设**；而且渐近停住——一条指令走完 74% 就不再动。固定步数的开环必然欠冲。按 74% 交付率剩余量每轮乘 0.26 几何收敛，实测 **6 次迭代到位**（轨迹 0 → 42.9 → 85.0 → 93.9 → 94.8 → 94.9 → 95.0 mm）。**根因归上游控制器**，本轮不改上游，只在我方语义层把「抬到目标高度」兜住。另有一个实时行为：`_wait_settle` 判静止返回后末端还会继续爬 **1.3–1.9 mm**，闭环在 settle 后加 `LIFT_CREEP_S = 1.5 s` 短等吸收，否则会把未完成的运动记成「已达高度」，下一轮剩余量就是错的；
+- 测试：新增 `tests/test_lift_closed_loop.py` 5 条（桩 pipeline `_Plant` 把「每条指令只交付 delivery 比例」的上游行为建模出来）——74% 交付下收敛且剩余量逐轮 ≤ 上轮 0.30 倍、首条指令即全剩余量、每轮账本带指令/实得/剩余、100% 交付 1–2 轮即收敛、交付率 2% 时走满 12 轮预算并如实记 `converged=False` 与回读实得量、闭环调用集合不越出非特权白名单。`tests/test_gates_no_privilege.py` 的 4 条 lift 用例按新语义更新（新增 `converged/iters` 断言：特权位移不得把「非特权高度纹丝不动」救成收敛；达标即退出不再发多余指令），非特权纪律 8 条全绿。本地 `472 passed`（基线 467 + 5），两个 CLI `--help` 通过；
+- **反向验证**（改动摘掉后必须变红）：把 `lift` 按回开环固定步数 → 新增 4 条 + 更新的 1 条全红，其余 8 条绿；`LIFT_TOL_M` 归零 → 几何收敛那条红（容差有牙齿）。**没有覆盖到的**：`LIFT_CREEP_S` 摘掉后测试仍全绿——那是墙钟时序行为，离线桩建模不出来，只由 5090 实测背书；
+- 本轮**没有**调用 Qwen、SAM3、camera、GraspNet、planner，也没有重跑 simulator——依据是 8/6 那次实测留下的数字，测试全部离线。
+
+当前停点：只动了 `oracle_runtime.py` 与两个测试文件，没碰 planning/perception/policy，`docs/API.md` 的 `lift` 签名与语义边界不变（闭环是原语内部的到位保证，不进契约）。**已知接缝（本轮刻意没动）**：`CLAW_TIP_DZ` 现在有两类语义不同的消费点——`grasp_at`/`approach` 是**张爪**下探（与新值同语义，正确），而 `transport`/`align` 是**夹着物体**移动、爪子处于闭合态，按实测闭爪指尖是 **+18.35 mm**，两者差 21.9 mm。这两处沿用张爪值属于遗留口径，要不要给闭爪单独立常数需要单独裁决（改了会动到 `align` 的对准高度，本轮没有对应的 3/3 实测背书）。另**明确没做**：改上游 74% 交付率的根因、把闭环推广到 `lower_until`（它已有非特权停止判据，语义不同）、给 `_wait_settle` 的 `timeout` 加调用方处置。
+
+## 2026-08-06：Oracle 两项真机调试修复（关节回读来源、抓取 IK 分支翻转）
+
+两项都来自 **8/6 v4 单世界栈实测**，证据在 5090 的 `evidence/slip/`，口径是**第 3 档「privileged Oracle 调试」**——修的是特权调试路径 `execution/oracle_runtime.py`，不是方法路径，也不构成任何阶段或任务成功率。
+
+- **修复一（真 bug）：`_arm_qpos` 的两臂交错假设在 v4 上不成立。** 旧实现假设 `/state` 的 `robot_qpos` 是「左偶右奇」并取 `[a::2][:7]`。实测证伪：`robot_qpos` 长度 **29**，右臂真实下标是 `1,3,6,9,11,13,15`，间隔 `+2/+3/+3/+2/+2/+2` **并不等距**。判别依据是**物理不可能性**——交错切片取出的 j6 = `-2.1813`，落在该关节自身限位 `[-1.308, +1.570]` 之外，关节不可能越过自己的限位；同一瞬间 pipeline `get_qpos` 返回的 7 元组全部在限位内。改为以 pipeline `info:get_qpos` 为关节真值来源（**按臂**的既有接口，与 `robot_api` 执行期收敛核对同源，是被验证过的那条），**不保留任何猜索引的路径**：读到的不是 7 元组就抛错，由调用方按「读不到」处理，不返回错值。唯一调用方是 `_wait_settle`（本臂 + `_park_idle_arm` 的闲臂），它已有的 `except → continue` 会把这种情况退化成 `timeout`。顺带效果：这条回读从特权 `/state` 降到**非特权**机器人状态；
+- **修复二（兜底）：抓取的 IK 分支翻转。** 平行夹爪两指对称，`yaw` 与 `yaw+180` 描述同一个物理抓取，但对 IK 是两个解。实测同一次抓取：默认分支 xy 误差 **15.3 mm**、最小关节裕度 **0.297 rad**；绕工具接近轴翻转 180° 后 **3.6 mm**、**0.700 rad**（裕度翻倍、误差降到 1/4）。`grasp_at` 下探到位后测实际 xy 残差，超过 `GRASP_XY_RETRY_MM = 8.0`（命名常量，注释写明来源是这两组实测数字）就翻转一次重试，两支各自的残差与最终选择记进 `grasp_branch` 账本（风格照 `mp_refine`）；翻转反而更差时**退回默认分支**再闭爪，不在更差的构型上闭合。翻转是 `_qmul(q, Rz(180))` 的**右乘**（工具系），与 `_tdx` 的 `_qmul(TDX0, Rz)` 同一套约定——左乘会变成绕世界轴转，是另一个姿态。**没做关节裕度查询版**：仓内没有限位表，重试-on-error 是零新依赖的 v1，裕度版在代码注释里留了升级说明；
+- 测试：`tests/test_motion_planning.py` 新增 8 条。关节侧 3 条（真值来自 `get_qpos` 且同一瞬间的交错切片越限位——旧路径的反证、`arm_id` 显式传入读对应臂、形状不对时 fail-closed 且 `_wait_settle` 退化成 `timeout`）；抓取侧 5 条（翻转四元数的数学单测：接近轴不变、指轴同线反向、翻两次回原姿、等于 `_tdx(yaw+180)`；腕姿不朝正下方时工具系右乘 ≠ 世界系左乘；15.3 mm→翻转→3.6 mm 触发且日志含两支残差；3.6 mm 时不翻转且只下探一次；翻转更差时退回默认分支）。本地 `467 passed`（基线 459 + 8），两个 CLI `--help` 通过；
+- **反向验证**（改动摘掉后必须变红）：把 `_arm_qpos` 按回交错切片 → 关节侧 3 条全红、其余全绿；摘掉 `_retry_flipped_branch` 调用 → 抓取行为 3 条全红；`GRASP_XY_RETRY_MM` 归零 → 「小残差不翻转」那条红（阈值有牙齿）；翻转改成世界系左乘 → 数学 2 条红（乘序被钉住）；
+- 本轮**没有**调用 Qwen、SAM3、camera、GraspNet、planner，也没有重跑 simulator——修改依据是 8/6 那次实测留下的数字，测试全部离线。
+
+当前停点：只动了 `oracle_runtime.py` 与 `tests/test_motion_planning.py`，没碰 planning/perception/policy，`docs/API.md` 的 `grasp_at` 签名与语义不变（翻转是到位后的内部兜底，不进契约）。**明确没做**：`lift` 仍是**开环发固定步数**（`LIFT_DZ/0.02` 步，每步 `_verify_moved` 的返回值被丢弃，只在结束后用总位移和外力做承重记账）——闭环化是下一轮，本轮刻意没动；也没做关节限位表、没把翻转推广到 `align`/`approach`、没给 `_wait_settle` 的 `timeout` 加上调用方处置（现在两个调用方都只是继续往下走）。已知接缝：`_tool_axes` 的行内注释把下标 0 写成「+x 接近轴」、下标 1 写成「+y 开合轴」，与模块常量 `APPROACH_AXIS_IDX=2 / FINGER_AXIS_IDX=1` 和 `_tdx` 的文档（接近轴 = 工具 +z）不一致；代码按常量走是对的，注释是旧的，本轮外科手术式改动没有顺手动它。
+## 2026-08-06：越框守卫两条链收敛补测试（裁决确认：共用一份守卫）
+
+- **裁决确认**：`object_record` 的单 anchor 链与 `program_record` 的感知程序执行器**必须共用同一份越框守卫**。一张 mask 只有一个判定，不同规的话 `segment` 收下的记录会在另一条链上被判 `UNKNOWN`，同一份 Qwen 框加 SAM3 mask 走哪条路径决定它的死活——这不是可以按路径调的策略，是同一个物理事实；
+- **代码侧本轮没动**：审计发现 08-05 的 `5c87aa3` 已经把 `program_record._segment` 的内联零容差换成共享的 `_mask_outside_box`，但那个 commit 只改了 `src/`，**没留测试、也没在 DEVLOG 记账**。因此下面 08-05「两项裁决落地」条目末尾那句「仍是零容差……留给下一轮裁决」在写下 3 分钟后（`f17681a` 10:54 → `5c87aa3` 10:57）就已经过期，本条即是它的结案；
+- **测试补两条而不是一条**：只镜像 `test_segment_still_rejects_a_three_pixel_excursion` 是不够的——3px 拒绝在**旧的零容差实现下同样通过**，它测的是守卫有没有牙齿，不是两条链有没有对齐。真正钉住这次收敛的是新增的 1px 接受用例（`test_segment_accepts_one_pixel_overflow_like_the_single_anchor_chain`）：box `x0=3`、mask 越出恰好一列，程序须 `PASS`。两条都用 `box_overrides` 钉住 tube 查询的框，沿用既有假 Qwen/SAM3 手法，零网络；
+- 反向验证：把 `_segment` 按回内联零容差后，1px 用例转红（`UNKNOWN != PASS`）、3px 用例仍绿（正是上一条说的盲区），而 `test_object_record.py` 的同名两条全程保持绿——分歧精确定位在两条链之间，不是共享 helper 坏了。验证后已 `git checkout` 复原；
+- 顺带核实全仓不存在第四份实现：`src/` 内 `_mask_outside_box` 恰好三个调用点（`object_record` 的 `segment_record` 与 `_validated_mask_evidence`、`program_record` 的 `_segment`），两文件之外没有任何内联清框写法；
+- 本地 `461 passed`（基线 459 + 2），两个 CLI `--help` 与 `git diff --check` 通过；本轮没有调用 Qwen、SAM3、camera、GraspNet、simulator、planner 或 control。
+
+当前停点：只动了 `tests/test_program_record.py` 与本文件，`src/` 一行未改。明确没做：改容差常量的值、把容差做成可配置项、动 08-05 那条历史条目的正文（历史按当时事实保留，过期由本条结案）、把 `_mask_outside_box` 从私有 helper 提成公开 API（两个消费者同在 `execution/`，现在这样够用）。
 
 ## 2026-08-05：感知程序跨程序身份守卫（同框不同 object → 双双 UNKNOWN）
 

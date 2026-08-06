@@ -27,6 +27,11 @@ LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
 GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0  # Pipeline convention: 100=open, 0=closed.
 GRIP_CLOSE_TUBE = GRIP_CLOSE
 GRIP_SETTLE_S = 4.0
+# lift 的闭环参数(语义 = 「抬到目标高度」,不是「发够步数」;见 `lift`)。
+LIFT_TOL_M = 0.005          # 达标容差:剩余量 ≤ 5 mm 即收敛退出
+LIFT_MAX_ITERS = 12         # 迭代上限;到顶仍未收敛按实得高度如实记账,不假装成功
+LIFT_STEP_MAX_M = LIFT_DZ   # 单步指令上限:读数异常导致剩余量爆掉时不发超过一次标称抬升
+LIFT_CREEP_S = 1.5          # _wait_settle 返回后还会继续爬 1.3-1.9 mm,额外短等吸收
 IDLE_ARM = {0: 1, 1: 0}
 CONTACT_FORCE_N = 20.0
 LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
@@ -35,7 +40,20 @@ LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
 TDX0 = [0.0, 1.0, 0.0, 0.0]  # Ry(180): tool +z points down.
 APPROACH_AXIS_IDX = 2
 FINGER_AXIS_IDX = 1
-CLAW_TIP_DZ = -0.010
+# 爪尖相对 EEF 帧的 z 偏移(m),取**张爪**状态的指尖:`grasp_at` 是以
+# `gpos=GRIP_OPEN` 张着爪下探的,定位常数必须与下探时的指尖状态同语义。
+# 8/6 v4 三方交叉实测:自由腕姿张爪 **−3.34 mm**、抓取腕姿张爪 **−3.57 mm**
+# ——两者只差 0.23 mm,互为独立佐证;同一抓取腕姿**闭爪**为 **+18.35 mm**,
+# 即开合一次指尖的垂直行程有 21.9 mm,**闭爪值不可用作定位常数**。
+# v3 的 −0.010 疑为同一「张爪」语义,但当时没做闭爪交叉验证,遗留待核。
+# 证据:5090 `~/dgl-stack/evidence/slip/claw_tip_dz_remeasure.json`,
+# privileged-debug 档,2026-08-06。
+CLAW_TIP_DZ = -0.0035
+
+# 抓取到位后仍可接受的笛卡尔 xy 残差(mm);超过则试另一个 IK 分支(见 _retry_flipped_branch)。
+# 来源:8/6 v4 单世界栈实测——同一个物理抓取,默认分支 xy 误差 15.3 mm、最小关节裕度
+# 0.297 rad;绕工具接近轴翻转 180° 后 3.6 mm、0.700 rad。阈值取两次实测之间。
+GRASP_XY_RETRY_MM = 8.0
 
 SERVO_STEP_M, SERVO_STEP_DEG = 0.05, 14.0
 SERVO_POS_TOL, SERVO_ROT_TOL = 0.015, 8.0
@@ -96,6 +114,18 @@ def _tool_axes(q):
 def _tdx(psi_deg):
     """竖直朝下 + 绕接近轴(工具 +z)把开合方向转 psi。"""
     return _qnorm(_qmul(TDX0, _qaxis([0, 0, 1], psi_deg)))
+
+
+def _flip_about_approach(q):
+    """绕**工具**接近轴转 180°:得到同一个物理抓取的另一个 IK 分支。
+
+    平行夹爪两指对称,yaw 与 yaw+180 描述的是同一次抓取(指轴同一条直线、只是两指
+    互换),但对 IK 是两个不同的解。合成方向必须**右乘**,与 `_tdx` 的
+    `_qmul(TDX0, Rz)` 是同一套工具系约定;左乘会变成绕世界轴转,那是另一个姿态。
+    """
+    axis = [0.0, 0.0, 0.0]
+    axis[APPROACH_AXIS_IDX] = 1.0
+    return _qnorm(_qmul(list(q), _qaxis(axis, 180.0)))
 
 
 def _topdown_like(q):
@@ -417,10 +447,24 @@ class OracleRuntime:
         self._wait_settle(arm_id=idle, timeout_s=6.0)
 
     def _arm_qpos(self, arm_id=None):
-        """某条臂的 7 个关节角(默认本臂)。/state 的 robot_qpos 是两臂交错排布:
-        左臂在偶数下标、右臂在奇数下标,之后才是 lifting + 12 个爪子自由度。"""
+        """某条臂的 7 个关节角(默认本臂),取自 pipeline ``info:get_qpos``——**按臂**的
+        既有接口,与 robot_api 的收敛核对同源,是被验证过的关节真值。
+
+        **不要**改回从 eval ``/state`` 的 ``robot_qpos`` 切片。那条旧路径假设两臂交错
+        (左偶右奇,``[a::2][:7]``),8/6 v4 单世界栈实测证伪:``robot_qpos`` 长度 29,
+        右臂的真实下标是 ``1,3,6,9,11,13,15``(间隔 +2/+3/+3/+2/+2/+2,并不等距)。
+        判别依据是物理不可能性——交错切片取出的 j6 = -2.1813,落在该关节自身限位
+        [-1.308, +1.570] 之外,关节不可能越过自己的限位;同一瞬间 ``get_qpos`` 返回的
+        7 元组全部在限位内。布局随机器人代次变化,这里不猜索引:读不到规定形状就抛错,
+        由调用方按"读不到"处理,不返回错值。
+        """
         a = self.arm_id if arm_id is None else arm_id
-        return self.eval.state()["robot_qpos"][a::2][:7]
+        q = [float(v) for v in self.pipe.call("info", "get_qpos", {"arm_id": a})]
+        if len(q) != robot_api.JOINTS_PER_WAYPOINT:      # 7-DoF 单臂
+            raise ValueError(
+                f"get_qpos(arm={a}) 返回 {len(q)} 个关节,"
+                f"期望 {robot_api.JOINTS_PER_WAYPOINT}")
+        return q
 
     def _wait_settle(self, target_xyz=None, tol=0.012, timeout_s=25.0, still_n=3,
                      arm_id=None):
@@ -692,11 +736,49 @@ class OracleRuntime:
         self._step_to(xyz)
         return self._move(xyz)
 
+    def _xy_err_mm(self, xyz):
+        """当前 EEF 与目标点的**水平**残差(mm)。z 另有下探与爪尖补偿,不进这个判据。"""
+        p, _ = self._cur_xquat()
+        return math.hypot(p[0] - xyz[0], p[1] - xyz[1]) * 1000.0
+
+    def _retry_flipped_branch(self, eef, quat):
+        """抓取到位残差过大时,换 IK 的另一个分支重试一次,停在实测更好的那支。
+
+        触发判据只用**到位后实测的 xy 残差**,不查关节裕度:仓内没有限位表,
+        重试-on-error 是零新依赖的 v1。拿到限位表后可升级成"先比最小关节裕度、
+        再决定用哪支",那样能省掉一次移动(8/6 v4 实测里裕度差了一倍:
+        0.297 rad vs 0.700 rad,比 xy 残差更早可判)。
+        """
+        err = self._xy_err_mm(eef)
+        if err <= GRASP_XY_RETRY_MM:
+            self._log("grasp_branch", branch="default", retried=False,
+                      xy_err_mm=round(err, 1))
+            return
+        flipped = _flip_about_approach(quat)
+        self._move(eef, quat=flipped, gpos=GRIP_OPEN)
+        err_flipped = self._xy_err_mm(eef)
+        if err_flipped < err:
+            self._log("grasp_branch", branch="flipped", retried=True,
+                      xy_err_mm=round(err_flipped, 1),
+                      default_xy_err_mm=round(err, 1),
+                      flipped_xy_err_mm=round(err_flipped, 1),
+                      reason="xy_err_over_threshold")
+            return
+        # 翻转分支更差:退回默认分支,不在更差的构型上闭爪。
+        self._move(eef, quat=quat, gpos=GRIP_OPEN)
+        self._log("grasp_branch", branch="default", retried=True, restored=True,
+                  xy_err_mm=round(self._xy_err_mm(eef), 1),
+                  default_xy_err_mm=round(err, 1),
+                  flipped_xy_err_mm=round(err_flipped, 1),
+                  reason="flip_not_better")
+
     def grasp_at(self, grasp_pose, axis=None):
         """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ。
 
         若提供物体长轴 ``axis``，工具开合方向与其水平投影正交。轴缺失或
         近竖直时保持当前腕姿，并在无法消费参数时记录 UNSUPPORTED。
+        下探到位后 xy 残差超过 ``GRASP_XY_RETRY_MM`` 时翻转一次 IK 分支再闭爪，
+        见 ``_retry_flipped_branch``。
         """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
@@ -711,6 +793,7 @@ class OracleRuntime:
         else:
             self._log("grasp_axis", why=why, quat=[round(v, 4) for v in gq])
         self._move(eef, quat=gq, gpos=GRIP_OPEN)  # 下探时锁住抓取腕姿,只走 z
+        self._retry_flipped_branch(eef, gq)       # xy 残差过大 → 试对称的另一个 IK 分支
         # !! 参数名只能是 angle:gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True。
         # 开合方向见模块顶部 GRIP_* 注释:
         # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
@@ -721,20 +804,45 @@ class OracleRuntime:
                   angle=self._grip_angle(), gripping=self._is_gripping())
 
     def lift(self, obj):
-        """分小步抬升，并用非特权信号记录夹持证据。
+        """闭环抬升到 ``LIFT_DZ``，并用非特权信号记录夹持证据。
+
+        语义是**达到目标高度**，不是「发够步数」:每轮回读 EEF 高度(非特权
+        ``get_xquat``)算出剩余量,剩余量 ≤ ``LIFT_TOL_M`` 即收敛退出,否则按剩余量
+        再发一条 ``delta_move``;到 ``LIFT_MAX_ITERS`` 仍未收敛就按实得高度如实记账
+        (``converged=False`` + ``iters``),不假装成功。
+
+        **为什么必须闭环**:8/6 v4 实测,上游控制器每条 ``delta_move`` 只交付约
+        **74%** 的指令量,空载与带载相同(负载无关 → 证伪了「重力把手臂压下去」的假设),
+        而且渐近停住——一条指令发完就不再动了。因此固定步数的开环必然欠冲。按 74%
+        交付率,剩余量每轮乘 0.26,几何收敛;实测 6 次迭代到位(轨迹 0 → 42.9 → 85.0
+        → 93.9 → 94.8 → 94.9 → 95.0 mm)。**根因在上游控制器**,这里不改上游,只在
+        我方语义层把「抬到目标高度」兜住。
 
         控制回路不读取特权实体位姿，只使用 EEF 上移量、末端外力和夹持回读。
         ``obj`` 仅用于日志，不参与控制判定。无法读取证据时保持 UNKNOWN。
         """
-        p0, _ = self._cur_xquat()
+        p0, q0 = self._cur_xquat()
         f0 = self._ee_extforce_max()
-        n = max(1, int(round(LIFT_DZ / 0.02)))
-        for _ in range(n):
-            before = self._cur_xquat()
-            self._ctrl("delta_move", delta_xyz=[0, 0, 0.02])
+        cur = (p0, q0)
+        iters = 0
+        while iters < LIFT_MAX_ITERS:
+            remaining = LIFT_DZ - (cur[0][2] - p0[2])
+            if abs(remaining) <= LIFT_TOL_M:
+                break
+            step = max(-LIFT_STEP_MAX_M, min(LIFT_STEP_MAX_M, remaining))
+            self._ctrl("delta_move", delta_xyz=[0, 0, round(step, 4)])
             self._wait_settle(timeout_s=10.0)
-            self._verify_moved(before, op="lift")
-        p1, _ = self._cur_xquat()
+            # _wait_settle 判静止后末端还会继续爬 1.3-1.9 mm;不吸收这段会把未完成的
+            # 运动记成「已达高度」,下一轮的剩余量就是错的。
+            time.sleep(LIFT_CREEP_S)
+            self._verify_moved(cur, op="lift")
+            cur = self._cur_xquat()             # 本轮实得,也是下一轮算剩余量的基准
+            iters += 1
+            self._log("lift_step", i=iters, cmd_dz=round(step, 4),
+                      achieved_dz=round(cur[0][2] - p0[2], 4),
+                      remaining_dz=round(LIFT_DZ - (cur[0][2] - p0[2]), 4))
+        p1 = cur[0]
+        converged = abs(LIFT_DZ - (p1[2] - p0[2])) <= LIFT_TOL_M
         f1 = self._ee_extforce_max()
         ee_dz = p1[2] - p0[2]                       # 非特权:末端自身上移量(不看物体)
         ee_rose = ee_dz >= SERVO_PROGRESS_EPS_M     # 指令是否真执行(派生自伺服进展容差)
@@ -755,6 +863,7 @@ class OracleRuntime:
         else:
             attached, reason = "empty", "ee_rose_no_load"
         self._log("lift_done", obj=str(obj), ee_dz=round(ee_dz, 4),
+                  target_dz=LIFT_DZ, converged=converged, iters=iters,
                   load_n=None if load is None else round(load, 1),
                   gripping=grip, grip_angle=self._grip_angle(),
                   attached=attached, reason=reason)
