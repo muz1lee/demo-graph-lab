@@ -9,9 +9,14 @@
   - ``upper_body``(s=0.80)沿 AABB 的**世界 z** 取点,抓取点高出赤道约 1 cm,
     而半径才 16.8 mm——光滑圆柱在赤道以上夹必滑出。
 
-本文件钉死修复后的语义:长轴从 AABB 最长边推断并经实体四元数变换到世界系;区带
-沿真实长轴参数化;横躺时哪一端算 upper 没有可靠信号,取段中点并记 ``end_ambiguous``;
-物体立着时行为与旧实现一致(向后兼容用旧公式逐点对照钉住);近立方拒绝。
+8/6 ep3 又推翻了 ep1 那版修复本身:它把**世界** AABB 的边序号直接当成**局部**轴序号,
+只有姿态轴对齐时两者才碰巧相等。正解是解 ``|R|·e = S`` 从世界 AABB 跨度反求局部三边长
+(``binding._local_extents``),长轴 = 局部最长边所在的轴。
+
+本文件钉死修复后的语义:局部边长可反求(已知答案逐分量对);三根同资产同姿态、只差 yaw
+的平躺管子必须给同一个答案(判别性用例 + 反向验证对照组);区带沿真实长轴参数化;横躺
+时哪一端算 upper 没有可靠信号,取段中点并记 ``end_ambiguous``;物体立着时行为与旧实现
+一致;近立方 / |R| 奇异 / 解出负边长一律拒绝,不猜。
 
 纯逻辑、离线、不触 sim/网络/LLM。
 """
@@ -20,6 +25,7 @@ import math
 
 import pytest
 
+from demo_graph_lab.evaluation import predicates
 from demo_graph_lab.execution import oracle_runtime
 from demo_graph_lab.execution.oracle_runtime import OracleRuntime
 from demo_graph_lab.selection import binding
@@ -32,11 +38,30 @@ _CENTER = (0.4, 0.1, 0.8)
 
 
 def _entity(extents, quat=(1.0, 0.0, 0.0, 0.0), center=_CENTER):
-    """按世界系 AABB 边长构造实体(pos 取 AABB 中心,与仿真资产一致)。"""
+    """按世界系 AABB 边长构造实体(pos 取 AABB 中心,与仿真资产一致)。
+
+    只在 ``|R|`` 为置换矩阵(轴对齐姿态)时才和 ``_entity_from_local`` 等价;姿态一斜
+    就必须用 ``_entity_from_local``,否则造出的是物理上不可能的 (AABB, quat) 组合。
+    """
     half = [item / 2.0 for item in extents]
     return {"pos": list(center), "quat": list(quat),
             "aabb": {"min": [center[i] - half[i] for i in range(3)],
                      "max": [center[i] + half[i] for i in range(3)]}}
+
+
+def _world_spans(local_extents, quat):
+    """已知局部三边长与姿态,**正向**算世界 AABB 跨度:S_j = Σ_k |R[j][k]|·e_k。
+
+    这是长轴反求的真值来源。测试只用这条正向公式造数据,再要求实现把 ``e`` 解回来
+    ——「已知答案」测试,和被测实现没有共享任何代码路径。
+    """
+    cols = [binding._local_axis_in_world(list(quat), k) for k in range(3)]
+    return [sum(abs(cols[k][j]) * local_extents[k] for k in range(3)) for j in range(3)]
+
+
+def _entity_from_local(local_extents, quat=(1.0, 0.0, 0.0, 0.0), center=_CENTER):
+    """由「局部边长 + 姿态」造出自洽实体(世界 AABB 用 ``_world_spans`` 正向算)。"""
+    return _entity(_world_spans(local_extents, quat), quat, center)
 
 
 class _Stub:
@@ -81,10 +106,191 @@ def _quat_about_x(deg):
     return [math.cos(half), math.sin(half), 0.0, 0.0]
 
 
+def _quat_about_y(deg):
+    half = math.radians(deg) / 2.0
+    return [math.cos(half), 0.0, math.sin(half), 0.0]
+
+
+def _quat_about_z(deg):
+    half = math.radians(deg) / 2.0
+    return [math.cos(half), 0.0, 0.0, math.sin(half)]
+
+
+def _qmul(a, b):
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return [w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2]
+
+
+def _angle_from_vertical(vec):
+    """轴无向:与世界 +z 的最小夹角(度)。"""
+    return math.degrees(math.acos(min(1.0, abs(vec[2]))))
+
+
 def _legacy_local_z(quat):
     """旧实现:无条件取物体局部 +z 作长轴。"""
     w, x, y, z = quat
     return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
+
+
+# ==========================================================================
+# 已知答案测试:局部边长必须能从世界 AABB 反求出来。
+#
+# 8/6 ep3 的教训写在这里:上一轮的"真长轴"修复把**世界** AABB 的边序号直接当成
+# **局部**轴序号喂给 `_local_axis_in_world`,两个索引空间根本不是一回事;而
+# tests/test_predicates.py 的 parity 测试只对照两侧数值是否相同,把同一个错误钉在了
+# 两边。parity 保证「一致」,保证不了「正确」——所以本节全部是**已知答案**测试:
+# 先定死局部边长与姿态,用 S = |R|·e 正向算出世界 AABB 造实体,再要求实现把 e 解回来。
+# ==========================================================================
+_LOCAL_TUBE = [_TUBE_LEN, _TUBE_DIA, _TUBE_DIA]        # 局部轴 0 是长轴
+
+_KNOWN_POSES = {
+    "identity": [1.0, 0.0, 0.0, 0.0],
+    "roll_+4.3": _quat_about_x(4.3),                    # 绕长轴自转,长轴方向不变
+    "roll_-4.3": _quat_about_x(-4.3),
+    "stand_up_90": _quat_about_y(90.0),                 # 长轴立起来
+    "yaw_25": _quat_about_z(25.0),
+    "compound": _qmul(_qmul(_quat_about_z(31.0), _quat_about_x(12.0)),
+                      _quat_about_y(7.0)),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_KNOWN_POSES))
+def test_local_extents_are_recovered_from_the_world_aabb(name):
+    quat = _KNOWN_POSES[name]
+    ent = _entity_from_local(_LOCAL_TUBE, quat)
+
+    extents, columns, reason = binding._local_extents(ent)
+
+    assert reason is None
+    assert extents == pytest.approx(_LOCAL_TUBE, abs=1e-9), \
+        "局部边长必须逐分量解回真值,不是世界跨度"
+
+
+@pytest.mark.parametrize("name", sorted(_KNOWN_POSES))
+def test_long_axis_is_the_local_longest_edge_axis_in_world(name):
+    quat = _KNOWN_POSES[name]
+    ent = _entity_from_local(_LOCAL_TUBE, quat)
+
+    vec, length, reason = binding.long_axis_world(ent)
+
+    assert reason is None
+    assert length == pytest.approx(_TUBE_LEN, abs=1e-9)
+    # 真值:局部轴 0 在世界系的方向(该构造下局部长轴恒为 0 号)。
+    truth = binding._local_axis_in_world(quat, 0)
+    assert abs(sum(vec[i] * truth[i] for i in range(3))) == pytest.approx(1.0, abs=1e-9), \
+        "世界向量必须与真长轴同线"
+
+
+def test_world_aabb_spans_are_not_the_local_edge_lengths():
+    """判别力自证:斜姿态下世界跨度确实 ≠ 局部边长,否则上面几条测不出东西。"""
+    spans = _world_spans(_LOCAL_TUBE, _KNOWN_POSES["compound"])
+    assert max(abs(spans[i] - _LOCAL_TUBE[i]) for i in range(3)) > 0.005
+
+
+# ==========================================================================
+# 三管同答案:同资产、同姿态、只差 yaw —— 必须给同一个答案。
+# ep3 实测里旧实现给出 FAIL / 假 PASS / UNKNOWN 三种答案。
+# ==========================================================================
+# 局部轴 1 是长轴;绕世界 x 转 2.2° 把它放到近水平(离竖直 87.8°),再绕局部 y 自转
+# 90°(同一根管子原地绕自己的长轴滚一下,长轴方向丝毫不变),最后套一个世界 yaw。
+_LOCAL_TUBE_AXIS1 = [_TUBE_DIA, _TUBE_LEN, _TUBE_DIA]
+_LYING_YAWS = (0.0, 40.0, 70.0)
+
+
+def _lying_tube(yaw):
+    quat = _qmul(_qmul(_quat_about_z(yaw), _quat_about_x(2.2)), _quat_about_y(90.0))
+    return _entity_from_local(_LOCAL_TUBE_AXIS1, quat)
+
+
+def test_three_lying_tubes_give_one_and_the_same_answer():
+    answers = [binding.long_axis_world(_lying_tube(yaw)) for yaw in _LYING_YAWS]
+
+    assert [reason for _v, _l, reason in answers] == [None, None, None], \
+        "同一根管子换个 yaw 不该有的能判、有的判不了"
+    lengths = [length for _v, length, _r in answers]
+    assert lengths == pytest.approx([_TUBE_LEN] * 3, abs=1e-9)
+    angles = [_angle_from_vertical(vec) for vec, _l, _r in answers]
+    assert max(angles) - min(angles) < 1.0, f"三根管子的离竖直角必须一致,实得 {angles}"
+    assert angles[0] == pytest.approx(87.8, abs=0.1)
+
+
+def test_three_lying_tubes_all_fail_axis_vertical():
+    ents = {f"tube{i}": _lying_tube(yaw) for i, yaw in enumerate(_LYING_YAWS)}
+    verdicts = [predicates.check(
+        {"name": "axis_vertical", "args": {"axis": f"{name}.long_axis"}}, ents)
+        for name in ents]
+
+    assert [v.status for v in verdicts] == [predicates.FAIL] * 3
+    assert [v.margin for v in verdicts] == pytest.approx([verdicts[0].margin] * 3, abs=0.1)
+
+
+def test_the_world_edge_index_reading_would_disagree_across_yaw():
+    """反向验证:换回"世界边序号当局部轴序号",这三根管子就散成三个答案。
+
+    没有这条对照,上面两条测试可能只是"两个错误实现也能一致"。
+    """
+    def world_edge_index_reading(ent):
+        lo, hi = binding._aabb_bounds(ent)
+        spans = [hi[i] - lo[i] for i in range(3)]
+        order = sorted(range(3), key=lambda i: spans[i], reverse=True)
+        if spans[order[1]] / spans[order[0]] > binding._AXIS_DOMINANCE_MAX_RATIO:
+            return None                                   # 次/主闸拦下 → UNKNOWN
+        vec = binding._local_axis_in_world(ent["quat"], order[0])
+        norm = math.sqrt(sum(v * v for v in vec))
+        return _angle_from_vertical([v / norm for v in vec])
+
+    legacy = [world_edge_index_reading(_lying_tube(yaw)) for yaw in _LYING_YAWS]
+    assert len(set(legacy)) == 3, f"对照组必须散开,实得 {legacy}"
+    assert legacy[0] == pytest.approx(87.8, abs=0.1)      # FAIL
+    assert legacy[1] is None                              # UNKNOWN(次/主闸)
+    assert legacy[2] == pytest.approx(2.2, abs=0.1)       # 假 PASS:近竖直
+
+
+# ==========================================================================
+# 拒绝面:歧义 / 数值退化,都不猜。
+# ==========================================================================
+def test_standing_tube_passes_axis_vertical():
+    ent = _entity_from_local(_LOCAL_TUBE, _quat_about_y(90.0))   # 局部 x 轴指向世界 z
+    p = predicates.check({"name": "axis_vertical", "args": {"axis": "t.long_axis"}},
+                         {"t": ent})
+    assert p.status == predicates.PASS and p.margin > 0
+
+
+def test_near_cube_local_extents_are_ambiguous_not_guessed():
+    ent = _entity_from_local([0.100, 0.095, 0.090], _KNOWN_POSES["compound"])
+    _vec, _length, reason = binding.long_axis_world(ent)
+    assert reason == "axis_ambiguous_extents"
+    p = predicates.check({"name": "axis_vertical", "args": {"axis": "t.long_axis"}},
+                         {"t": ent})
+    assert p.status == predicates.UNKNOWN and p.reason == "axis_ambiguous_extents"
+
+
+def test_exact_45_degree_yaw_is_singular_and_refused():
+    """绕竖直轴恰 45°:|R| 的前两行相同,世界 AABB 对两条局部边长完全无信息 → 拒绝。"""
+    ent = _entity_from_local(_LOCAL_TUBE, _quat_about_z(45.0))
+    _vec, _length, reason = binding.long_axis_world(ent)
+    assert reason == "axis_extents_unrecoverable"
+    p = predicates.check({"name": "axis_vertical", "args": {"axis": "t.long_axis"}},
+                         {"t": ent})
+    assert p.status == predicates.UNKNOWN and p.reason == "axis_extents_unrecoverable"
+
+
+def test_inconsistent_aabb_and_quat_solve_negative_and_are_refused():
+    """AABB 与 quat 对不上(解出负边长)→ 这组观测自相矛盾,拒绝,不取绝对值硬凑。"""
+    ent = _entity((_TUBE_LEN, _TUBE_DIA, _TUBE_DIA), _quat_about_z(30.0))
+    _vec, _length, reason = binding.long_axis_world(ent)
+    assert reason == "axis_extents_unrecoverable"
+
+
+def test_degenerate_quat_is_unobserved():
+    ent = _entity_from_local(_LOCAL_TUBE, [1.0, 0.0, 0.0, 0.0])
+    ent["quat"] = [0.0, 0.5, 0.5, 0.0]        # 非单位四元数,第 2 列退化成零向量
+    _vec, _length, reason = binding.long_axis_world(ent)
+    assert reason == "axis_unobserved"
 
 
 # ==========================================================================
@@ -93,7 +299,7 @@ def _legacy_local_z(quat):
 def test_lying_cylinder_long_axis_is_world_x():
     out = _solve_axis(_entity((_TUBE_LEN, _TUBE_DIA, _TUBE_DIA)))
     assert out["vec"] == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)
-    assert out["axis_source"] == "aabb_longest_edge"
+    assert out["axis_source"] == "local_extents_from_aabb"
 
 
 def test_lying_cylinder_long_axis_follows_the_longest_edge_not_the_key_order():

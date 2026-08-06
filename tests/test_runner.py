@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from types import SimpleNamespace
 
@@ -9,7 +10,7 @@ import pytest
 
 from demo_graph_lab.evaluation import predicates
 from demo_graph_lab.execution.oracle_runtime import OracleRuntime
-from demo_graph_lab.execution.runner import run_policy
+from demo_graph_lab.execution.runner import _CTX_VECTOR_OPS, _stage_ctx, run_policy
 from demo_graph_lab.policy.fake_runtime import FakeRuntime
 from demo_graph_lab.selection.binding import UnsolvedHole
 
@@ -228,7 +229,7 @@ def _run_grasp(handler) -> dict:
 
 def test_runner_feeds_the_recorded_grasp_point_to_the_gate() -> None:
     def handler(rt) -> None:
-        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
+        rt.calls.append({"op": "grasp_point", "xyz": [0.05, 0.05, 0.90]})
         rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
 
     gate = _run_grasp(handler)
@@ -239,7 +240,7 @@ def test_runner_feeds_the_recorded_grasp_point_to_the_gate() -> None:
 def test_runner_ctx_does_not_make_the_gate_lenient() -> None:
     """拿到抓取点不等于放行:抓在下段就该 FAIL。"""
     def handler(rt) -> None:
-        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.10]})
+        rt.calls.append({"op": "grasp_point", "xyz": [0.05, 0.05, 0.10]})
         rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
 
     gate = _run_grasp(handler)
@@ -262,7 +263,7 @@ def test_runner_without_a_recorded_grasp_point_keeps_the_unknown_verdict() -> No
 def test_runner_ignores_records_from_before_this_stage_attempt() -> None:
     """窗口按 attempt 划:上一阶段留下的抓取点不能拿来给这一阶段验收。"""
     runtime = _RecordingRuntime()
-    runtime.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
+    runtime.calls.append({"op": "grasp_point", "xyz": [0.05, 0.05, 0.90]})
 
     def handler(rt) -> None:
         rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
@@ -275,16 +276,68 @@ def test_runner_ignores_records_from_before_this_stage_attempt() -> None:
 def test_runner_takes_the_latest_record_and_rejects_malformed_ones() -> None:
     """同一阶段记了多次 → 取最近一次;形态不对的记录当作没记。"""
     def handler(rt) -> None:
-        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.10]})
-        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, 0.05, 0.90]})
-        rt.calls.append({"op": "approach", "approach_dir": "down"})   # 不是向量
+        rt.calls.append({"op": "grasp_point", "xyz": [0.05, 0.05, 0.10]})
+        rt.calls.append({"op": "grasp_point", "xyz": [0.05, 0.05, 0.90]})
+        rt.calls.append({"op": "approach_dir", "dir": "down"})        # 不是向量
         rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
 
     gate = _run_grasp(handler)
     assert gate["acceptance_hold"] is True          # 用了最后那次(上段)
 
     def only_bad(rt) -> None:
-        rt.calls.append({"op": "grasp_at", "grasp_point": [0.05, "x", 0.90]})
+        rt.calls.append({"op": "grasp_point", "xyz": [0.05, "x", 0.90]})
         rt.positions["tube0_prop"] = [0.4, 0.2, 0.92]
 
     assert _run_grasp(only_bad)["acceptance_hold"] is None
+
+
+# ==========================================================================
+# ctx 通道的字段名必须和生产端对得上(8/6 ep3)。
+#
+# runtime 记的是 ``{"op": <名字>, **载荷}``:``{"op":"grasp_point","xyz":[...]}`` /
+# ``{"op":"approach_dir","dir":[...]}``。消费端原先做的是 ``record.get("grasp_point")``
+# ——名字在 ``op`` 里、向量在 ``xyz``/``dir`` 里,那个同名字段在仓里没有任何生产者写过,
+# 于是 ctx 恒空、两条谓词永远 UNKNOWN。下面直接喂**真实记录形状**,不再自己发明形状。
+# ==========================================================================
+_REAL_GRASP_RECORD = {"t": 1.0, "op": "grasp_point", "xyz": [0.4013, 0.1988, 0.8102]}
+# ep3 实测的接近方向(下探段起止回读位移归一化)。
+_EP3_APPROACH_DIR = [-0.046, -0.016, -0.999]
+_REAL_APPROACH_RECORD = {"t": 1.1, "op": "approach_dir", "dir": _EP3_APPROACH_DIR,
+                         "source": "measured_descent"}
+
+
+def test_stage_ctx_reads_the_real_runtime_record_shape() -> None:
+    runtime = SimpleNamespace(calls=[_REAL_GRASP_RECORD, _REAL_APPROACH_RECORD])
+
+    ctx = _stage_ctx(runtime, 0)
+
+    assert ctx == {"grasp_point": pytest.approx(_REAL_GRASP_RECORD["xyz"]),
+                   "approach_dir": pytest.approx(_EP3_APPROACH_DIR)}
+
+
+def test_the_same_named_field_reading_would_see_nothing() -> None:
+    """反向验证:按 ``record.get("grasp_point")`` 读真实记录,两个键都取不到。"""
+    for record in (_REAL_GRASP_RECORD, _REAL_APPROACH_RECORD):
+        assert record.get("grasp_point") is None
+        assert record.get("approach_dir") is None
+
+
+def test_ep3_measured_approach_dir_reaches_the_predicate_and_passes() -> None:
+    """ep3 实测值回归:这条方向离竖直向下只有 2.8°,接上通道后必须判 PASS。"""
+    runtime = SimpleNamespace(calls=[_REAL_APPROACH_RECORD])
+    ctx = _stage_ctx(runtime, 0)
+
+    p = predicates.check({"name": "approach_direction", "args": {"cone": "top_down"}},
+                         {}, **ctx)
+
+    assert p.status == predicates.PASS
+    assert float(p.detail.split("angle=")[1].split()[0]) == pytest.approx(2.8, abs=0.1)
+
+
+def test_oracle_runtime_evidence_records_match_the_consumed_field_names() -> None:
+    """生产端与消费端同源对账:oracle 记的 op 名与载荷字段名就是 runner 读的那两组。"""
+    assert _CTX_VECTOR_OPS == {"grasp_point": "xyz", "approach_dir": "dir"}
+    source = inspect.getsource(OracleRuntime._log_grasp_evidence)
+    for op, field in _CTX_VECTOR_OPS.items():
+        assert f'self._log("{op}"' in source, f"生产端不再记 {op}"
+        assert f"{field}=" in source, f"生产端不再用 {field} 装向量"

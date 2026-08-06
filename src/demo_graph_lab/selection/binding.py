@@ -312,9 +312,16 @@ def _aabb_bounds(entity):
     return bx[0], bx[1]
 
 
-# 长轴判据:次长边 / 最长边 超过此比值 → 近立方/近方形,主方向不可辨,拒绝。
+# 长轴判据:**局部**次长边 / 最长边 超过此比值 → 近立方/近方形,主方向不可辨,拒绝。
 # 口径与 perception.operators.fit_principal_axis 的 PCA 判据一致(次/主 > 0.8 即歧义)。
+# 判的必须是反求出来的局部边长,不是世界 AABB 跨度:世界跨度会被姿态撑大,同一根管子
+# 换个 yaw 比值就变(8/6 ep3 实测 tube1 的世界跨度比值 0.648,照样过闸)。
 _AXIS_DOMINANCE_MAX_RATIO = 0.8
+# |R| 的高斯消元主元小于此值即视为奇异(如绕竖直轴恰 45°:两行相同,世界 AABB
+# 对这两条局部边长完全无信息)。数值退化就拒绝,不猜。
+_ROT_SINGULAR_EPS = 1e-6
+# 反求出的局部边长允许的负向浮点噪声;超过就说明这组 (AABB, quat) 自身不自洽。
+_EXTENT_NEG_TOL_M = 1e-9
 # 长轴与世界 z 的方向余弦 ≥ 此值才算「立着」;此时 region 的上下端才有可靠含义
 # (0.9 ≈ 与竖直夹角 25.8°)。横躺资产的局部 +z 只偏离竖直 4.3°,靠它区分不了。
 _AXIS_VERTICAL_DOT = 0.9
@@ -333,37 +340,110 @@ def _local_axis_in_world(quat, index):
     return [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)]
 
 
-def _long_axis(ent, hole):
-    """实体的**真实长轴**:世界系单位向量 + 沿该轴的长度(m)。
+def _solve3(matrix, rhs):
+    """3×3 线性方程组 ``matrix · x = rhs``,列主元高斯消元。奇异 → ``None``。
 
-    做法是从 AABB 三边长里取最长边所在的**局部**轴序号,再经实体四元数变换到世界系。
-    实测背景(8/6 ep1):管子横躺,AABB 的 z 跨度只有直径 33.6 mm,但资产的局部 +z
-    仍近竖直(偏离 4.3°)——直接拿局部 +z 当长轴,yaw 就跟着这 4.3° 的方位角抖,
-    两次 attempt 的抓取四元数能差几十度。
-
-    两处拒绝,都不给静默出口:
-      - 最长边与次长边之比不足(次/主 > ``_AXIS_DOMINANCE_MAX_RATIO``)→ 近立方或
-        近方形,主方向不可辨。物体绕竖直轴转 45° 时 AABB 会被撑成近方形,这条判据
-        同时兜住了"AABB 边长不等于局部边长"的失真情形;
-      - 四元数退化(旋转列长度为零)→ 姿态读不出来。
+    只有 3 阶,纯 Python 展开即可,不引入 numpy 依赖。入参不被修改。
     """
-    lo, hi = _aabb_bounds(ent)
-    extents = [float(hi[i]) - float(lo[i]) for i in range(3)]
-    order = sorted(range(3), key=lambda i: extents[i], reverse=True)
+    rows = [[float(v) for v in matrix[i]] + [float(rhs[i])] for i in range(3)]
+    for col in range(3):
+        pivot = max(range(col, 3), key=lambda r: abs(rows[r][col]))
+        if abs(rows[pivot][col]) < _ROT_SINGULAR_EPS:
+            return None
+        rows[col], rows[pivot] = rows[pivot], rows[col]
+        for r in range(3):
+            if r == col:
+                continue
+            factor = rows[r][col] / rows[col][col]
+            for c in range(col, 4):
+                rows[r][c] -= factor * rows[col][c]
+    return [rows[i][3] / rows[i][i] for i in range(3)]
+
+
+def _local_extents(ent):
+    """从世界 AABB 跨度**反求**物体的局部三边长。
+
+    返回 ``(extents, columns, None)``(``extents[k]`` = 局部第 k 轴的边长 m,
+    ``columns[k]`` = 该局部轴在世界系的方向)或 ``(None, None, reason)``。
+
+    依据:一个局部边长为 ``e`` 的长方体按旋转矩阵 ``R`` 摆放后,它的世界轴对齐
+    包围盒在第 j 轴上的跨度是三条局部边在该轴上投影的绝对值之和::
+
+        S_j = Σ_k |R[j][k]| · e_k
+
+    也就是 ``|R| · e = S``。``|R|`` 和 ``S`` 都是已知量,解这一个 3×3 线性系统就
+    把 ``e`` 反求出来了——纯几何,不需要任何物体形状先验。
+
+    这是 8/6 ep3 定位的那个 bug 的正解:旧实现把 ``S`` 的**世界**边序号直接当成
+    **局部**轴序号喂给 ``_local_axis_in_world``,两个索引空间根本不是一回事。只有
+    姿态轴对齐时它们才碰巧相等;三根同资产同姿态、只差 yaw 的平躺管子会被判出三种
+    不同的长轴(实测 86.0° / 8.7° / 拒绝),而正解是三根都一样。
+
+    三处拒绝,都不给静默出口:
+      - 快照读不出 AABB → ``no_aabb``;
+      - 四元数退化(某条旋转列长度为零)→ ``axis_unobserved``;
+      - ``|R|`` 奇异(绕竖直轴恰 45° 这类:世界 AABB 对两条局部边长无信息)或解出
+        负边长(这组 AABB 与 quat 不自洽)→ ``axis_extents_unrecoverable``。
+    """
+    try:
+        lo, hi = _aabb_bounds(ent)
+        spans = [float(hi[i]) - float(lo[i]) for i in range(3)]
+    except Exception:
+        return None, None, "no_aabb"
+    try:
+        columns = [_local_axis_in_world(ent["quat"], k) for k in range(3)]
+    except Exception:
+        return None, None, "axis_unobserved"
+    norms = [math.sqrt(sum(v * v for v in col)) for col in columns]
+    if min(norms) < 1e-9:
+        return None, None, "axis_unobserved"
+    # |R|:第 j 行第 k 列 = 局部 k 轴世界方向的第 j 个分量的绝对值。
+    abs_r = [[abs(columns[k][j]) for k in range(3)] for j in range(3)]
+    extents = _solve3(abs_r, spans)
+    if extents is None or min(extents) < -_EXTENT_NEG_TOL_M:
+        return None, None, "axis_extents_unrecoverable"
+    extents = [max(0.0, v) for v in extents]
+    return extents, [[v / norms[k] for v in columns[k]] for k in range(3)], None
+
+
+def long_axis_world(ent):
+    """实体的**真实长轴**:``(世界系单位向量, 沿该轴的长度 m, None)``
+    或 ``(None, None, reason)``。
+
+    局部边长由 ``_local_extents`` 从世界 AABB 反求;长轴 = 局部边长最大的那根轴,
+    世界方向就是 ``R`` 的对应列。歧义闸判的是**局部**次/主边长比(见
+    ``_AXIS_DOMINANCE_MAX_RATIO``),不是世界跨度比。
+
+    `evaluation.predicates._long_axis_world` 与 `binding._long_axis` 都薄封装本函数
+    (前者转三值 reason,后者转 `UnsolvedHole`),口径只有这一份实现。
+    """
+    extents, columns, reason = _local_extents(ent)
+    if reason is not None:
+        return None, None, reason
+    order = sorted(range(3), key=lambda k: extents[k], reverse=True)
     longest, second = extents[order[0]], extents[order[1]]
     if longest <= 0.0 or second / longest > _AXIS_DOMINANCE_MAX_RATIO:
+        return None, None, "axis_ambiguous_extents"
+    return columns[order[0]], longest, None
+
+
+_LONG_AXIS_REFUSAL_MSG = {
+    "no_aabb": "快照里没有可读的 AABB,长轴无从谈起",
+    "axis_unobserved": "实体四元数退化,长轴方向读不出来",
+    "axis_extents_unrecoverable": (
+        "世界 AABB 反求不出自洽的局部边长(|R| 奇异或解出负边长)"),
+    "axis_ambiguous_extents": "局部边长分不出主方向(近立方/近方形)",
+}
+
+
+def _long_axis(ent, hole):
+    """`long_axis_world` 的 binding 侧封装:拒绝面抛 ``UnsolvedHole``,reason 同名。"""
+    vec, length, reason = long_axis_world(ent)
+    if reason is not None:
         raise UnsolvedHole(
-            f"hole {hole.get('name')!r}: AABB 边长 {extents} 分不出主方向"
-            f"(次/主 = {second / longest if longest > 0 else float('inf'):.3f}"
-            f" > {_AXIS_DOMINANCE_MAX_RATIO})",
-            hole=hole, reason="axis_ambiguous_extents")
-    vec = _local_axis_in_world(ent["quat"], order[0])
-    norm = math.sqrt(sum(item * item for item in vec))
-    if norm < 1e-9:
-        raise UnsolvedHole(
-            f"hole {hole.get('name')!r}: 实体四元数退化,长轴方向读不出来",
-            hole=hole, reason="axis_unobserved")
-    return [item / norm for item in vec], longest
+            f"hole {hole.get('name')!r}: {_LONG_AXIS_REFUSAL_MSG[reason]}",
+            hole=hole, reason=reason)
+    return vec, length
 
 
 # 5 个求解器。签名统一 (hole, stage, constraints, rt) → 句柄 dict。
@@ -511,9 +591,9 @@ def solve_pose_se3(hole, stage, constraints, rt):
 def solve_axis_3d(hole, stage, constraints, rt):
     """axis_3d:方向向量。参照物取自 axis_* / approach_direction 约束。
 
-    长轴由 ``_long_axis`` 从 AABB 最长边推断,不再无条件取物体局部 +z:横躺资产的
-    局部 +z 仍近竖直,拿它当长轴会让下游 ``_grasp_quat`` 的 yaw 跟着噪声抖。
-    物体立着时最长边就是局部 +z,结果与旧实现一致。
+    长轴由 ``_long_axis`` 给出:解 ``|R|·e = S`` 从世界 AABB 反求局部边长,取局部最长
+    边所在的轴。不再无条件取物体局部 +z(横躺资产的局部 +z 仍近竖直,拿它当长轴会让
+    下游 ``_grasp_quat`` 的 yaw 跟着噪声抖),也不再把世界边序号当局部轴序号。
     """
     so = (stage or {}).get("stage_objects") or {}
     av = _constraint(constraints, "axis_vertical")
@@ -539,7 +619,7 @@ def solve_axis_3d(hole, stage, constraints, rt):
     return {"kind": "axis", "hole": hole.get("name"), "vec": vec,
             "frame": "world", "requested_frame": hole.get("frame"),
             "ref": obj, "ref_source": ref_source,
-            "axis_source": "aabb_longest_edge"}
+            "axis_source": "local_extents_from_aabb"}
 
 
 def solve_point_3d(hole, stage, constraints, rt):

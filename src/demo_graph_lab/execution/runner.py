@@ -4,10 +4,16 @@ from __future__ import annotations
 
 from ..evaluation import gates
 
-# 谓词专用输入里,可以从 runtime 自己的调用记录中读出来的三分量世界系向量。
-# region_grasp 要抓取点、approach_direction 要接近方向;gate 不传这两个值时，两条
-# 谓词永远 UNKNOWN(ep1/ep2 两集实测都是这样)。
-_CTX_VECTOR_KEYS = ("grasp_point", "approach_dir")
+# 谓词专用输入里,可以从 runtime 自己的调用记录中读出来的三分量世界系向量:
+# ctx 键名 → 该条记录里装向量的字段名。
+#
+# runtime 的记录形态是 ``{"op": <名字>, **载荷}``(oracle_runtime._log 与
+# policy.fake_runtime._log 都是这一套):抓取点记成 ``{"op":"grasp_point","xyz":[...]}``,
+# 接近方向记成 ``{"op":"approach_dir","dir":[...]}``。名字在 ``op`` 里,向量在
+# ``xyz``/``dir`` 里。8/6 ep3 定位:消费端原先做的是 ``record.get("grasp_point")``,
+# 这个字段在仓里**没有任何生产者**写过,于是 ctx 恒空,region_grasp /
+# approach_direction 两条谓词永远 UNKNOWN(ep1/ep2/ep3 三集实测都是这样)。
+_CTX_VECTOR_OPS = {"grasp_point": "xyz", "approach_dir": "dir"}
 
 
 def _runtime_calls(runtime) -> list:
@@ -29,8 +35,9 @@ def _stage_ctx(runtime, since: int) -> dict:
     """本次 attempt 里 runtime **实际记下**的抓取点与接近方向,交给 gate 当谓词输入。
 
     只看 ``calls[since:]``，也就是本次 attempt 期间新增的记录，取每个键的**最近一次**;
-    上一阶段或上一次 attempt 的值不能拿来给这一阶段验收。值必须是 runtime 在世界系
-    记录的三分量向量,任何别的形态都当作没记(不猜、不换算)。
+    上一阶段或上一次 attempt 的值不能拿来给这一阶段验收。记录按生产端的形态读:
+    ``op`` 字段是名字,向量在 ``_CTX_VECTOR_OPS`` 指定的载荷字段里。值必须是 runtime
+    在世界系记录的三分量向量,任何别的形态都当作没记(不猜、不换算)。
 
     runner 只做搬运:runtime 没记就返回空 ctx，那两条谓词维持既有的 UNKNOWN，
     fail-closed 不放松。
@@ -39,13 +46,13 @@ def _stage_ctx(runtime, since: int) -> dict:
     for record in reversed(_runtime_calls(runtime)[since:]):
         if not isinstance(record, dict):
             continue
-        for key in _CTX_VECTOR_KEYS:
-            if key in ctx:
-                continue
-            vector = _vector3(record.get(key))
-            if vector is not None:
-                ctx[key] = vector
-        if len(ctx) == len(_CTX_VECTOR_KEYS):
+        key = record.get("op")
+        if key not in _CTX_VECTOR_OPS or key in ctx:
+            continue
+        vector = _vector3(record.get(_CTX_VECTOR_OPS[key]))
+        if vector is not None:
+            ctx[key] = vector
+        if len(ctx) == len(_CTX_VECTOR_OPS):
             break
     return ctx
 
