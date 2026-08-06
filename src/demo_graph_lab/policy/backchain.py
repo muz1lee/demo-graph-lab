@@ -51,6 +51,26 @@ def _is_demo_constraint(constraint: dict) -> bool:
     return constraint.get("provenance") != "derived"
 
 
+def _candidate_dependent(constraint: dict, object_id: str) -> bool:
+    """Whether a later constraint can change with the current grasp choice.
+
+    Most such constraints name the manipulated object directly.  Gripper-to-
+    environment clearance is the important indirect case: the rigid grasp
+    transform decides where the gripper ends up relative to the rack even
+    though the constraint arguments say ``gripper`` rather than the tube ID.
+    """
+
+    args = constraint.get("args", {})
+    return (
+        _mentions(args, object_id)
+        or (
+            constraint.get("name") == "clearance"
+            and isinstance(args, dict)
+            and args.get("obj_a") == "gripper"
+        )
+    )
+
+
 def _grasp_holes(stage: dict) -> list[str]:
     return [
         hole["name"]
@@ -116,7 +136,7 @@ def selection_context(graph: dict, *, mode: str = "backchain") -> dict[int, dict
                     later.get("constraints", []),
                     lambda item: (
                         _is_demo_constraint(item)
-                        and _mentions(item.get("args", {}), manipulated)
+                        and _candidate_dependent(item, manipulated)
                     ),
                 ))
         result[index] = {

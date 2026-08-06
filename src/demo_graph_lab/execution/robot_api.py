@@ -95,7 +95,8 @@ def _reshape_flat(flat, joints=JOINTS_PER_WAYPOINT):
 
 def plan_joint_path(rt, arm, q_goal_or_pose, *, q_current=None, q_other_arm=None,
                     planning_mode=None, scene_input="live", scene_camera=None,
-                    data=None, planner_config=None, timeout_s=180.0):
+                    data=None, grasp_item=None, planner_config=None,
+                    timeout_s=180.0):
     """规划一条到目标的关节空间轨迹,返回 PlanResult(N×7 航点)。
 
     以 motion planning 取代 raw IK：底层调 reasoning:motion_planning_stereo。
@@ -113,6 +114,8 @@ def plan_joint_path(rt, arm, q_goal_or_pose, *, q_current=None, q_other_arm=None
       scene_camera   : live 模式相机(head/hand);None → head。
       data           : [pos3,quat4] 名义目标位姿;intent=plan 的 _parse_arm_data 必需。None 时
                        从 info:get_xquat 读当前 EE 位姿作名义值(joint_goal 只作占位,真目标是 q_goal)。
+      grasp_item     : 可选的持物 capsule，定义在 planner TCP frame；只用于抓住物体后的
+                       continuation planning，不应传给 current→grasp 规划。
 
     后端、IK、输入或传输失败时抛出 PlanFailed。
     """
@@ -169,6 +172,8 @@ def plan_joint_path(rt, arm, q_goal_or_pose, *, q_current=None, q_other_arm=None
     }
     if q_goal is not None:
         kwargs["q_goal"] = q_goal
+    if grasp_item is not None:
+        kwargs["grasp_item"] = grasp_item
     if planner_config is not None:
         kwargs["planner_config"] = planner_config
 

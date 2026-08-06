@@ -309,6 +309,8 @@ def test_opening_geometry_is_recomputed_from_rgbd_roi_and_support_plane() -> Non
     assert record["frame"] == "camera_head_optical"
     assert record["unit"] == "meter"
     assert record["metrics"]["depth_contrast_m"] > 0.04
+    assert record["metrics"]["opening_boundary_points"] == 8
+    assert record["metrics"]["opening_inscribed_radius_m"] == pytest.approx(0.01)
 
 
 def test_opening_geometry_accepts_a_protruding_opening_and_keeps_the_sign() -> None:

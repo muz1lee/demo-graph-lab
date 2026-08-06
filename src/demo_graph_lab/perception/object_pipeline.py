@@ -734,9 +734,49 @@ def estimate_planar_opening_geometry(
         return unknown(_OPERATOR_REASONS[error.reason])
     if float(normal @ center) < 0.0:
         normal = -normal
+
+    # Measure a conservative inscribed opening radius from this same mask and
+    # fitted support plane.  Hole depths see the recessed interior, so using
+    # their xyz values would measure the wrong surface.  Instead intersect the
+    # boundary pixel rays with the support plane, then take a low quantile of
+    # their radial distances.  This remains meaningful for mildly non-circular
+    # openings and is deliberately smaller than an enclosing radius.
+    interior = roi_mask.copy()
+    interior[1:-1, 1:-1] &= (
+        roi_mask[:-2, 1:-1]
+        & roi_mask[2:, 1:-1]
+        & roi_mask[1:-1, :-2]
+        & roi_mask[1:-1, 2:]
+    )
+    boundary_rows, boundary_columns = np.nonzero(roi_mask & ~interior)
+    boundary_points = []
+    for row, column in zip(boundary_rows, boundary_columns):
+        try:
+            boundary_points.append(intersect_ray_plane(
+                [
+                    (float(column) - values["cx"]) / values["fx"],
+                    (float(row) - values["cy"]) / values["fy"],
+                    1.0,
+                ],
+                normal=normal,
+                plane_point=plane_center,
+            ))
+        except OperatorError:
+            continue
+    if len(boundary_points) < 4:
+        return unknown("insufficient_opening_boundary")
+    boundary_points = np.asarray(boundary_points, dtype=np.float64)
+    radial = boundary_points - center
+    radial -= np.outer(radial @ normal, normal)
+    radial_distances = np.linalg.norm(radial, axis=1)
+    opening_radius = float(np.quantile(radial_distances, 0.10))
+    if not math.isfinite(opening_radius) or opening_radius <= 0.0:
+        return unknown("opening_radius_is_degenerate")
     metrics.update({
         "roi_center_row": center_row,
         "roi_center_column": center_column,
+        "opening_boundary_points": int(len(boundary_points)),
+        "opening_inscribed_radius_m": opening_radius,
     })
     return PlanarOpeningGeometry(
         status=GeometryStatus.PASS,

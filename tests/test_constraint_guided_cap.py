@@ -4,8 +4,13 @@ from copy import deepcopy
 import json
 from pathlib import Path
 
+import pytest
+
 from demo_graph_lab.policy import ablation
-from demo_graph_lab.execution.planning_runtime import PlanningOnlyRuntime
+from demo_graph_lab.execution.planning_runtime import (
+    NoFeasibleCandidate,
+    PlanningOnlyRuntime,
+)
 from demo_graph_lab.perception import ObjectObservation, ObservationPacket, Proprioception
 from demo_graph_lab.policy.backchain import selection_context
 from demo_graph_lab.policy.program import compile_program, validate_program
@@ -199,6 +204,7 @@ def test_reviewed_insert_tubes_routes_all_three_grasps_through_selection() -> No
         "s5:c1:axis_vertical",
         "s5:c2:axis_parallel",
         "s5:c3:center_align",
+        "s5:c5:clearance",
     ]
 
 
@@ -291,7 +297,7 @@ def _observation() -> ObservationPacket:
     )
 
 
-def _candidate(candidate_id: str, height: float, future: dict[str, str]) -> CandidateBundle:
+def _candidate(candidate_id: str, height: float) -> CandidateBundle:
     return CandidateBundle(
         candidate_id=candidate_id,
         observation_id="obs-1",
@@ -306,7 +312,6 @@ def _candidate(candidate_id: str, height: float, future: dict[str, str]) -> Cand
         features={
             "height_fraction": height,
             "approach_tilt_deg": 0.0,
-            "future_constraints": future,
         },
         evidence_refs=(f"candidates/{candidate_id}.json",),
     )
@@ -329,13 +334,23 @@ def test_generated_constraint_pipeline_rejects_local_best_that_kills_insertion(
 ) -> None:
     future_refs = ("s1:c0:axis_parallel", "s1:c1:inside")
     candidates = (
-        _candidate("local-best", 0.95, {
-            future_refs[0]: "FAIL", future_refs[1]: "PASS",
-        }),
-        _candidate("future-viable", 0.75, {
-            future_refs[0]: "PASS", future_refs[1]: "PASS",
-        }),
+        _candidate("local-best", 0.95),
+        _candidate("future-viable", 0.75),
     )
+
+    def compatibility(candidate, observation, current, future, ref, constraint):
+        status = (
+            CheckStatus.FAIL
+            if candidate.candidate_id == "local-best" and ref == future_refs[0]
+            else CheckStatus.PASS
+        )
+        return CheckCertificate(
+            check=ref,
+            status=status,
+            reason="measured_test_compatibility",
+            evidence_refs=(f"compat/{candidate.candidate_id}-{ref}.json",),
+        )
+
     runtime = PlanningOnlyRuntime(
         _graph(),
         observation_provider=lambda stage: _observation(),
@@ -345,6 +360,7 @@ def test_generated_constraint_pipeline_rejects_local_best_that_kills_insertion(
         )),
         decision_log_path=tmp_path / "decisions.jsonl",
         stage_program=_program(),
+        future_compatibility=compatibility,
     )
     runtime.begin_stage(_graph()["stages"][0])
 
@@ -361,3 +377,33 @@ def test_generated_constraint_pipeline_rejects_local_best_that_kills_insertion(
     assert runtime.decisions[0].ranking_meta["cap_program"][
         "downstream_constraints"
     ] == list(future_refs)
+    future_filter = runtime.decisions[0].ranking_meta["cap_program"][
+        "future_filter"
+    ]
+    assert future_filter[0]["outcomes"]["local-best"]["status"] == "FAIL"
+    assert "future_constraints" not in candidates[0].features
+
+
+def test_require_future_without_evaluator_is_unknown_and_fail_closed(tmp_path: Path) -> None:
+    runtime = PlanningOnlyRuntime(
+        _graph(),
+        observation_provider=lambda stage: _observation(),
+        candidate_provider=lambda stage, observation: (_candidate("only", 0.8),),
+        hard_checks=tuple(_pass_check(name) for name in (
+            "reachability", "collision_free", "gripper_width",
+        )),
+        decision_log_path=tmp_path / "decisions.jsonl",
+        stage_program=_program(),
+    )
+    runtime.begin_stage(_graph()["stages"][0])
+    runtime.begin_candidates("tube_grasp_pose")
+    runtime.require_future("s1:c0:axis_parallel")
+
+    with pytest.raises(NoFeasibleCandidate, match="no candidate"):
+        runtime.choose("tube_grasp_pose")
+
+    outcome = runtime.decisions[0].ranking_meta["cap_program"][
+        "future_filter"
+    ][0]["outcomes"]["only"]
+    assert outcome["status"] == "UNKNOWN"
+    assert outcome["reason"] == "future_compatibility_not_configured"

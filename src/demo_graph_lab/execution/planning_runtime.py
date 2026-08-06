@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from typing import Callable, Iterable, Mapping, Sequence
 
 from ..perception import ObservationPacket
@@ -48,6 +49,10 @@ class OpaqueHandle:
 
 ObservationProvider = Callable[[dict], ObservationPacket]
 CandidateProvider = Callable[[dict, ObservationPacket], Sequence[CandidateBundle]]
+FutureCompatibility = Callable[
+    [CandidateBundle, ObservationPacket, Mapping, Mapping, str, Mapping],
+    CheckCertificate,
+]
 TYPED_BINDING_CHECK = "typed_hole_values"
 
 
@@ -183,6 +188,7 @@ class PlanningOnlyRuntime:
         hard_checks: Sequence[HardCheck],
         decision_log_path: str | Path,
         stage_program: dict | None = None,
+        future_compatibility: FutureCompatibility | None = None,
     ) -> None:
         required_holes_by_stage = None
         explicit_selection_stages: frozenset[int] = frozenset()
@@ -205,6 +211,7 @@ class PlanningOnlyRuntime:
         self._observation_provider = observation_provider
         self._candidate_provider = candidate_provider
         self._hard_checks = tuple(hard_checks)
+        self._future_compatibility = future_compatibility
         self.decision_log_path = Path(decision_log_path)
         self.decisions: list[DecisionTrace] = []
         self._explicit_selection_stages = explicit_selection_stages
@@ -415,7 +422,7 @@ class PlanningOnlyRuntime:
             raise NoFeasibleCandidate(
                 "begin_candidates must run before require_future"
             )
-        stage_index, _ = self._constraint(constraint_ref)
+        stage_index, constraint = self._constraint(constraint_ref)
         if stage_index <= self._active_stage_index:
             raise ValueError(
                 f"require_future needs a later-stage constraint; got {constraint_ref!r}"
@@ -424,10 +431,41 @@ class PlanningOnlyRuntime:
         kept = []
         outcomes = {}
         for candidate in self._selection_pool:
-            support = candidate.features.get("future_constraints", {})
-            status = support.get(constraint_ref) if isinstance(support, Mapping) else None
-            outcomes[candidate.candidate_id] = status or "UNKNOWN"
-            if status == CheckStatus.PASS.value:
+            started = time.perf_counter()
+            if self._future_compatibility is None:
+                certificate = CheckCertificate(
+                    check=constraint_ref,
+                    status=CheckStatus.UNKNOWN,
+                    reason="future_compatibility_not_configured",
+                )
+            else:
+                try:
+                    certificate = self._future_compatibility(
+                        candidate,
+                        self._active_observation,
+                        self._stages[self._active_stage_index],
+                        self._stages[stage_index],
+                        constraint_ref,
+                        constraint,
+                    )
+                except Exception as error:
+                    certificate = CheckCertificate(
+                        check=constraint_ref,
+                        status=CheckStatus.UNKNOWN,
+                        reason=(
+                            "future_compatibility_error:"
+                            f"{type(error).__name__}:{error}"
+                        ),
+                    )
+                if certificate.check != constraint_ref:
+                    raise ValueError(
+                        "future compatibility returned certificate for "
+                        f"{certificate.check!r}, expected {constraint_ref!r}"
+                    )
+            outcome = certificate.to_record()
+            outcome["elapsed_s"] = time.perf_counter() - started
+            outcomes[candidate.candidate_id] = outcome
+            if certificate.status is CheckStatus.PASS:
                 kept.append(candidate)
         self._selection_pool = tuple(kept)
         self._selection_downstream.append(constraint_ref)

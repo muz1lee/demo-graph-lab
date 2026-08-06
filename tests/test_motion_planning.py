@@ -143,6 +143,27 @@ def test_move_quat_none_uses_vertical_pose_as_goal():
     assert plan_kwargs["data"][3:7] == pytest.approx(expected_q)
 
 
+def test_plan_joint_path_forwards_attached_capsule():
+    pipe = MovePipe(_mp_result(), START_XQUAT)
+    rt = _rt(pipe)
+    capsule = {
+        "item_type": "capsule",
+        "length": 0.20,
+        "radius": 0.01,
+        "offset_xyz": [0.0, 0.0, 0.05],
+        "euler_xyz": [0.0, 0.0, 0.0],
+    }
+
+    robot_api.plan_joint_path(
+        rt, 1, REACHED_XQUAT,
+        planning_mode="cartesian_goal", data=REACHED_XQUAT,
+        grasp_item=capsule,
+    )
+
+    plan_kwargs = next(kw for a, n, kw in pipe.calls if n == "motion_planning_stereo")
+    assert plan_kwargs["grasp_item"] == capsule
+
+
 def test_move_falls_back_to_servo_and_books_mp_fallback():
     """规划失败 → 退回手写伺服(xquat_move),且记 mp_fallback(degraded=true),不静默。"""
     pipe = MovePipe(_mp_result(), START_XQUAT, plan_raises=True, reach=REACHED_XQUAT)
