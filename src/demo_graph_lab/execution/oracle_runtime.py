@@ -274,8 +274,21 @@ class OracleRuntime:
         toks = [t for t in base.replace("-", "_").split("_") if t in self._SPATIAL]
         return sum(self._SPATIAL[t] for t in toks)
 
+    # 两个同类实体的 y 相差不到这个量就认为左右分不开(双射无解)。
+    BIJECTION_Y_TOL_M = 0.01
+
     def _family_bijection(self, base: str, ents: dict):
-        """按空间词和 y 坐标稳定匹配同类图对象与场景实体，并缓存结果。"""
+        """同类图对象 ↔ 同类场景实体的空间双射;定不下来时返回 ``None``。
+
+        唯一依据是左右次序:图名一侧按名字里的空间词得分排,实体一侧按 y 排
+        (机器人系 +y 为左)。以下三种情况没有确定的对应关系,一律返回 ``None``
+        让调用方拒绝,不留"取第一个"或"多个图名共用一个实体"的静默出口:
+
+        ① 两侧基数不等——基数不等就不存在双射。旧实现用 ``min(i, len-1)`` 截断,
+           图名多于实体时会把多出来的名字全部塌到最后一个实体;
+        ② 图名的空间得分有并列——并列时次序只能靠字典序决定,那是猜;
+        ③ 实体 y 并列(相差 < ``BIJECTION_Y_TOL_M``)——左右分不开。
+        """
         cat_key = None
         for group in self.SYNONYMS:
             if any(w in base for w in group):
@@ -297,42 +310,83 @@ class OracleRuntime:
         names = [n for n in self._graph_object_names() if _same_cat(n)]
         fam = self._family(base, ents)   # 已按 y 排序(左+y→右-y? 见 _family)
         fam_l2r = sorted(fam, key=lambda e: -ents[e]["pos"][1])   # 左(+y)→右(-y)
-        # 图名按空间得分从左到右排(得分大=左),同名再按字典序稳定
-        names_l2r = sorted(names, key=lambda n: (-self._spatial_key(n.split(".")[0].lower()), n))
-        mapping = {}
-        for i, nm in enumerate(names_l2r):
-            mapping[nm] = fam_l2r[min(i, len(fam_l2r) - 1)] if fam_l2r else None
+        keys = [self._spatial_key(n.split(".")[0].lower()) for n in names]
+        ys = [ents[e]["pos"][1] for e in fam_l2r]
+        mapping = None
+        if (names and len(names) == len(fam_l2r)
+                and len(set(keys)) == len(keys)
+                and all(ys[i] - ys[i + 1] >= self.BIJECTION_Y_TOL_M
+                        for i in range(len(ys) - 1))):
+            # 图名按空间得分从左到右排(得分大=左);得分已保证互异,无需字典序兜底。
+            names_l2r = sorted(
+                names, key=lambda n: -self._spatial_key(n.split(".")[0].lower()))
+            mapping = dict(zip(names_l2r, fam_l2r))
         cache[ckey] = mapping
         return mapping
 
+    def _bijection_hit(self, name: str, base: str, ents: dict):
+        """同类双射里 ``name`` 对应的实体键;双射定不下来或没这个名字 → ``None``。"""
+        mapping = self._family_bijection(base, ents)
+        if not mapping:
+            return None
+        return (mapping.get(name) or mapping.get(base)
+                or mapping.get(str(name).split(".")[0]))
+
     def _resolve(self, name: str) -> str:
         """registry id/物体名 → /state 实体键。
-        启发式顺序:精确 → 别名 → 子串 → **同类双射(空间词)** → 同义词兜底。"""
+        启发式顺序:精确 → 别名 → 子串 → **同类双射(空间词)** → 同义词兜底。
+
+        别名/子串/同义词三个分支只在**唯一命中**时直取。命中多个实体说明这个名字
+        本身分不开(ep1 三根管的 ``trace_aliases`` 都是 ``["tube"]``,取第一个会把
+        ``tube_left/tube_right/tube_third`` 全部塌进 ``tube0_prop``),此时降级到
+        空间双射;双射也定不下来就抛 ``UnsolvedHole``,宁拒绝不静默。
+        """
         ents = self._entities()
         if name in ents:
             return name
         base = str(name).split(".")[0].lower()
+
+        def _pick(candidates, branch):
+            """唯一命中直取;多命中降级到空间双射;双射也定不下来 → 拒绝。"""
+            candidates = sorted(set(candidates))
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                return candidates[0]
+            hit = self._bijection_hit(name, base, ents)
+            if hit is not None:
+                return hit
+            raise binding.UnsolvedHole(
+                f"cannot resolve object {name!r}: {branch} 命中多个实体 "
+                f"{candidates},同类空间双射也定不下来",
+                reason="ambiguous_object_reference")
+
+        alias_candidates = []
         for reg in self.registry:  # registry 的 trace_aliases 桥接
             if reg.get("id", "").lower() == base:
                 for alias in reg.get("trace_aliases", []):
-                    for e in ents:
-                        if alias.lower() in e.lower():
-                            return e
-        for e in ents:  # 子串(如 bowl0 ↔ bowl0_prop)
-            if base in e.lower() or e.lower().replace("_prop", "") in base:
-                return e
+                    alias_candidates.extend(
+                        e for e in ents if alias.lower() in e.lower())
+        hit = _pick(alias_candidates, "trace_alias")
+        if hit:
+            return hit
+        hit = _pick([e for e in ents          # 子串(如 bowl0 ↔ bowl0_prop)
+                     if base in e.lower() or e.lower().replace("_prop", "") in base],
+                    "substring")
+        if hit:
+            return hit
         # 同类双射:名字含空间词、且同类图物体 >=2 个时,用缓存双射拿到唯一实体。
         toks = [t for t in base.replace("-", "_").split("_") if t in self._SPATIAL]
         if toks:
-            mp = self._family_bijection(base, ents)
-            hit = mp.get(name) or mp.get(base) or mp.get(str(name).split(".")[0])
+            hit = self._bijection_hit(name, base, ents)
             if hit:
                 return hit
         for group in self.SYNONYMS:  # 同义词组兜底
             if any(w in base for w in group):
-                for e in ents:
-                    if any(w in e.lower() for w in group):
-                        return e
+                hit = _pick([e for e in ents
+                             if any(w in e.lower() for w in group)], "synonym")
+                if hit:
+                    return hit
         raise KeyError(f"cannot resolve object {name!r} among {sorted(ents)}")
 
     def _ent(self, name: str) -> dict:

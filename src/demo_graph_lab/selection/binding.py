@@ -325,6 +325,44 @@ def _resolve_ref(rt, name):
         return None
 
 
+# world 与 robot_base 重合的判定容差:位置 1 mm、四元数分量 1e-3。
+_BASE_AT_ORIGIN_TOL_M = 1e-3
+_BASE_IDENTITY_TOL = 1e-3
+
+
+def _world_equals_robot_base(rt) -> bool:
+    """断言 oracle 场景里 world 系与 robot_base 系重合。
+
+    只有当实体表里存在**唯一**一个名字含 "robot" 的实体、且它位于世界原点、姿态
+    为单位四元数时才成立;此时 world 系的数值同时也是 robot_base 系的数值。零个
+    或多个候选都返回 ``False``(不猜哪个是根),读不到实体表也返回 ``False``。
+    这条断言只用于特权 oracle 调试路径,不是通用的 frame 变换。
+    """
+    entities = getattr(rt, "_entities", None)
+    if not callable(entities):
+        return False
+    try:
+        table = entities()
+    except Exception:
+        return False
+    hits = [key for key in table if "robot" in str(key).lower()]
+    if len(hits) != 1:
+        return False
+    root = table[hits[0]]
+    if not isinstance(root, Mapping):
+        return False
+    pos, quat = root.get("pos"), root.get("quat")
+    if not _numeric_vector(tuple(pos or ()), 3):
+        return False
+    if not _numeric_vector(tuple(quat or ()), 4):
+        return False
+    if max(abs(float(item)) for item in pos) > _BASE_AT_ORIGIN_TOL_M:
+        return False
+    w, x, y, z = (float(item) for item in quat)       # /state 物体四元数 wxyz
+    return (abs(abs(w) - 1.0) <= _BASE_IDENTITY_TOL
+            and max(abs(x), abs(y), abs(z)) <= _BASE_IDENTITY_TOL)
+
+
 def solve_pose_se3(hole, stage, constraints, rt):
     """pose_se3:抓取/放置位姿。参照物与偏好区带从 region_grasp 约束取;无则回退 stage_objects。
 
@@ -337,9 +375,18 @@ def solve_pose_se3(hole, stage, constraints, rt):
     inside = _constraint(constraints, "inside")
 
     _ROBOT_FRAMES = {"robot_base", "base", "robot", "ee", "end_effector"}
+    _BASE_FRAMES = {"robot_base", "base", "robot"}
     anchor_free = (rg is None and ca is None and inside is None
                    and so.get("manipulated") is None and so.get("target") is None)
-    if str(hole.get("frame", "")).lower() in _ROBOT_FRAMES or anchor_free:
+    requested = str(hole.get("frame", "")).lower()
+    # live 契约要求几何洞 frame=robot_base,但本求解器只会算 world 系数值。
+    # 特权 oracle 调试路径下,若能断言 world 与 robot_base 重合(机器人根实体在原点、
+    # 单位四元数),world 数值同时就是 base 数值,可以给数;断言不成立时维持拒绝,
+    # 绝不无条件放行。ee 系不在此列——末端在动,原点重合断言对它没有意义。
+    world_is_base = (requested in _BASE_FRAMES
+                     and not anchor_free
+                     and _world_equals_robot_base(rt))
+    if (requested in _ROBOT_FRAMES and not world_is_base) or anchor_free:
         return {"kind": "pose", "hole": hole.get("name"), "xyz": None, "quat": None,
                 "frame": hole.get("frame") or "robot_base",
                 "ref": None, "ref_source": "robot_frame"}
@@ -380,10 +427,15 @@ def solve_pose_se3(hole, stage, constraints, rt):
             f"未知 region {region!r};合法(vocab.GRASP_REGIONS):{vocab.GRASP_REGIONS}")
 
     xyz = [x, y, z]
-    return {"kind": "pose", "hole": hole.get("name"), "xyz": xyz, "quat": None,
-            "frame": "world", "requested_frame": hole.get("frame"),
-            "ref": obj, "ref_source": ref_source, "region": region,
-            "region_status": region_status}
+    handle = {"kind": "pose", "hole": hole.get("name"), "xyz": xyz, "quat": None,
+              "frame": "world", "requested_frame": hole.get("frame"),
+              "ref": obj, "ref_source": ref_source, "region": region,
+              "region_status": region_status}
+    if world_is_base:
+        # 数值仍然是 world 系算出来的;能交给 robot_base 洞是因为断言了两系重合。
+        handle["anchor_source"] = ref_source
+        handle["ref_source"] = "world_equals_base_asserted"
+    return handle
 
 
 def solve_axis_3d(hole, stage, constraints, rt):

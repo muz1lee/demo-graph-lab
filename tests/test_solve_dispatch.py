@@ -132,6 +132,99 @@ def test_axis_without_observed_pose_fails_instead_of_guessing_vertical():
     assert error.value.reason == "axis_unobserved"
 
 
+# --------------------------------------------------------------------------
+# robot_base 洞:只有断言 world 与 robot_base 重合时才给数值。
+# 实测背景:live 契约要求几何洞 frame=robot_base,而 solve_pose_se3 见 robot 系
+# 就返回无数值描述子,ep1 的 grasp_at 因此崩在 TypeError,只能靠 shim 绕过。
+# --------------------------------------------------------------------------
+class _EntityTableRuntime:
+    """带可调用 ``_entities()`` 的桩:``_world_equals_robot_base`` 要读实体表。"""
+
+    def __init__(self, table):
+        self.table = table
+
+    def _entities(self, max_age_s=0.0):
+        return self.table
+
+    def _ent(self, name):
+        return self.table[name]
+
+
+def _base_frame_stage():
+    return {
+        "index": 0, "name": "grasp",
+        "stage_objects": {"manipulated": "tube", "target": "rack"},
+        "constraints": [
+            {"name": "center_align", "args": {"obj_a": "tube", "obj_b": "rack"}},
+        ],
+    }
+
+
+def _robot_root(x=0.0, y=0.0, z=0.0, quat=(1.0, 0.0, 0.0, 0.0)):
+    return {"pos": [x, y, z], "quat": list(quat)}
+
+
+def test_robot_base_hole_gets_numbers_when_world_equals_base():
+    """机器人根实体在原点、单位四元数 → world 数值同时就是 base 数值,可以给数。"""
+    rt = _EntityTableRuntime({"robot": _robot_root(),
+                              "rack": _entity(x=1.0, y=2.0, z=3.0)})
+    hole = {"name": "grasp_pose", "type": "pose_se3", "frame": "robot_base"}
+
+    out = binding.solve_hole(hole, _base_frame_stage(),
+                             _base_frame_stage()["constraints"], rt)
+
+    assert out["xyz"] is not None, "断言成立时不得再返回无数值描述子"
+    assert out["xyz"][:2] == [1.0, 2.0]
+    assert out["ref_source"] == "world_equals_base_asserted"
+    assert out["anchor_source"] == "center_align", "锚点来源不能因为改标记而丢失"
+
+
+def test_robot_base_hole_still_refused_when_base_is_offset():
+    """机器人根不在世界原点 → 两系不重合 → 维持拒绝,绝不无条件放行。"""
+    rt = _EntityTableRuntime({"robot": _robot_root(x=0.35),
+                              "rack": _entity(x=1.0, y=2.0, z=3.0)})
+    hole = {"name": "grasp_pose", "type": "pose_se3", "frame": "robot_base"}
+
+    out = binding.solve_hole(hole, _base_frame_stage(),
+                             _base_frame_stage()["constraints"], rt)
+
+    assert out["xyz"] is None and out["ref_source"] == "robot_frame"
+
+
+def test_robot_base_hole_refused_when_root_entity_is_ambiguous():
+    """实体表里多个 "robot" 实体 → 不猜哪个是根 → 维持拒绝。"""
+    rt = _EntityTableRuntime({"robot_left": _robot_root(),
+                              "robot_right": _robot_root(y=0.4),
+                              "rack": _entity()})
+    hole = {"name": "grasp_pose", "type": "pose_se3", "frame": "robot_base"}
+
+    out = binding.solve_hole(hole, _base_frame_stage(),
+                             _base_frame_stage()["constraints"], rt)
+
+    assert out["xyz"] is None and out["ref_source"] == "robot_frame"
+
+
+def test_ee_frame_hole_is_refused_even_when_world_equals_base():
+    """末端在动,原点重合断言对 ee 系没有意义 → 仍拒绝。"""
+    rt = _EntityTableRuntime({"robot": _robot_root(), "rack": _entity()})
+    hole = {"name": "grasp_pose", "type": "pose_se3", "frame": "ee"}
+
+    out = binding.solve_hole(hole, _base_frame_stage(),
+                             _base_frame_stage()["constraints"], rt)
+
+    assert out["xyz"] is None and out["ref_source"] == "robot_frame"
+
+
+def test_robot_base_hole_refused_without_an_entity_table():
+    """拿不到实体表(非 oracle runtime)→ 断言无从做起 → 维持拒绝。"""
+    hole = {"name": "grasp_pose", "type": "pose_se3", "frame": "robot_base"}
+
+    out = binding.solve_hole(hole, _base_frame_stage(),
+                             _base_frame_stage()["constraints"], _StubRuntime())
+
+    assert out["xyz"] is None and out["ref_source"] == "robot_frame"
+
+
 def _stage_with_region(region_label):
     return {
         "index": 0, "name": "grasp",
