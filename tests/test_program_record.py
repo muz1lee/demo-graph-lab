@@ -150,6 +150,60 @@ _REPEAT_PROGRAM = {
     ],
 }
 
+# 同一个 rack 的两个 hole 各占一个 stage:prompt 不同,所以两个程序可以拿到不同的
+# 框,但 object_id 相同——框再像也不是身份冲突。
+_RACK_HOLES = ("left", "right")
+
+_RACK_GRAPH = {
+    "task": "insert_tubes",
+    "stages": [
+        {
+            "index": index,
+            "name": f"insert_{instance}",
+            "stage_objects": {"manipulated": "tube_left", "target": "rack"},
+            "holes": [
+                {
+                    "name": f"rack_{instance}_hole_center",
+                    "type": "point_3d",
+                    "frame": "robot_base",
+                    "solver_hint": f"center of the rack {instance}-hole opening",
+                    "resolver": "part_center",
+                    "anchor": {
+                        "object_id": "rack", "part": "hole", "instance": instance,
+                    },
+                },
+                {
+                    "name": f"rack_{instance}_hole_axis",
+                    "type": "axis_3d",
+                    "frame": "robot_base",
+                    "solver_hint": f"axis of the rack {instance}-hole opening",
+                    "resolver": "part_axis",
+                    "anchor": {
+                        "object_id": "rack", "part": "hole", "instance": instance,
+                    },
+                },
+            ],
+        }
+        for index, instance in enumerate(_RACK_HOLES)
+    ],
+}
+
+_RACK_PROGRAM = {
+    "schema": "demo_graph_lab.perception_program.v1",
+    "task": "insert_tubes",
+    "programs": [
+        {
+            "stage": index,
+            "chain": ["localize", "segment", "fit_opening"],
+            "provides": [
+                {"field": "center", "hole": f"rack_{instance}_hole_center"},
+                {"field": "axis", "hole": f"rack_{instance}_hole_axis"},
+            ],
+        }
+        for index, instance in enumerate(_RACK_HOLES)
+    ],
+}
+
 _TUBES = ("tube_left", "tube_right", "tube_third")
 
 # 今晨那次观测的形状:三根同类管子各占一个 stage,靠 distinguisher 区分。
@@ -387,9 +441,17 @@ class FakeSources:
                 return list(box)
         if prompt not in cls.boxes:
             index = len(cls.boxes)
-            # 默认框互不相同(否则不同 anchor 会假性同框),但都包住 fake mask
-            # (否则会先撞上越框守卫)。
-            cls.boxes[prompt] = [index % 4, 0, width - index // 4, height]
+            # 默认框互不相同,而且两两 IoU 最高只有 0.8、稳在身份守卫的 0.90 之下
+            # (否则不同 anchor 会假性同框);同时都包住 fake mask(否则会先撞上越
+            # 框守卫)。索引 0 是整幅画面,自定义 mask 的用例靠它稳住。
+            assert index < 6, "fixture 只备了 6 个互不混淆的默认框"
+            inset_y = max(1, round(height * 0.125)) * (index % 2)
+            cls.boxes[prompt] = [
+                max(1, round(width * 0.2)) * (index // 2),
+                inset_y,
+                width,
+                height - inset_y,
+            ]
         return list(cls.boxes[prompt])
 
     class QwenGroundingClient:
@@ -831,7 +893,134 @@ def test_morning_shared_box_between_tube_right_and_tube_third(tmp_path) -> None:
         assert envelope["reason"] == "grounding_identity_collision"
         assert envelope["failed_step"] == "localize"
         assert envelope["collides_with"] == [peer]
-    assert results["holes"]["s0.tube_left_long_axis"]["status"] == "PASS"
+        # 逐元素相等的老路径:判定依据记 exact,IoU 自然是 1.0。
+        assert envelope["collision_basis"] == {peer: {"match": "exact", "iou": 1.0}}
+    left = results["holes"]["s0.tube_left_long_axis"]
+    assert left["status"] == "PASS"
+    assert left["collision_basis"] == {}
+
+
+def _tube_pair(tmp_path, right_box, third_box):
+    """Run the three-tube document with the two right-hand queries pinned."""
+
+    root, _, program_path = _run(
+        tmp_path,
+        graph=_TUBE_GRAPH,
+        document=_TUBE_PROGRAM,
+        objects=_TUBE_OBJECTS,
+        hole_name="tube_left_long_axis",
+        # 与今晨那条回归同规:头相机画幅 + 细长 mask,PCA 才解得出明确主轴。
+        # mask 落在两个框的公共部分里,免得先撞上越框守卫。
+        shape=(720, 1280),
+        mask_bounds=(285, 345, 960, 980),
+        box_overrides=(
+            ("the right tube", list(right_box)),
+            ("the third tube", list(third_box)),
+        ),
+    )
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+    results = _results(root)
+    return (
+        results["holes"]["s1.tube_right_long_axis"],
+        results["holes"]["s2.tube_third_long_axis"],
+        results["holes"]["s0.tube_left_long_axis"],
+    )
+
+
+def test_one_pixel_apart_boxes_still_demote_each_other(tmp_path) -> None:
+    """2026-08-06 首测实跑的回归:Qwen 给 `tube_right` 与 `tube_third` 的框是
+    `[935,279,1039,349]` 与 `[935,279,1039,348]`——只差 1 个像素、压在同一根物理管
+    上(overlay 目视 + 两条链解出的轴几乎相同佐证),而当时逐元素精确相等的判据静默
+    放行,靠人工 identity-accept 才挡下来。模型产出的是近重复框,不是重复框。
+    """
+
+    right_box = [935, 279, 1039, 349]
+    third_box = [935, 279, 1039, 348]
+    right, third, left = _tube_pair(tmp_path, right_box, third_box)
+    for envelope, peer in ((right, "p2_2"), (third, "p1_1")):
+        assert envelope["status"] == "UNKNOWN"
+        assert envelope["value"] is None
+        assert envelope["reason"] == "grounding_identity_collision"
+        assert envelope["failed_step"] == "localize"
+        assert envelope["collides_with"] == [peer]
+        basis = envelope["collision_basis"][peer]
+        assert basis["match"] == "iou"
+        # 7176 / 7280:实测的那个数,判定依据留在产物里可审计。
+        assert round(basis["iou"], 4) == 0.9857
+    assert left["status"] == "PASS"
+
+
+def test_boxes_just_over_the_threshold_demote_each_other(tmp_path) -> None:
+    # 74/81 = 0.9136:刚过阈值,判 UNKNOWN。
+    right, third, left = _tube_pair(
+        tmp_path, [930, 279, 1011, 483], [930, 279, 1004, 483]
+    )
+    for envelope, peer in ((right, "p2_2"), (third, "p1_1")):
+        assert envelope["status"] == "UNKNOWN"
+        assert envelope["value"] is None
+        assert envelope["reason"] == "grounding_identity_collision"
+        assert envelope["collision_basis"][peer]["match"] == "iou"
+    assert left["status"] == "PASS"
+
+
+def test_boxes_just_under_the_threshold_both_publish(tmp_path) -> None:
+    # 72/81 = 0.8889:差一点点就到阈值,但没到,两边照发。
+    right, third, left = _tube_pair(
+        tmp_path, [930, 279, 1011, 483], [930, 279, 1002, 483]
+    )
+    for envelope in (right, third, left):
+        assert envelope["status"] == "PASS"
+        assert envelope["collides_with"] == []
+        assert envelope["collision_basis"] == {}
+
+
+def test_half_overlapping_boxes_of_two_objects_are_not_touched(tmp_path) -> None:
+    # 40/80 = 0.5:两个真不同的物体,框挨着也不该被守卫误伤。
+    right, third, left = _tube_pair(
+        tmp_path, [930, 279, 1010, 483], [950, 279, 990, 483]
+    )
+    for envelope in (right, third, left):
+        assert envelope["status"] == "PASS"
+        assert envelope["collides_with"] == []
+        assert len(envelope["value"]) == 3
+
+
+def test_one_object_two_parts_on_near_duplicate_boxes_still_passes(tmp_path) -> None:
+    # 同一个 rack 的两个 hole 各被一个程序问一次:prompt 不同、框近重复(IoU 恰好
+    # 0.9,压在阈值上),但 object_id 相同,不是身份冲突,守卫不许动它们。
+    root, _, program_path = _run(
+        tmp_path,
+        graph=_RACK_GRAPH,
+        document=_RACK_PROGRAM,
+        hole_name="rack_left_hole_center",
+        box_overrides=(
+            ("left hole", [0, 0, _WIDTH, _HEIGHT]),
+            ("right hole", [1, 0, _WIDTH, _HEIGHT]),
+        ),
+    )
+
+    programs_record(
+        root,
+        perception_program_path=program_path,
+        allow_model_read=True,
+        source_module=FakeSources,
+        qwen_token="test-secret",
+    )
+
+    results = _results(root)
+    boxes = [item["bbox_pixel"] for item in results["programs"]]
+    assert boxes == [[0, 0, _WIDTH, _HEIGHT], [1, 0, _WIDTH, _HEIGHT]]
+    assert len(results["holes"]) == 4
+    for envelope in results["holes"].values():
+        assert envelope["status"] == "PASS"
+        assert envelope["collides_with"] == []
+        assert envelope["object_id"] == "rack"
 
 
 def test_a_collided_program_keeps_its_own_earlier_failure_reason(tmp_path) -> None:

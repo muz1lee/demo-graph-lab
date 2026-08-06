@@ -18,12 +18,15 @@ every hole that program provides, with a machine-readable reason and the evidenc
 produced so far.  Partial success would let a caller believe a hole was filled.
 
 Identity is judged across programs too, not only inside one.  Two programs
-anchored on different graph objects that accept the element-wise identical pixel
-box have not identified either object — one box cannot be two objects — so every
-program on that box publishes ``UNKNOWN`` even when its chain finished and a
-value exists.  One object queried by several programs is the normal case and is
-left alone.  Without this the run stays silently wrong: the second object's holes
-receive a value measured on the first object's pixels.
+anchored on different graph objects that accept the same pixel box have not
+identified either object — one box cannot be two objects — so every program on
+that box publishes ``UNKNOWN`` even when its chain finished and a value exists.
+"The same box" is element-wise identical *or* overlapping by at least
+``IDENTITY_COLLISION_IOU``: a model that cannot tell two queries apart returns a
+near-duplicate box, not a duplicate one.  One object queried by several programs
+is the normal case and is left alone.  Without this the run stays silently
+wrong: the second object's holes receive a value measured on the first object's
+pixels.
 """
 
 from __future__ import annotations
@@ -90,6 +93,12 @@ _PASS = "PASS"
 _UNKNOWN = "UNKNOWN"
 _TOP_K = 2
 _COLLISION_REASON = "grounding_identity_collision"
+# 两个框算「同一份证据」的重叠阈值。数值来自证据两侧,不是拍的:2026-08-06 的实跑
+# 里 Qwen 给 `tube_right` 与 `tube_third` 的框是 `[935,279,1039,349]` 与
+# `[935,279,1039,348]`——只差 1 个像素、IoU 0.9857,overlay 目视与两条链解出的轴都
+# 确认那就是同一根管子,而当时逐元素精确相等的判据放行了它;另一侧是几何常识:两个
+# 不同物体的框即使紧邻,重叠也远达不到 0.9。0.90 卡在这两簇之间。
+IDENTITY_COLLISION_IOU = 0.90
 
 _PROGRAM_ARTIFACTS = {
     "program_results": "program_results.json",
@@ -696,32 +705,54 @@ def _execute_program(scene: _Scene, directory: Path, offset: int,
     }
 
 
-def _identity_collisions(summaries: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Map each program to the other programs that accepted its exact box.
+def _box_iou(left: list[int], right: list[int]) -> float:
+    """Intersection over union of two half-open pixel boxes."""
+
+    ax0, ay0, ax1, ay1 = left
+    bx0, by0, bx1, by1 = right
+    width = min(ax1, bx1) - max(ax0, bx0)
+    height = min(ay1, by1) - max(ay0, by0)
+    if width <= 0 or height <= 0:
+        return 0.0
+    intersection = width * height
+    union = (ax1 - ax0) * (ay1 - ay0) + (bx1 - bx0) * (by1 - by0) - intersection
+    return 0.0 if union <= 0 else intersection / union
+
+
+def _identity_collisions(
+    summaries: list[dict[str, Any]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Map each program to the peers resting on the same grounding evidence.
 
     One pixel box cannot be two graph objects at once.  When programs anchored on
-    different ``object_id`` accept element-wise identical boxes, the grounding
-    evidence stops telling those objects apart, so none of them may publish.  The
-    comparison is exact and parameter-free on purpose: no overlap threshold is
-    involved, only the case where two identities rest on literally one piece of
-    evidence.  Programs repeating one ``object_id`` are the normal case — the same
-    anchor may legitimately be queried by several programs — and never collide.
+    different ``object_id`` accept the same box, the grounding evidence stops
+    telling those objects apart, so none of them may publish.  "The same box"
+    means element-wise identical **or** ``IoU >= IDENTITY_COLLISION_IOU``: what a
+    model returns for two queries it cannot tell apart is a near-duplicate box,
+    not a duplicate one, and the exact-only test let a 1-pixel difference through
+    on real data.  Programs repeating one ``object_id`` are the normal case — the
+    same anchor may legitimately be queried by several programs — and never
+    collide.  The relation is judged pairwise; each pair records how it was
+    decided so the verdict can be audited without recomputing it.
     """
 
-    by_box: dict[tuple[int, ...], list[dict[str, Any]]] = {}
-    for summary in summaries:
-        box = summary["bbox_pixel"]
-        if box is not None:
-            by_box.setdefault(tuple(box), []).append(summary)
-    collisions: dict[str, list[str]] = {}
-    for members in by_box.values():
-        if len({item["anchor"]["object_id"] for item in members}) < 2:
-            continue
-        for item in members:
-            collisions[item["program"]] = sorted(
-                other["program"] for other in members
-                if other["program"] != item["program"]
-            )
+    grounded = [item for item in summaries if item["bbox_pixel"] is not None]
+    collisions: dict[str, dict[str, dict[str, Any]]] = {}
+    for index, item in enumerate(grounded):
+        for other in grounded[index + 1:]:
+            if item["anchor"]["object_id"] == other["anchor"]["object_id"]:
+                continue
+            box, peer_box = item["bbox_pixel"], other["bbox_pixel"]
+            iou = _box_iou(box, peer_box)
+            if box == peer_box:
+                match = "exact"
+            elif iou >= IDENTITY_COLLISION_IOU:
+                match = "iou"
+            else:
+                continue
+            basis = {"match": match, "iou": iou}
+            collisions.setdefault(item["program"], {})[other["program"]] = basis
+            collisions.setdefault(other["program"], {})[item["program"]] = dict(basis)
     return collisions
 
 
@@ -747,14 +778,17 @@ def _apply_identity_collisions(summaries: list[dict[str, Any]],
         "failed_step": "localize",
     }
     for summary in summaries:
-        peers = collisions.get(summary["program"], [])
-        # 没撞的程序也带这个字段:结果的 key 集合不随判定结果变化。
-        summary["collides_with"] = peers
+        peers = collisions.get(summary["program"], {})
+        # 没撞的程序也带这两个字段:结果的 key 集合不随判定结果变化。
+        summary["collides_with"] = sorted(peers)
+        # 判定依据跟着判定走:审计时不必拿两个框回头重算一遍 IoU。
+        summary["collision_basis"] = {name: peers[name] for name in sorted(peers)}
         if peers and summary["status"] == _PASS:
             summary.update(refusal)
     for envelope in holes.values():
-        peers = collisions.get(envelope["program"], [])
-        envelope["collides_with"] = peers
+        peers = collisions.get(envelope["program"], {})
+        envelope["collides_with"] = sorted(peers)
+        envelope["collision_basis"] = {name: peers[name] for name in sorted(peers)}
         # 已经因为自己链上的失败记 UNKNOWN 的程序保留原 reason:那是更具体的事实,
         # 冲突本身另有 collides_with 记账。
         if peers and envelope["status"] == _PASS:

@@ -314,7 +314,8 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
  "calibration_ref": "<...>/calibration/bundle.json", "object_id": "tube_mid",
  "identity_status": "MODEL_PROPOSED", "status": "PASS",
  "reason": "pca_dominant_axis", "failed_step": null,
- "evidence_refs": ["<...>"], "program": "p0_0", "collides_with": []}
+ "evidence_refs": ["<...>"], "program": "p0_0", "collides_with": [],
+ "collision_basis": {}}
 ```
 
 `frame` 如实写测量所在的相机光学系。执行器**不做**任何 frame 变换，所以把它的 envelope 直接喂给 typed-hole 校验仍然会因 frame 不一致被拒——这是设计意图，不是缺陷。真正的变换是第 7 节那个独立的本地步骤，它需要额外输入（外参记录 + 与该次 observation 同时刻的 `q_lift`）；把 optical 数值改标签成 `robot_base` 依然是错误。identity 一律 `MODEL_PROPOSED`，执行器不做任何自动接受。
@@ -323,7 +324,9 @@ v1 只有线性链，算子闭集如下，`consumes/produces` 是链上流动的
 
 ### 跨程序身份守卫
 
-上面那些守卫都在一个程序内部生效，因此拦不住这一类污染：同一次 observation 内，两个 `object_id` 不同的程序接受了**逐元素相同**的 `bbox_pixel`。此时这个框没有识别出其中任何一个对象（一个框不可能同时是两个 graph object），落在它上面的几何值来自哪个物体无从判断，所以同框的程序**全部**记 `UNKNOWN`、`value=null`、`reason=grounding_identity_collision`、`failed_step=localize`（被判定的正是 `localize` 交出的那个框），并在 envelope 与 program 摘要的 `collides_with` 里互相点名。判定精确相等、无参数：不用 IoU、不设阈值，只处理「两个身份压在同一份证据上」这一种情形。同一个 `object_id` 被多个程序各查一次而命中同一个框是**合法**的——一个 anchor 本来就可以被多条链观测——不受影响。
+上面那些守卫都在一个程序内部生效，因此拦不住这一类污染：同一次 observation 内，两个 `object_id` 不同的程序接受了**同一个** `bbox_pixel`。此时这个框没有识别出其中任何一个对象（一个框不可能同时是两个 graph object），落在它上面的几何值来自哪个物体无从判断，所以同框的程序**全部**记 `UNKNOWN`、`value=null`、`reason=grounding_identity_collision`、`failed_step=localize`（被判定的正是 `localize` 交出的那个框），并在 envelope 与 program 摘要的 `collides_with` 里互相点名。
+
+「同一个框」指**逐元素相同，或者 IoU ≥ `IDENTITY_COLLISION_IOU = 0.90`**：模型分不清两个查询时交出的是**近重复框**而不是重复框（2026-08-06 实测 1 像素之差、IoU 0.9857 压在同一根管上），所以判据必须容得下这点抖动；阈值另一侧是几何常识——两个不同物体的框即使紧邻，重叠也远达不到 0.9。判定逐对做，每一对把依据写进 `collision_basis`（`{"<peer>": {"match": "exact"|"iou", "iou": <float>}}`，没撞的程序是 `{}`），审计时不必拿两个框回头重算。同一个 `object_id` 被多个程序各查一次而命中同一个框（哪怕框近重复）是**合法**的——一个 anchor 本来就可以被多条链观测——不受影响。
 
 判定在全部程序执行完、写 `program_results.json` 之前做一次，所以「先发布后被撞」与「先被撞后发布」两个方向对称，与文档里的程序顺序无关。已经因为自己链上失败记了 `UNKNOWN` 的程序保留它自己的 reason（更具体的事实），冲突只由 `collides_with` 记账。`programs/p<stage>_<index>/` 下的产物**照原样保留**：链确实跑完了，那份记录正是这条判定的证据，降级只发生在 envelope 与 program 摘要上。program 摘要另外记下被接受的 `bbox_pixel`，让判定与它依据的证据出现在同一份文件里。
 
