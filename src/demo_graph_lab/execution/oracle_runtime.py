@@ -37,6 +37,11 @@ APPROACH_AXIS_IDX = 2
 FINGER_AXIS_IDX = 1
 CLAW_TIP_DZ = -0.010
 
+# 抓取到位后仍可接受的笛卡尔 xy 残差(mm);超过则试另一个 IK 分支(见 _retry_flipped_branch)。
+# 来源:8/6 v4 单世界栈实测——同一个物理抓取,默认分支 xy 误差 15.3 mm、最小关节裕度
+# 0.297 rad;绕工具接近轴翻转 180° 后 3.6 mm、0.700 rad。阈值取两次实测之间。
+GRASP_XY_RETRY_MM = 8.0
+
 SERVO_STEP_M, SERVO_STEP_DEG = 0.05, 14.0
 SERVO_POS_TOL, SERVO_ROT_TOL = 0.015, 8.0
 MP_MIN_DIST_M = 2 * SERVO_STEP_M
@@ -96,6 +101,18 @@ def _tool_axes(q):
 def _tdx(psi_deg):
     """竖直朝下 + 绕接近轴(工具 +z)把开合方向转 psi。"""
     return _qnorm(_qmul(TDX0, _qaxis([0, 0, 1], psi_deg)))
+
+
+def _flip_about_approach(q):
+    """绕**工具**接近轴转 180°:得到同一个物理抓取的另一个 IK 分支。
+
+    平行夹爪两指对称,yaw 与 yaw+180 描述的是同一次抓取(指轴同一条直线、只是两指
+    互换),但对 IK 是两个不同的解。合成方向必须**右乘**,与 `_tdx` 的
+    `_qmul(TDX0, Rz)` 是同一套工具系约定;左乘会变成绕世界轴转,那是另一个姿态。
+    """
+    axis = [0.0, 0.0, 0.0]
+    axis[APPROACH_AXIS_IDX] = 1.0
+    return _qnorm(_qmul(list(q), _qaxis(axis, 180.0)))
 
 
 def _topdown_like(q):
@@ -706,11 +723,49 @@ class OracleRuntime:
         self._step_to(xyz)
         return self._move(xyz)
 
+    def _xy_err_mm(self, xyz):
+        """当前 EEF 与目标点的**水平**残差(mm)。z 另有下探与爪尖补偿,不进这个判据。"""
+        p, _ = self._cur_xquat()
+        return math.hypot(p[0] - xyz[0], p[1] - xyz[1]) * 1000.0
+
+    def _retry_flipped_branch(self, eef, quat):
+        """抓取到位残差过大时,换 IK 的另一个分支重试一次,停在实测更好的那支。
+
+        触发判据只用**到位后实测的 xy 残差**,不查关节裕度:仓内没有限位表,
+        重试-on-error 是零新依赖的 v1。拿到限位表后可升级成"先比最小关节裕度、
+        再决定用哪支",那样能省掉一次移动(8/6 v4 实测里裕度差了一倍:
+        0.297 rad vs 0.700 rad,比 xy 残差更早可判)。
+        """
+        err = self._xy_err_mm(eef)
+        if err <= GRASP_XY_RETRY_MM:
+            self._log("grasp_branch", branch="default", retried=False,
+                      xy_err_mm=round(err, 1))
+            return
+        flipped = _flip_about_approach(quat)
+        self._move(eef, quat=flipped, gpos=GRIP_OPEN)
+        err_flipped = self._xy_err_mm(eef)
+        if err_flipped < err:
+            self._log("grasp_branch", branch="flipped", retried=True,
+                      xy_err_mm=round(err_flipped, 1),
+                      default_xy_err_mm=round(err, 1),
+                      flipped_xy_err_mm=round(err_flipped, 1),
+                      reason="xy_err_over_threshold")
+            return
+        # 翻转分支更差:退回默认分支,不在更差的构型上闭爪。
+        self._move(eef, quat=quat, gpos=GRIP_OPEN)
+        self._log("grasp_branch", branch="default", retried=True, restored=True,
+                  xy_err_mm=round(self._xy_err_mm(eef), 1),
+                  default_xy_err_mm=round(err, 1),
+                  flipped_xy_err_mm=round(err_flipped, 1),
+                  reason="flip_not_better")
+
     def grasp_at(self, grasp_pose, axis=None):
         """grasp_pose 给的是**爪尖**要到的世界点;EEF 帧要比它高 CLAW_TIP_DZ。
 
         若提供物体长轴 ``axis``，工具开合方向与其水平投影正交。轴缺失或
         近竖直时保持当前腕姿，并在无法消费参数时记录 UNSUPPORTED。
+        下探到位后 xy 残差超过 ``GRASP_XY_RETRY_MM`` 时翻转一次 IK 分支再闭爪，
+        见 ``_retry_flipped_branch``。
         """
         xyz = list(grasp_pose["xyz"]) if isinstance(grasp_pose, dict) else list(grasp_pose)
         eef = [xyz[0], xyz[1], xyz[2] + CLAW_TIP_DZ]
@@ -725,6 +780,7 @@ class OracleRuntime:
         else:
             self._log("grasp_axis", why=why, quat=[round(v, 4) for v in gq])
         self._move(eef, quat=gq, gpos=GRIP_OPEN)  # 下探时锁住抓取腕姿,只走 z
+        self._retry_flipped_branch(eef, gq)       # xy 残差过大 → 试对称的另一个 IK 分支
         # !! 参数名只能是 angle:gpos 传给 set_gripper 会被静默丢弃且仍回 ok=True。
         # 开合方向见模块顶部 GRIP_* 注释:
         # 闭合 = 往 **更小** 的 angle 走,GRIP_CLOSE=0 才是全闭。
