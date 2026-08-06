@@ -27,6 +27,11 @@ LOWER_STEP, LOWER_MAX_STEPS = 0.02, 12
 GRIP_OPEN, GRIP_CLOSE = 100.0, 0.0  # Pipeline convention: 100=open, 0=closed.
 GRIP_CLOSE_TUBE = GRIP_CLOSE
 GRIP_SETTLE_S = 4.0
+# lift 的闭环参数(语义 = 「抬到目标高度」,不是「发够步数」;见 `lift`)。
+LIFT_TOL_M = 0.005          # 达标容差:剩余量 ≤ 5 mm 即收敛退出
+LIFT_MAX_ITERS = 12         # 迭代上限;到顶仍未收敛按实得高度如实记账,不假装成功
+LIFT_STEP_MAX_M = LIFT_DZ   # 单步指令上限:读数异常导致剩余量爆掉时不发超过一次标称抬升
+LIFT_CREEP_S = 1.5          # _wait_settle 返回后还会继续爬 1.3-1.9 mm,额外短等吸收
 IDLE_ARM = {0: 1, 1: 0}
 CONTACT_FORCE_N = 20.0
 LIFT_LOAD_FORCE_N = CONTACT_FORCE_N / 4.0
@@ -799,20 +804,45 @@ class OracleRuntime:
                   angle=self._grip_angle(), gripping=self._is_gripping())
 
     def lift(self, obj):
-        """分小步抬升，并用非特权信号记录夹持证据。
+        """闭环抬升到 ``LIFT_DZ``，并用非特权信号记录夹持证据。
+
+        语义是**达到目标高度**，不是「发够步数」:每轮回读 EEF 高度(非特权
+        ``get_xquat``)算出剩余量,剩余量 ≤ ``LIFT_TOL_M`` 即收敛退出,否则按剩余量
+        再发一条 ``delta_move``;到 ``LIFT_MAX_ITERS`` 仍未收敛就按实得高度如实记账
+        (``converged=False`` + ``iters``),不假装成功。
+
+        **为什么必须闭环**:8/6 v4 实测,上游控制器每条 ``delta_move`` 只交付约
+        **74%** 的指令量,空载与带载相同(负载无关 → 证伪了「重力把手臂压下去」的假设),
+        而且渐近停住——一条指令发完就不再动了。因此固定步数的开环必然欠冲。按 74%
+        交付率,剩余量每轮乘 0.26,几何收敛;实测 6 次迭代到位(轨迹 0 → 42.9 → 85.0
+        → 93.9 → 94.8 → 94.9 → 95.0 mm)。**根因在上游控制器**,这里不改上游,只在
+        我方语义层把「抬到目标高度」兜住。
 
         控制回路不读取特权实体位姿，只使用 EEF 上移量、末端外力和夹持回读。
         ``obj`` 仅用于日志，不参与控制判定。无法读取证据时保持 UNKNOWN。
         """
-        p0, _ = self._cur_xquat()
+        p0, q0 = self._cur_xquat()
         f0 = self._ee_extforce_max()
-        n = max(1, int(round(LIFT_DZ / 0.02)))
-        for _ in range(n):
-            before = self._cur_xquat()
-            self._ctrl("delta_move", delta_xyz=[0, 0, 0.02])
+        cur = (p0, q0)
+        iters = 0
+        while iters < LIFT_MAX_ITERS:
+            remaining = LIFT_DZ - (cur[0][2] - p0[2])
+            if abs(remaining) <= LIFT_TOL_M:
+                break
+            step = max(-LIFT_STEP_MAX_M, min(LIFT_STEP_MAX_M, remaining))
+            self._ctrl("delta_move", delta_xyz=[0, 0, round(step, 4)])
             self._wait_settle(timeout_s=10.0)
-            self._verify_moved(before, op="lift")
-        p1, _ = self._cur_xquat()
+            # _wait_settle 判静止后末端还会继续爬 1.3-1.9 mm;不吸收这段会把未完成的
+            # 运动记成「已达高度」,下一轮的剩余量就是错的。
+            time.sleep(LIFT_CREEP_S)
+            self._verify_moved(cur, op="lift")
+            cur = self._cur_xquat()             # 本轮实得,也是下一轮算剩余量的基准
+            iters += 1
+            self._log("lift_step", i=iters, cmd_dz=round(step, 4),
+                      achieved_dz=round(cur[0][2] - p0[2], 4),
+                      remaining_dz=round(LIFT_DZ - (cur[0][2] - p0[2]), 4))
+        p1 = cur[0]
+        converged = abs(LIFT_DZ - (p1[2] - p0[2])) <= LIFT_TOL_M
         f1 = self._ee_extforce_max()
         ee_dz = p1[2] - p0[2]                       # 非特权:末端自身上移量(不看物体)
         ee_rose = ee_dz >= SERVO_PROGRESS_EPS_M     # 指令是否真执行(派生自伺服进展容差)
@@ -833,6 +863,7 @@ class OracleRuntime:
         else:
             attached, reason = "empty", "ee_rose_no_load"
         self._log("lift_done", obj=str(obj), ee_dz=round(ee_dz, 4),
+                  target_dz=LIFT_DZ, converged=converged, iters=iters,
                   load_n=None if load is None else round(load, 1),
                   gripping=grip, grip_angle=self._grip_angle(),
                   attached=attached, reason=reason)

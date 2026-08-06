@@ -15,7 +15,16 @@ GT 防火墙要求特权量不得进入 lift/lower_until 的停止判据。
 
 import time
 
+import pytest
+
+from demo_graph_lab.execution import oracle_runtime
 from demo_graph_lab.execution.oracle_runtime import LIFT_LOAD_FORCE_N, OracleRuntime
+
+
+@pytest.fixture(autouse=True)
+def _no_creep_wait(monkeypatch):
+    """离线测试里把 lift 每轮的爬升吸收等待置零(真实值 1.5 s,见 LIFT_CREEP_S)。"""
+    monkeypatch.setattr(oracle_runtime, "LIFT_CREEP_S", 0.0)
 
 
 # --------------------------------------------------------------------------
@@ -37,6 +46,9 @@ def _rt(entities=None, force=0.0, ee_z_trajectory=None, probes=None):
     force           : get_ee_extforce 返回的标量力(N),lift/lower_until 都读它。
     ee_z_trajectory : _cur_xquat 每次调用返回的 z 序列(非特权 EEF 高度);
                       None → 恒定 z(无位移)。用列表模拟抬升/下探的真实 EEF 轨迹。
+                      lift 闭环每轮回读一次高度(外加进入循环前的一次基准读),
+                      所以序列的第 n+1 项就是第 n 轮迭代的实得高度;耗尽后停在末值
+                      = 「机器人不动了」,闭环会走满迭代预算并如实记 converged=False。
     probes          : probes() 返回值(仅用于探测方法路径是否偷调它;应全程为空触碰)。
     """
     g = {"stages": [{"index": 0, "name": "lift", "holes": [], "stage_objects": {}}]}
@@ -112,12 +124,15 @@ def test_lift_blind_to_privileged_displacement():
     assert rec["reason"] == "ee_did_not_rise"
     # 记账里绝不出现「读了物体位姿」的痕迹:ee_dz 是非特权 EEF 量,不是 obj 位移。
     assert "obj_dz" not in rec, "去特权后不得再记特权 obj_dz"
+    # 非特权高度纹丝不动 → 闭环走满预算且如实记未收敛(特权位移不得把它救成收敛)。
+    assert rec["converged"] is False and rec["ee_dz"] == 0.0
 
 
 def test_lift_attached_from_nonprivileged_load():
     """真非特权证据齐(EEF 确有上移 + 残余负载 ≥ 阈值)→ attached='likely'。
     证明判据不是恒 UNKNOWN,而是被非特权信号驱动。"""
-    # EEF 从 0.80 一路升到 0.92(上移 0.12m,超过进展容差);力值给足残余负载。
+    # EEF 每轮升 0.02,第 6 轮到 0.92(总上移 0.12m = LIFT_DZ,闭环在此收敛);
+    # 力值给足残余负载。
     traj = [0.80] + [0.80 + 0.02 * i for i in range(1, 8)]
     rt = _rt(entities={"tube": _entity()}, force=LIFT_LOAD_FORCE_N + 5.0,
              ee_z_trajectory=traj)
@@ -125,6 +140,8 @@ def test_lift_attached_from_nonprivileged_load():
     rec = _find(rt, "lift_done")[0]
     assert rec["attached"] == "likely", f"非特权证据齐应判 likely,实得 {rec}"
     assert rec["reason"] == "ee_rose_and_loaded"
+    assert rec["converged"] is True and rec["iters"] == 6, \
+        f"达到目标高度即收敛退出,不再发多余指令,实得 {rec}"
 
 
 def test_lift_empty_when_ee_rose_but_no_load():
