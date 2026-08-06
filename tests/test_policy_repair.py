@@ -439,7 +439,10 @@ def test_prompt_carries_the_closed_set_the_program_and_only_the_summary(
     prompt = prompts[0]["prompt"]
     assert prompts[0]["tag"] == "repair_r1"
     # 原语闭集从代码渲染,prompt 里不手写第二份。
-    for primitive in ("approach", "grasp_at", "lower_until", "retreat"):
+    # reorient_held_axis 是模型提案入库的原语;它进 prompt 靠的是同一套代码渲染,
+    # 不靠有人记得往 prompt 里补一行。
+    for primitive in ("approach", "grasp_at", "reorient_held_axis",
+                      "lower_until", "retreat"):
         assert f"| `{primitive}` |" in prompt
     assert "hole `purpose` must be `lower_stop`" in prompt
     # 当前程序、失败判据与调用尾巴在;整份报告不在。

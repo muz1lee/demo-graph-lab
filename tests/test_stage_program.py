@@ -36,6 +36,7 @@ def _graph() -> dict:
                     {"name": "retract_pose", "type": "pose_se3",
                      "solver_hint": "post-release retract pose"},
                     {"name": "tube_axis", "type": "axis_3d"},
+                    {"name": "hole_axis", "type": "axis_3d"},
                     {"name": "contact", "type": "runtime_condition",
                      "purpose": "lower_stop"},
                     {"name": "clearance", "type": "scalar"},
@@ -57,6 +58,10 @@ def test_all_runtime_primitives_compile_and_dry_run():
             "grasp_pose": {"hole": "grasp_pose"},
             "axis": {"hole": "tube_axis"}}},
         {"op": "lift", "args": {"obj": {"object": "tube0"}}},
+        {"op": "reorient_held_axis", "args": {
+            "obj": {"object": "tube0"},
+            "object_axis": {"hole": "tube_axis"},
+            "target_direction": {"hole": "hole_axis"}}},
         {"op": "transport", "args": {
             "obj": {"object": "tube0"},
             "target": {"hole": "target_point"}}},
@@ -86,13 +91,14 @@ def test_all_runtime_primitives_compile_and_dry_run():
     result = dry_run(code, _graph())
     assert result["normal"]["ok"]
     assert result["holes_solved"] == [
-        "contact", "grasp_pose", "retract_pose", "target_point", "tube_axis",
+        "contact", "grasp_pose", "hole_axis", "retract_pose", "target_point",
+        "tube_axis",
     ]
     action_calls = [
         call["op"] for call in result["calls"]
         if call["op"] not in {"solve", "verify"}
     ]
-    assert action_calls[:8] == list(PRIMITIVES)
+    assert action_calls[:9] == list(PRIMITIVES)
 
 
 @pytest.mark.parametrize(
@@ -116,6 +122,16 @@ def test_all_runtime_primitives_compile_and_dry_run():
             "obj": {"object": "tube0"}, "target": [0.1, 0.2, 0.3]}},
          "禁止数值字面量"),
         ({"op": "lift", "args": {"obj": {"ref": "tube0"}}}, "未知引用格式"),
+        # 模型提案原语:两个轴参数都必填,且只收 axis_3d。
+        ({"op": "reorient_held_axis", "args": {
+            "obj": {"object": "tube0"},
+            "object_axis": {"hole": "tube_axis"}}},
+         "缺少参数 ['target_direction']"),
+        ({"op": "reorient_held_axis", "args": {
+            "obj": {"object": "tube0"},
+            "object_axis": {"hole": "grasp_pose"},
+            "target_direction": {"hole": "hole_axis"}}},
+         "类型 'pose_se3' 不兼容"),
     ],
 )
 def test_stage_program_rejects_bad_actions(action, message):
@@ -151,6 +167,37 @@ def test_empty_or_reversed_stage_is_rejected():
     ])
     assert any("primitive 顺序倒退" in error
                for error in validate_program(reversed_program, _graph()))
+
+
+def _reorient_action() -> dict:
+    return {"op": "reorient_held_axis", "args": {
+        "obj": {"object": "tube0"},
+        "object_axis": {"hole": "tube_axis"},
+        "target_direction": {"hole": "hole_axis"}}}
+
+
+def test_reorient_held_axis_sits_between_lift_and_transport():
+    """模型提案原语的链序位:lift 之后(前置条件是「已被持有」)、transport 之前。"""
+    assert (PRIMITIVES.index("lift")
+            < PRIMITIVES.index("reorient_held_axis")
+            < PRIMITIVES.index("transport"))
+
+    legal = _program([
+        {"op": "lift", "args": {"obj": {"object": "tube0"}}},
+        _reorient_action(),
+        {"op": "transport", "args": {
+            "obj": {"object": "tube0"}, "target": {"hole": "target_point"}}},
+    ])
+    assert validate_program(legal, _graph()) == []
+
+    # 搬完再转:已经对准的落点会重新失准,链序上直接判倒退。
+    illegal = _program([
+        {"op": "transport", "args": {
+            "obj": {"object": "tube0"}, "target": {"hole": "target_point"}}},
+        _reorient_action(),
+    ])
+    assert any("primitive 顺序倒退到 'reorient_held_axis'" in error
+               for error in validate_program(illegal, _graph()))
 
 
 @pytest.mark.parametrize("actions", [
@@ -229,7 +276,7 @@ def test_unwired_holes_are_reported_without_rejecting_program():
     assert unwired_holes(program, _graph()) == [{
         "stage": 0,
         "holes": [
-            "clearance", "contact", "grasp_pose", "retract_pose",
+            "clearance", "contact", "grasp_pose", "hole_axis", "retract_pose",
             "target_point", "tube_axis",
         ],
     }]

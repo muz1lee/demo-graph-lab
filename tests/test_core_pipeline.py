@@ -307,6 +307,7 @@ def test_runtime_api_surface_is_small_and_explicit():
         "approach",
         "grasp_at",
         "lift",
+        "reorient_held_axis",
         "transport",
         "align",
         "lower_until",

@@ -69,8 +69,8 @@ class FakeRuntime:
 
     def __getattr__(self, name):
         # 控制原语统一记日志。
-        if name in ("approach", "grasp_at", "lift", "transport", "align",
-                    "lower_until", "release", "retreat"):
+        if name in ("approach", "grasp_at", "lift", "reorient_held_axis",
+                    "transport", "align", "lower_until", "release", "retreat"):
             def prim(*a, **kw):
                 self._log(name, args=[repr(x) for x in a],
                           kwargs={k: repr(v) for k, v in kw.items()})

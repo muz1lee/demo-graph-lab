@@ -19,6 +19,9 @@ PRIMITIVES = (
     "approach",
     "grasp_at",
     "lift",
+    # 链序位:必须在 grasp_at/lift 之后(前置条件是「物体已被持有」),在 transport
+    # 之前(先把长轴摆到位再搬,搬完再转会让已经对准的落点重新失准)。
+    "reorient_held_axis",
     "transport",
     "align",
     "lower_until",
@@ -39,6 +42,13 @@ ARGUMENT_SPECS = {
     },
     "lift": {
         "obj": {"object": True},
+    },
+    # 两个轴参数都是 axis_3d,且都**必填**:少任何一个都解不出旋转。
+    # 参数名与必填性由 RuntimeAPI 签名反射校验(见 _primitive_parameters)。
+    "reorient_held_axis": {
+        "obj": {"object": True},
+        "object_axis": {"holes": {"axis_3d"}},
+        "target_direction": {"holes": {"axis_3d"}},
     },
     "transport": {
         "obj": {"object": True},

@@ -30,6 +30,14 @@ class RuntimeAPI:
     def lift(self, obj):
         """提起物体。"""
 
+    def reorient_held_axis(self, obj, object_axis, target_direction):
+        """把**已被持有**物体的长轴重新定向到目标方向。
+        object_axis = 物体当前长轴句柄;target_direction = 目标方向句柄(如插入轴)。
+        语义:由两个轴句柄解出刚体旋转(叉积定轴、点积定角),腕部走完该旋转并保持
+        夹持,**不平移抓取点**。后置:object_axis ∥ target_direction。
+        未持有、旋转执行中无进展、轴句柄缺失都走拒绝路径,不硬转。
+        contract proposed by backend model 2026-08-06, admitted with amendments。"""
+
     def transport(self, obj, target):
         """携带物体移动到目标上方/附近(target 为句柄或物体名)。"""
 
