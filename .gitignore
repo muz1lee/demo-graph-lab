@@ -34,6 +34,7 @@ htmlcov/
 .idea/
 .vscode/
 .codex_backups/
+.worktrees/
 *.bak
 *.bak.*
 *~
