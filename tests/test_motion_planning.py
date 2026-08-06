@@ -94,6 +94,7 @@ def _rt(pipe):
     rt.calls = []
     rt._hole_index = {}
     rt._current_stage = None
+    rt._mp_disabled = False        # MP 熔断闸的初值(真 __init__ 里设,这里绕过了它)
     return rt
 
 

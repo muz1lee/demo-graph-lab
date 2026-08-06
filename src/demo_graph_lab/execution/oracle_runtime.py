@@ -207,6 +207,22 @@ def _as_numbers(v):
     return out
 
 
+# MP 熔断的判别串。`PipelineClient` 把 urllib 的 `HTTPError` 原样拼进消息,
+# 其 `__str__` 恒为 "HTTP Error <code>: <reason>",所以这是精确匹配而不是搜 "400"
+# (坐标里也会出现 400)。
+_MP_UNAVAILABLE_MARK = "HTTP Error 400"
+
+
+def _is_mp_unavailable(exc) -> bool:
+    """规划失败是不是「后端不存在/拒绝受理」(HTTP 400)。
+
+    只有 400 才熔断:它表示这条总线上压根没有 `motion_planning_stereo` 后端,
+    再试一万次也是同一个结果。超时、传输中断、返回结构异常等**可能是瞬时的**,
+    保留原来的逐次 fallback 语义。
+    """
+    return _MP_UNAVAILABLE_MARK in str(exc)
+
+
 class OracleRuntime:
     def __init__(self, graph: dict, objects: list | None = None,
                  eval_url="http://127.0.0.1:7480", pipe_url="http://127.0.0.1:8000",
@@ -236,6 +252,8 @@ class OracleRuntime:
         # 持物态:闭爪后为 True,`release` 后回 False。持物期间臂跟随不换(见
         # `_select_arm_for_stage`)。
         self._holding = False
+        # MP 熔断闸(同一 episode 一次性):首次 HTTP 400 之后不再调规划。
+        self._mp_disabled = False
 
     def begin_stage(self, stage: dict) -> None:
         """Bind subsequent ``solve(name)`` calls to the current stage."""
@@ -663,6 +681,12 @@ class OracleRuntime:
 
         长距离优先使用运动规划；规划失败时转入限幅伺服并记录 ``mp_fallback``。
         短距离直接使用局部伺服。``quat=None`` 时选择接近当前腕姿的竖直姿态。
+
+        规划一旦以 HTTP 400 失败,同一 episode 内**熔断**不再调用(见
+        ``_is_mp_unavailable``)。8/6 ep2 实测:隔离总线上没有
+        ``motion_planning_stereo`` 后端,每次调用要白等 400+20 s,单集烧掉 200 s
+        (**29% wall**),100% 失败后全部走 degraded 伺服——重试没有任何信息增量,
+        只在买同一个已知答案。非 400 的失败**不熔断**,保留原逐次 fallback 语义。
         """
         p0, q0 = self._cur_xquat()
         tq = _topdown_like(q0) if quat is None else list(quat)
@@ -672,10 +696,16 @@ class OracleRuntime:
         if dist0 < MP_MIN_DIST_M and _qang(q0, tq) <= SERVO_ROT_TOL:
             self._log("move_local", dist=round(dist0, 4), reason="short_range")
             return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
+        if self._mp_disabled:
+            self._log("mp_fallback", reason="mp_disabled_after_400", degraded=True)
+            return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
         try:
             plan = robot_api.plan_joint_path(self, self.arm_id, target_pose,
                                             planning_mode="cartesian_goal")
         except robot_api.PlanFailed as e:
+            if _is_mp_unavailable(e):
+                self._mp_disabled = True
+                self._log("mp_disabled_after_400", err=str(e)[:160])
             self._log("mp_fallback", reason=getattr(e, "reason", None) or "plan_failed",
                       err=str(e)[:160], degraded=True)
             return self._move_servo(xyz, quat=quat, interpolation=interpolation, gpos=gpos)
