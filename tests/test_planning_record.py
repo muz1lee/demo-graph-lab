@@ -238,6 +238,66 @@ def test_capture_freezes_optical_observation_without_object_claims(tmp_path) -> 
     assert not (record_dir / "candidates.json").exists()
 
 
+def test_capture_says_the_lift_reading_is_unavailable_instead_of_guessing(
+    tmp_path,
+) -> None:
+    """相机挂在升降关节上,所以变换需要与本次 capture 同时刻的 q_lift。
+
+    当前只读 proprio 通道只有两条手臂的 ``get_qpos``,拿不到升降关节,记录必须如实
+    写 null 并说明原因;下游据此拒绝发布 base 系点,而不是默认按标定姿态偏移。
+    """
+
+    FakeSources.calls = []
+    record_dir = _plan(tmp_path)
+
+    capture_record(record_dir, allow_live_read=True, source_module=FakeSources)
+
+    proprio = json.loads((record_dir / "proprioception.json").read_text())
+    observation = json.loads((record_dir / "observation.json").read_text())
+    assert proprio["lift_position_m"] is None
+    assert proprio["lift_source"] == "unavailable_no_lift_joint_in_readonly_proprio"
+    assert proprio["position_unit"] == "meter"
+    # 落点就是 observation 已经指向的那份 proprio 记录,没有平行结构。
+    assert observation["robot_state"]["evidence_ref"] == str(
+        (record_dir / "proprioception.json").resolve()
+    )
+
+
+def test_capture_keeps_a_supplied_lift_reading_with_its_source(tmp_path) -> None:
+    class LiftSources(FakeSources):
+        class ReadOnlyProprioClient(FakeSources.ReadOnlyProprioClient):
+            def read(self):
+                return {
+                    **super().read(),
+                    "lift_position_m": -0.00642,
+                    "lift_source": "pipeline_info:get_qpos_lift",
+                }
+
+    FakeSources.calls = []
+    record_dir = _plan(tmp_path)
+
+    capture_record(record_dir, allow_live_read=True, source_module=LiftSources)
+
+    proprio = json.loads((record_dir / "proprioception.json").read_text())
+    assert proprio["lift_position_m"] == -0.00642
+    assert proprio["lift_source"] == "pipeline_info:get_qpos_lift"
+
+
+def test_capture_refuses_a_lift_reading_without_a_named_source(tmp_path) -> None:
+    class UnsourcedSources(FakeSources):
+        class ReadOnlyProprioClient(FakeSources.ReadOnlyProprioClient):
+            def read(self):
+                return {**super().read(), "lift_position_m": -0.00642}
+
+    FakeSources.calls = []
+    record_dir = _plan(tmp_path)
+
+    with pytest.raises(ValueError, match="lift_source"):
+        capture_record(
+            record_dir, allow_live_read=True, source_module=UnsourcedSources
+        )
+
+
 def test_capture_preserves_structured_source_error(tmp_path) -> None:
     class CaptureFailure(RuntimeError):
         status_code = 503

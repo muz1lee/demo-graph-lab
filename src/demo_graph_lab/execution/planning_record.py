@@ -620,8 +620,26 @@ def capture_record(
             "end_effector_poses": proprio["end_effector_poses"],
             "evidence_ref": str(proprio_path),
         }
+        # 头部相机挂在棱柱升降关节上,所以任何 camera→robot_base 变换只在某一个
+        # q_lift 成立。消费端需要的是与本次 capture 同时刻的那个读数,因此它记在
+        # 这份 proprioception 里(observation.robot_state.evidence_ref 指向它),而
+        # 不是另起一份平行记录。当前只读 proprio 通道只有两条手臂的 get_qpos,没有
+        # 升降关节的来源,所以这里如实记 null:下游变换的拒绝规则会因此拒绝发布
+        # base 系点,而不是默认按标定姿态偷偷偏移。
+        lift_position = proprio.get("lift_position_m")
+        if lift_position is None:
+            lift_source = "unavailable_no_lift_joint_in_readonly_proprio"
+        else:
+            if (isinstance(lift_position, bool)
+                    or not isinstance(lift_position, (int, float))
+                    or not math.isfinite(lift_position)):
+                raise ValueError("proprioception lift_position_m must be finite")
+            lift_position = float(lift_position)
+            lift_source = _required_string(
+                proprio.get("lift_source"), "proprioception lift_source"
+            )
         proprio_artifact = {
-            "schema": "demo_graph_lab.readonly_proprioception.v1",
+            "schema": "demo_graph_lab.readonly_proprioception.v2",
             "captured_after_source_frame_id": snapshot.frame_id,
             "values": robot_state,
             "calls": proprio.get("calls", []),
@@ -631,6 +649,8 @@ def capture_record(
             "pose_layout": "x_y_z_qx_qy_qz_qw",
             "position_unit": "meter",
             "quaternion_convention": "xyzw",
+            "lift_position_m": lift_position,
+            "lift_source": lift_source,
         }
         _write_json(proprio_path, proprio_artifact)
 
