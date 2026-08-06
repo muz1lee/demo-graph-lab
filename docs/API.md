@@ -147,6 +147,7 @@ graph 为未来的可信 resolver 层固定以下映射，生成 policy 不直�
 | `approach(target, cone=None)` | 按离散接近方向靠近对象或目标 handle |
 | `grasp_at(grasp_pose, axis=None)` | 在已求解的抓取位姿闭合夹爪 |
 | `lift(obj)` | 抬起对象 |
+| `reorient_held_axis(obj, object_axis, target_direction)` | 把已持有对象的长轴转到目标方向；两个参数都是 `axis_3d` hole 且都必填 |
 | `transport(obj, target)` | 携带对象移动到目标附近 |
 | `align(obj, target, axis=None)` | 在下放前完成对象与目标对齐 |
 | `lower_until(stop_condition)` | 下放到运行时停止条件触发 |
@@ -154,6 +155,20 @@ graph 为未来的可信 resolver 层固定以下映射，生成 policy 不直�
 | `retreat(target)` | 释放后的退离动作；当前只有 opcode/接线契约，Oracle 在可信 pose solver 完成前拒绝执行 |
 
 `push` 当前没有可靠实现，因此不属于可用 API。需要支持推动任务时，应先实现和测试底层动作，再把它加入高层契约。
+
+#### `reorient_held_axis` 的契约与出处
+
+这是本项目第一条**由 backend 模型自己提出、经人类评审后 admit** 的原语。契约原文来自 2026-08-06 的受控提案实验（零泄题条件下模型一次产出），提案证据在 5090 `evidence/reorient_proposal/`；评审改了三处，都写在实现的 docstring 里：
+
+1. **补一条拒绝路径「旋转不可达」**——模型只写了「未持有则拒」。ep2/ep3 实测腕姿残差有 18° 量级，执行中必须能停：连续 `SERVO_PATIENCE` 轮剩余角没有进展就停下并记 `reason="no_rotation_progress"`，不硬转；
+2. **补一条「轴句柄缺失/退化」的处理**——缺失或零向量记 `unsupported_param` 后拒绝；两轴已近平行时旋转是恒等，直接记 `already_aligned` 成功且不发任何指令；
+3. **明确「未持有」用什么证据判**——非特权信号：夹爪角落在「夹住带」（`GRIP_CLOSE`/`GRIP_OPEN` 两端各收一个回读容差）内 **且** 末端外力达到 `lift` 的承重阈 `LIFT_LOAD_FORCE_N`。`is_gripping` 只是停转信号，只进账本不参与判定；两个信号任一读不到即拒，不 fail-open。
+
+模型漏提「抓取朝向影响可达性」，评审决定**不**把它做成硬前置：policy 可以先用 `grasp_at(axis=)` 优化抓取朝向，够不着的情形由上面的拒绝路径兜底。`target_direction` 在插入任务里天然由 rack 孔轴（`part_axis` + hole anchor）求解，模型选 `axis_3d` 是合理的。
+
+链序位在 `lift` 之后、`transport` 之前：前置条件是「物体已被持有」，而搬完再转会让已经对准的落点重新失准。
+
+已知缺口（本轮**没做**）：① 后置条件 `object_axis ∥ target_direction` 还没有独立 gate 谓词（`held_axis_parallel`），当前只有 runtime 自己在 `reorient_done` 里记残差，属于「自己验自己」，不能当验收；② 谓词词表里没有可查的「持有」谓词；③ 实现只锁住 EEF 原点，爪尖会随腕部旋转画弧，真正的抓取点零平移要先知道抓取点在工具系里的位置。三条都在 `docs/TODO.md`。
 
 `retreat` 的 graph hole 目前只能证明 backend 显式选择了 retract/retreat 语义，不能证明数值 pose 安全。真正接控制前，可信 runtime 必须基于当前 EEF、接近路径和碰撞检查生成退离候选；不得回退到对象质心。当前 Oracle loader 会在 reset 和任何控制前拒绝含 `retreat` 的 episode；方法自身也保留 `NotImplementedError` 作为第二道硬停。
 

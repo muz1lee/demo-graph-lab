@@ -2,6 +2,20 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-06：第一条模型提出、人类评审、修订后 admit 的原语 `reorient_held_axis`
+
+- **这一条的分量在流程，不在功能。** 项目此前所有原语都是人写的，backend 模型只在既定闭集里选序列和接线。这次是**模型自己提出一条新原语的契约**（今天的受控提案实验，零泄题条件下一次产出，提案证据在 5090 `evidence/reorient_proposal/`），人类评审后**修订三处再 admit**。口径要说准：**admit 的是契约与实现，不是任何执行效果**——本轮只有第 2 档（离线单测），没有跑过仿真、没有 episode、没有成功率；
+- **模型契约原文**：`reorient_held_axis(obj, object_axis, target_direction)`，把已被持有物体的长轴重新定向到目标方向；两个轴句柄解出刚体旋转（叉积定轴、点积定角），腕部走完该旋转并保持夹持，不平移抓取点；后置条件 `object_axis ∥ target_direction`；拒绝路径写了一条：未持有则拒；
+- **评审修订三处**（都进了实现 docstring 和 `docs/API.md`）：① **补拒绝路径「旋转不可达」**——模型只写了未持有一条，但 ep2/ep3 实测腕姿残差有 18° 量级，执行中必须能停：连续 `SERVO_PATIENCE` 轮剩余角无进展即停、记 `no_rotation_progress`，不硬转；② **补「轴句柄缺失/退化」**——缺失或零向量记 `unsupported_param` 后拒，两轴近平行时旋转是恒等、直接记 `already_aligned` 成功且一条指令都不发；③ **把「未持有」的判据钉死成非特权证据**——夹爪角在「夹住带」内 **且** 末端外力达 `lift` 的承重阈 `LIFT_LOAD_FORCE_N`，`is_gripping` 只当停转信号（它读到 False 只说明此刻没在顶着走）、只进账本不参与判定，两个信号任一读不到即拒。另外**明确不采纳**一处：模型漏提「抓取朝向影响可达性」，评审决定不把它做成硬前置——policy 可以先用 `grasp_at(axis=)` 优化抓取朝向，够不着的情形由拒绝路径兜底。`target_direction` 在插入任务里天然由 rack 孔轴（`part_axis` + hole anchor）求解，模型选 `axis_3d` 这个洞类型经核对是合理的；
+- **一个模型没提、实现里必须自己长出来的判断**：长轴是**无向的直线**不是射线，所以 `dot < 0` 时先把目标方向取反走短程；否则为了对齐同一条线要白转 180°，还多担一次可达性风险。账本里记 `flipped_target`；
+- **不新增经验常数。** 角度判据全部复用 `SERVO_ROT_TOL`（执行器分辨不出更小的角差，另立更严的阈值只会造出永不收敛的循环），迭代上限取 `LIFT_MAX_ITERS`，无进展判据取 `SERVO_PROGRESS_EPS_DEG / SERVO_PATIENCE`，力阈取 `LIFT_LOAD_FORCE_N`。唯一新提的常量是 `GRIP_ANGLE_TOL_DEG = 2.0`，它不是新数——原本就写死在 `_wait_grip` 的默认参数里，这次提成常量给「夹住带」两端共用，`_wait_grip` 改为引用它，行为不变；
+- **闭环而不是发够步数**，与 `lift` 同一个理由（上游控制器单条指令只交付约 74%，开环必然欠冲）。每轮回读 `get_xquat` 算剩余角，按 `SERVO_STEP_DEG` 限幅 slerp 一步；每步的 `target_xyz` 就是当轮回读到的位置——既不下发平移，也顺带纠掉旋转带来的漂移；
+- **测试 22 条**：`tests/test_reorient_held_axis.py` 19 条（正常收敛并**独立复核**长轴与目标方向真的平行了、零平移、无向轴走短程、四种轴句柄退化、三种未持有、两种证据读不到、`is_gripping` 单独不能放行也不能否决、夹住带边界、无进展停、部分交付走满预算记 `budget`、已平行零指令、两条非特权纪律），`tests/test_stage_program.py` 3 条（链序位在 `lift` 与 `transport` 之间、两个轴参数必填、只收 `axis_3d`）。链序合法性与参数反射走的都是既有机制：`ARGUMENT_SPECS` 的参数名与必填性由 `RuntimeAPI` 签名反射校验，repair prompt 的原语闭集由 `_render_primitive_table` 从代码渲染（补了一条断言钉住新原语确实被渲染进去）；
+- **反向验证 6 项**：去掉持物硬前置 → 7 条转红；去掉无向轴取反 → 1 条；去掉无进展停止 → 1 条；去掉「已平行不发指令」短路 → 2 条；链序位挪到 `transport` 之后 → 2 条；`object_axis` 放开收 `pose_se3` → 1 条。每项的红点都精确落在对应判据上，不是别处坏了；验证后已复原；
+- 本地 `667 passed`（基线 645 + 22），两个 CLI `--help` 通过；本轮没有调用 backend、仿真、planner 或 control。
+
+当前停点：只动了 `policy/api.py`、`policy/program.py`、`policy/fake_runtime.py`、`execution/oracle_runtime.py`、测试与 docs。**明确没做、且会让这条原语现在还用不起来的两个缺口**：① **`prompts/compile_policy.md` 里那份手写的原语闭集没同步**——repair prompt 是从代码渲染的（新原语自动在），compile prompt 却留着第二份手写副本，所以 backend 在**首次编译**时根本看不到 `reorient_held_axis`，只有走修复回路才可能用到它。这是本轮范围外（改的是 prompt 运行资产），但它是这条原语真正被用起来的前提；② **`PlanningOnlyRuntime` 没补对应的 `ExecutionDisabled` 硬停**，调到它会抛 `AttributeError` 而不是契约里那个显式硬停——仍然是 fail-closed，但错误类型是错的，且违反 `AGENTS.md`「新增高层动作要同时更新 planning-only 硬停」。两条都已写进 `docs/TODO.md`。另外**明确没做**：gate 谓词 `held_axis_parallel`（本轮不做，`evaluation/predicates.py` 另有人在改）——后置条件目前只有 runtime 自己在 `reorient_done` 里记腕姿残差，**属于「自己验自己」，不能当验收**；谓词词表里也缺一个可查的「持有」谓词，前置条件在 gate 侧同样问不出来；以及抓取点零平移的补偿（现在只锁 EEF 原点，爪尖随腕部画弧，这个近似已如实记在 docstring 里）。
+
 ## 2026-08-06：跨程序身份守卫被真实数据击穿——判据从「逐元素相等」升级到 IoU ≥ 0.90
 
 - **失守案例（完整记录）**：08-05 那条跨程序身份守卫（同一次 observation 内两个 `object_id` 不同的程序命中同一个框 → 双双 `UNKNOWN`）今天首次上真实数据就被绕过。Qwen 给 `tube_right` 的框是 `[935, 279, 1039, 349]`，给 `tube_third` 的框是 `[935, 279, 1039, 348]`——**只差 1 个像素**（下沿 349 vs 348），IoU **0.9857**，overlay 目视与两条链各自解出的主轴几乎相同，三份证据一致指向**同一根物理管子**。守卫按逐元素精确相等比较，`349 != 348`，于是**静默放行**，两个洞都带着 `PASS` 进了 `program_results.json`。最后是**人工 identity-accept 这道闸门把它挡下来**的——不是守卫。教训一句话：模型分不清两个查询时交出的是**近重复框**，不是重复框，精确相等这个判据从一开始就打不中真实的失效模式；

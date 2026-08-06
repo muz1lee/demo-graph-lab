@@ -50,6 +50,8 @@
 - 解决抬升时物体滑脱，并删除剩余固定 sleep，统一用状态回读判断动作结束。
 - `lower_stop` 的 runtime descriptor 要明确路由到非特权 contact / motion plateau，而不是自由文本猜测。
 - 实现可信 retreat target solver：从当前 EEF、接近路径和碰撞检查生成候选；禁止回退到对象质心，完成前保持 Oracle 硬停。
+- 给 `PlanningOnlyRuntime` 补 `reorient_held_axis` 的 `ExecutionDisabled` 硬停；同时把 `prompts/compile_policy.md` 里手写的原语闭集改成由 `PRIMITIVES / ARGUMENT_SPECS / RuntimeAPI` 渲染（`repair.py::_render_primitive_table` 已经这么做，compile 侧还留着第二份手写副本，新原语进不了 compile prompt）。
+- `reorient_held_axis` 目前只锁住 EEF 原点，爪尖随腕部旋转画弧；要做到契约写的「不平移抓取点」，先要拿到抓取点在工具系里的位置，再绕它补一段平移。
 
 完成定义：至少一个稳定持握可重复，第一失败动作能由 decision/action/gate 日志定位。
 
@@ -58,6 +60,7 @@
 - 正式任务成功使用固定人工或 benchmark evaluator；模型提议的 acceptance 只用于阶段归因。
 - 把实际 grasp point 和 approach direction 传给对应 predicate。
 - 为 `carry` 设计非特权检查；检查不了继续返回 `UNKNOWN`。
+- 补 `held_axis_parallel` 谓词，独立验收 `reorient_held_axis` 的后置条件。现在只有 runtime 自己在 `reorient_done` 里记腕姿残差，属于「自己验自己」，不能当验收。同时词表里缺一个可查的「持有」谓词——`reorient_held_axis` 的前置条件目前只有 runtime 侧的非特权证据，gate 侧问不出来。
 - 用明显正例和负例校准 predicate，再用于任务评价。
 
 完成定义：gate 不把 `UNKNOWN` 当通过，并区分“动作被调用”和“任务关系成立”。
