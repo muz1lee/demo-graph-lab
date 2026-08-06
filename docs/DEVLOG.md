@@ -2,6 +2,16 @@
 
 只记录最近的工程动作、可复查产物和停点。稳定设计写进 README/API，后续工作写进 TODO/MILESTONES。
 
+## 2026-08-06：研究主线纠偏为 constraint-guided CaP
+
+- 核心因果路径改为：demo graph 提供当前与下游约束，backend 生成带 `selection` 的 StageProgram，compiler 把它降成显式的 `begin_candidates / rank_by / require_future / choose`，runtime 只执行这段候选数据流。新 CaP program 不再沿用 `begin_stage()` 里的旧隐藏选择；legacy program 仍保留原行为。
+- 下游回传规则保持最小：只取后续阶段中 manipulated object 相同、且参数确实提到该对象的非 derived constraint；constraint ref 是可读的 `s<stage>:c<offset>:<name>`，没有 SHA 或额外协议。
+- 新增配对实验 `dgl cap-ablate`：`vanilla` 不看约束、`local` 只写当前 constraint、`backchain` 再写下游 constraint。实验固定 graph、模型和 primitive contract，产出每次 StageProgram、policy 与 `summary.json`。
+- synthetic 反例已验证：局部排序最高但 `axis_parallel=FAIL` 的抓取会被 backchain 淘汰，选择另一个可插入候选。该结果只证明算法接线，不是实际机器人效果。
+- 本地全量回归 `634 passed, 15 skipped`；CLI help 与 Python compile 通过。5090 旧 run `runs/insert_tubes/20260804_122155/graph.json` 的 hole 没有 resolver，不能直接做三组消融；隔夜代码生成实验改用仓库内 reviewed `tests/fixtures/graphs/insert_tubes.graph.json`，它能产生两个 grasp stage 的 local/backchain 差异。
+
+当前停点：真实 `future_constraints` 还没有由几何/规划器计算，只有 synthetic fixture；下一步先跑代码生成合法率，再把真实 compatibility 接进同一个 API，不能把 fixture 标签当方法成功率。
+
 ## 2026-08-06：补上 `reorient_held_axis` 的两个缺口——compile prompt 闭集改从代码渲染 + planning-only 硬停
 
 上一条留下的两个缺口，本轮各补一处。两处都只动接缝，不动这条原语的语义。

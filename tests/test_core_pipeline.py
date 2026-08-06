@@ -304,6 +304,10 @@ def test_runtime_api_surface_is_small_and_explicit():
 
     assert _contract_methods() == {
         "solve",
+        "begin_candidates",
+        "rank_by",
+        "require_future",
+        "choose",
         "approach",
         "grasp_at",
         "lift",

@@ -21,13 +21,13 @@
 | 阶段切分 | 全视频采样帧、任务指令 | `stages_proposed.json` | 只有上游 trace 缺失时调用 |
 | 对象 registry | 全视频采样帧、trace 中的对象别名 | `objects.json` | 每个 demo 一次 |
 | 约束抽取 | 单阶段关键帧、指令、对象 registry | `constraints / acceptance / holes` | 每阶段调用 `k` 次，再确定性合并 |
-| Program 提议 | 已校验 graph、`RuntimeAPI` 源码 | `StageProgram`：primitive sequence + hole wiring | 每个 graph 一次；backend 不写 Python |
+| Program 提议 | 已校验 graph、下游约束上下文、`RuntimeAPI` 源码 | `StageProgram`：primitive sequence + hole wiring + selection dataflow | 每个 graph 一次；backend 不写自由 Python |
 | PerceptionProgram 提议 | `StageProgram` 接线出的几何 hole 契约、从代码渲染的算子闭集与 resolver 绑定表 | `PerceptionProgram`：感知链组合 + hole 发布 | 每个 graph 一次；只在 `StageProgram` 发布后调用，无可发布 hole 时不调用 |
 | StageProgram 修复 | 已校验 graph、当前 `StageProgram`、一份失败 episode 的确定性摘要 | 一句失败归因 + 修订版 `StageProgram` | 每个 run 目录最多 3 次；只在有失败 episode 时调用 |
 
 表中这 **6 个调用点**是 backend model 在整个 workflow 中被允许出现的全部位置（此前是 5 个，`StageProgram` 修复是新增的第 6 个）。新调用点和其余五个受同一条边界约束：它输出的是受限 JSON，不是 Python、逐步参数或任何数值——model 改的只是自己那份 program 的动作序列与 hole 接线，边界细节见第 8 节。
 
-视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。在线 hole 求解、候选排序、运动执行、predicate 和 gate 目前也没有 backend model 调用。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
+视频读取、trace 解析、关键帧采样、graph 补全和校验都不调用模型。episode 中的 hole 求解、候选选择、运动执行、predicate 和 gate 也不再次调用 backend model：它们执行离线生成的 CaP program。`OracleRuntime` 只读取 simulator 状态，同样不调用模型。
 
 推荐的完整离线顺序是：
 
@@ -48,7 +48,7 @@ video + optional trace
   → same deterministic validation / compilation / dry-run gate, published beside the original
 ```
 
-Backend 输出始终是不可信 proposal。stage、registry、constraint sample、`StageProgram` 和 `PerceptionProgram` 都经过严格 schema；无效 sample 不参加投票，分母固定为请求次数。同名阶段的约束只有达到严格多数才传播。`StageProgram` 只决定高层 primitive sequence 和 hole/object 接线，validator 检查动作顺序、API 签名、hole 类型与 purpose、对象引用和数字字面量，可信 compiler 再生成 Python。`PerceptionProgram` 只决定哪条闭集算子链发布哪个几何 hole，validator 检查链的类型衔接、字段与 hole 类型、resolver 绑定、`(stage, hole)` 唯一性和数字字面量，fake runtime 再干跑一遍；它未通过时不发布，`StageProgram` 与 `policy.py` 的发布不受影响。每次调用的脱敏请求、raw reply、parsed result 和 validator 结论都保存在 `model_calls/<tag>/`；同 tag 的再次调用保留在 `history/`，不会把不同请求和回复混在一起。
+Backend 输出始终是不可信 proposal。stage、registry、constraint sample、`StageProgram` 和 `PerceptionProgram` 都经过 schema 校验。`StageProgram` 决定高层 primitive sequence、hole/object 接线和候选 selection dataflow；validator 检查动作顺序、API 签名、hole 类型与 constraint ref，可信 compiler 只把这份 IR 确定性降成 Python。`PerceptionProgram` 决定哪条闭集算子链发布哪个几何 hole。每次调用的请求、raw reply、parsed result 和 validator 结论保存在 `model_calls/<tag>/`。
 
 ### 当前建议的在线顺序
 
@@ -88,7 +88,7 @@ synthetic fixture candidates
 
 真实点云保留在 OpenCV head optical frame：`+X` 右、`+Y` 下、`+Z` 前，单位米。可信代码先在 mask 上筛 depth，再同步生成 `Nx3` object cloud 与 `Nx2 (row,col)` lineage；`object_assignment.json` 记录 observation、被请求的 graph anchor、frame、calibration 和 Qwen/SAM3 evidence，但 identity 状态固定为 `MODEL_PROPOSED`。opening center/axis 由局部 RGB-D 对比与开口周围 ring 的局部支撑面重新计算，证据不足返回 `UNKNOWN`，不采用模型 pose。GraspNet 只消费 object cloud，raw detector ID 原值保留；仓库仍不发布 GraspNet→graph candidate converter。identity 接受与 lift-aware `camera_head_optical → robot_base` 变换见第 7 节；`graspnet_parallel_jaw → runtime_ee` 变换仍未做，因此 grasp 洞不走那条路径。
 
-在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`；缺少某项排序特征时，对应 preference meta 是 `UNCHECKABLE`，只有部分候选有特征时为 `PARTIAL`，不能把 ID tie-break 误写成 demo ranking。固定 synthetic replay 已经验证一次 hard filter 后共享 accepted set 的 demo/no-demo 对照；这不是 live 感知或物理 checker 结果。当前 replay loader 只接受 `synthetic_contract_fixture`，在真实 provenance/manifest contract 完成前会拒绝任何 `recorded_real` 标签。完整 episode 稳定后，才允许 backend model 对已经通过硬过滤的候选做可选排序；它不能生成新 pose、复活被过滤候选或决定 gate。显式 `compat` 和向后检查也属于可信 selection。
+在线 selector 不接受没有 frame 的 `approach_dir`。上游必须先在有重力定义的 frame 中计算 `approach_tilt_deg ∈ [0,180]`。固定 synthetic replay 已验证 hard filter 后共享 accepted set 的对照；新增的 CaP 路径则执行 policy 中显式写出的 `rank_by` 和 `require_future`。候选的 downstream compatibility 由可信几何/规划器产生，backend 只选择在代码中引用哪些 graph constraint，不生成新 pose、复活被过滤候选或决定 gate。当前 `future_constraints` 只有 synthetic contract 测试，尚不能当真实方法效果。
 
 实验需要区分两种模式：component mode 固定人工检查过的 graph 和 policy，只研究候选与执行；end-to-end mode 才重新从 demo 调用 backend 生成 graph 和 policy。选择算法对照必须共享同一 graph、policy、候选和执行预算。
 
@@ -119,11 +119,15 @@ synthetic fixture candidates
 
 高层接口定义在 `src/demo_graph_lab/policy/api.py`。编译器会把这个文件的源码放进 VLM prompt。未出现在该类中的方法一律不能由生成 policy 调用。
 
-### 感知入口
+### 感知与候选选择入口
 
 | 方法 | 输入 | 输出 | 失败语义 |
 |---|---|---|---|
 | `solve(hole_name)` | 当前阶段声明的 hole 名 | 不透明 handle | hole 未声明、类型未知或必需的对象观测缺失时直接报错 |
+| `begin_candidates(grasp_hole)` | 当前阶段的 `grasp_candidate` pose hole | 无 | hole 不合法或阶段未开始时报错 |
+| `rank_by(constraint_ref)` | 当前阶段 `region_grasp / approach_direction` ref | 无 | 非当前阶段或非排序约束时报错 |
+| `require_future(constraint_ref)` | 后续阶段 constraint ref | 无 | 候选为 `FAIL / UNKNOWN` 时从当前集合删除 |
+| `choose(grasp_hole)` | 已开始的 grasp hole | 不透明 grasp pose handle | 没有剩余候选时报错 |
 
 Handle 只允许传给后续高层动作。生成 policy 不能读取其中的坐标、角度或阈值，也不能自己修改它。
 

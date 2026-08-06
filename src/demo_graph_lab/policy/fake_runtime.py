@@ -45,6 +45,24 @@ class FakeRuntime:
         self._log("solve", hole=hole_name)
         return Handle("hole", hole_name)
 
+    def begin_candidates(self, grasp_hole):
+        declared = self._holes_by_stage.get(self._active_stage_index, set())
+        if grasp_hole not in declared:
+            raise ValueError(f"undeclared grasp hole: {grasp_hole!r}")
+        self._log("begin_candidates", hole=grasp_hole)
+
+    def rank_by(self, constraint_ref):
+        self._log("rank_by", constraint=constraint_ref)
+
+    def require_future(self, constraint_ref):
+        self._log("require_future", constraint=constraint_ref)
+
+    def choose(self, grasp_hole):
+        self._log("choose", hole=grasp_hole)
+        # Dry-run needs only the opaque dataflow shape.  Logging solve here would
+        # incorrectly make the compiler report a hidden solve call.
+        return Handle("hole", grasp_hole)
+
     def verify(self, constraint) -> bool:
         self._log("verify", constraint=constraint.get("name"),
                   stage=constraint.get("_stage"))

@@ -31,8 +31,9 @@
 示范视频
   → 阶段、对象和关键帧
   → constraints + acceptance + typed holes
-  → StageProgram（primitive sequence + hole wiring）
-  → 确定性编译成只调用高层 Runtime API 的 policy
+  → 下游约束按 manipulated object 回传到当前抓取阶段
+  → StageProgram（primitive sequence + hole wiring + constraint selection dataflow）
+  → CaP policy 显式调用当前与下游约束 API
   → 运行时感知并生成候选
   → 候选过滤、排序和下游检查
   → 执行动作
@@ -40,7 +41,7 @@
   → 失败归因或有界恢复
 ```
 
-当前仓库已经实现示范解析、约束图、StageProgram、确定性 policy 编译和 Oracle 调试路径；非特权 record adapter、typed-hole binding、硬过滤、planning-only runtime 与 synthetic fixed replay 已有脚手架。live sensor adapter、真实 hard checker、非特权控制、下游可行性检查和自适应恢复仍未实现。
+当前仓库已经实现示范解析、约束图、带显式 selection 的 StageProgram、三组 CaP 代码生成消融，以及 planning-only runtime 中对 downstream constraint result 的执行。synthetic 反例已覆盖“局部最高分抓取导致后续插入失败”。真实 compatibility predictor、真实 hard checker、非特权控制和完整任务效果仍未实现。
 
 ## 约束图
 
@@ -61,7 +62,7 @@
 2. **示范排序**：在剩余候选中，哪个更符合示范给出的抓取区域、接近方向和对象关系？这里只改顺序，不删除候选。
 3. **下游检查**：这个候选是否至少保留一个可行的后续选择？
 
-最后一步可以写成一个简单递归：当前候选可行，当且仅当它满足本阶段约束，并且存在一个与它兼容的下一阶段候选；末阶段只检查自身约束。
+第一版不引入复杂协议或搜索框架。graph 中涉及同一 manipulated object 的后续约束被转成稳定、可读的引用；CaP 在当前阶段写出 `require_future(ref)`。runtime 只消费候选上由几何/规划器产生的 `PASS / FAIL / UNKNOWN` compatibility，`FAIL` 与 `UNKNOWN` 不保留。以后可把单步检查递归到多阶段，但不是当前实现的前提。
 
 这种“先看后续是否还走得通”的思路在规划领域并不新。本项目的研究点，是把它落实到单段示范产生的定性约束链上，并用真实候选和阶段级实验检验它是否有用。
 
@@ -73,7 +74,7 @@ VLM 可以参与四个位置，但权限不同：
 
 - 从示范中提取阶段、对象和约束；
 - 根据约束图提议有限的 primitive sequence 和 hole wiring，以及发布几何 hole 的闭集感知链；
-- 在运行时对少量离散候选排序，并引用支持选择的约束；
+- 在 StageProgram 中生成候选选择数据流，并显式引用支持选择的当前与下游约束；
 - 根据真实执行后的残差提出有界、离散的修正建议。
 
 VLM 不得：
@@ -83,9 +84,7 @@ VLM 不得：
 - 读取 simulator 精确状态；
 - 决定某个阶段是否通过。
 
-运行时 VLM 的候选排序、修正和视觉证据接口目前只是设计，尚未实现。完整接口边界见 `API.md`。
-
-当前高层 workflow 仍有一次受限 synthesis：backend 输出结构化 `StageProgram`，决定 primitive sequence 和 hole/object wiring；它不再生成 Python。可信 validator 检查动作顺序、签名、类型、purpose 和引用，随后确定性 compiler 生成 policy 并做静态检查和 fake dry-run。该 program 在同一组选择实验中固定复用，backend 不在 episode 中重新规划；代码生成本身不是研究主张。
+backend 输出结构化 `StageProgram`，决定 primitive sequence、hole/object wiring 和 `selection`。可信 validator 检查动作顺序、签名、类型、purpose 和 constraint ref，compiler 只做确定性 lowering。这里的研究主张不是“能生成 Python”，而是**任务理解得到的下游约束是否通过生成的 CaP 代码改变当前动作选择，并提升长程可行性**。backend 不在 episode 中重新规划。
 
 ## 后续学习方向（当前不实施）
 
@@ -103,16 +102,15 @@ VLM 不得：
 
 ## 可证伪实验
 
-### 约束图是否有用
+### 三组核心消融
 
-固定模型、感知、候选和执行预算，对比：
+固定模型、graph、候选和执行预算，对比生成代码中的选择上下文：
 
-- 无示范的通用 agent；
-- 文本步骤计划；
-- 当前阶段约束图；
-- 带下游检查的约束链。
+- `vanilla`：`begin_candidates → choose`；
+- `local`：再加入当前阶段的 `rank_by`；
+- `backchain`：再加入下游约束的 `require_future`。
 
-如果约束链没有提升成功率，也没有改善第一失败点的定位，主张不成立。
+先测 StageProgram 合法率、三组生成代码是否真的不同；接入真实 compatibility 后再测 top-1 改变率、长程成功率和第一失败阶段。如果 `backchain` 不改变选择或不提升长程结果，主张不成立。
 
 ### 示范排序是否真的改变选择
 

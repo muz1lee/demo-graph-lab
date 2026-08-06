@@ -2,15 +2,17 @@
 
 从一段机器人示范中提取阶段和定性约束，再把它们编译成可执行、可独立检查的操作策略。
 
-这个仓库是研究原型。离线的 demo 理解、约束图、结构化 `StageProgram` 和确定性 policy 编译已经接通。在线主方法目前只到 read-only component perception：一次记录一个 graph anchor，并按它的 resolver 分支生成 tube 的 PCA / object-only GraspNet raw proposal，或 rack-hole 的保守几何；这些不是同一 anchor 的串行产物。graph anchor 只是被请求的语义标签，Qwen/SAM3 结果仍标为 `MODEL_PROPOSED`，不代表实例身份已经确认。多 anchor stage assembly、identity 接受、candidate normalization、两个 frame 标定、三个 hard checker 和控制仍未接入。`OracleRuntime` 只用于调试和上界，不代表主方法已经完成。
+这个仓库是一个 constraint-guided Code as Policies（CaP）研究原型。主线是：从示范理解任务约束，把后续阶段对当前动作的要求反传回来，再让生成的 CaP 程序显式调用这些约束选择 API；因此每一阶段的抓取不是局部、随意地取一个可抓 pose。当前已完成三组代码级消融（`vanilla / local / backchain`）和 synthetic 反例；真实 candidate compatibility、真实 hard checker 和非特权完整执行仍未完成。`OracleRuntime` 只用于调试和上界，不代表方法效果。
 
 ## 代码架构
 
 ```text
-离线语义路径
-video / trace → demo → graph → StageProgram JSON → deterministic compiler → policy.py
-                    ↑              ↑
-              backend VLM    backend LLM 只提议动作序列与接线
+CaP 主路径
+video / trace → demo constraint graph → downstream backchain context
+                                      → StageProgram JSON
+                                      → generated policy.py explicitly calls
+                                        begin_candidates / rank_by /
+                                        require_future / choose
 
 在线方法路径（当前 read-only perception）
 graph hole anchor + head RGB-D
@@ -18,7 +20,8 @@ graph hole anchor + head RGB-D
     ├─ grasp_candidate → object-only GraspNet raw proposals
     └─ part_center / part_axis → conservative rack-hole geometry (PASS / UNKNOWN)
     → [frame transform / candidate normalization 尚未完成]
-    → typed-hole validation → hard filter → ranking → ExecutionDisabled
+    → typed-hole validation → hard filter
+    → execute the selection dataflow written in policy.py → ExecutionDisabled
 
 独立评测路径
 动作前后观测 → predicates / gates → PASS / FAIL / UNKNOWN
@@ -54,14 +57,16 @@ tests/                 纯逻辑测试和固定输入 fixture
 生成的 policy 只能看到 `policy/api.py` 里的 `RuntimeAPI`：
 
 ```text
+begin_candidates → rank_by → require_future → choose
 solve
 approach → grasp_at → lift → transport → align → lower_until → release → retreat
 ```
 
-- `solve()` 返回不透明 handle；policy 只能传递，不能读取坐标或阈值。
+- `begin_candidates / rank_by / require_future / choose` 是 CaP 显式写出的候选选择数据流；runtime 执行它，不替 program 隐藏选择逻辑。
+- `solve()` 只绑定普通 typed hole；`choose()` 返回选中 grasp pose 的不透明 handle。policy 只能传递 handle，不能读取坐标或阈值。
 - StageProgram validator 只允许把 `purpose=lower_stop` 的运行时条件接到 `lower_until()`；不能拿 scalar depth 或 gate condition 冒充。真实 runtime 的停止信号路由仍是执行前 TODO。
 - policy 不调用 `verify()`，也不能自行宣布阶段成功。
-- `selection`、`runner` 和 `evaluation` 属于可信运行层，不暴露给 VLM。
+- StageProgram 的 `selection` 暴露给 backend model，并确定性编译成上面的四类 API 调用；runner 与 evaluation 仍不暴露给模型。
 - `execution/robot_api.py` 和 `execution/pipeline.py` 是底层数值控制，只由 runtime 调用。
 - `OracleRuntime` 会读取 simulator `/state`，只能用于集成调试。
 - `retreat` 目前只有独立 opcode 和编译契约；可信 runtime solver 尚未实现，含该动作的 Oracle episode 会在 reset 和任何控制前拒绝启动。
@@ -83,7 +88,7 @@ approach → grasp_at → lift → transport → align → lower_until → relea
 
 Cone 排序只读重力相对的 `approach_tilt_deg`，不接受没有 frame 的裸 `approach_dir`。未来的 GraspNet candidate normalization 必须同时验证米制 point-cloud manifest、独立 identity 接受记录和 grasp-frame→runtime-EEF 标定，并在 provenance 中保存变换数值、frame、单位、XYZW 约定和独立证据。当前 binding 只记录“这个 mask 是为哪个 anchor 请求的”，不证明模型找对了实例，也不篡改 GraspNet detector ID；当前仓库仍不发布 GraspNet→graph candidate converter。
 
-当前 backend model 只在离线流程中参与：无 trace 时提议阶段切分、建立全视频对象 registry、逐阶段提取约束，以及提议结构化 `StageProgram`。Python policy 由可信代码确定性生成；在线候选选择、运动执行和 gate 都不调用 backend。这里的 backend model 指通过 `common/llm.py` 调用的生成式 VLM/LLM；抓取检测器等感知模型属于非特权感知层，不在这个定义中。
+当前 backend model 只在离线流程中参与：无 trace 时提议阶段切分、建立对象 registry、逐阶段提取约束，并生成包含动作接线与 `selection` 的结构化 `StageProgram`。可信 compiler 只负责把这份 CaP IR 降成 Python；候选选择的约束调用已经由 model 产物显式决定。episode 运行时不再调用 backend，运动执行和 gate 也不由它决定。
 
 ## 快速开始
 
@@ -104,11 +109,23 @@ export DGL_DATA_ROOT=/path/to/robot-subtask-seg
 
 dgl all --task insert_tubes
 dgl compile --task insert_tubes
+dgl compile --task insert_tubes --cap-mode backchain
 dgl metrics --task insert_tubes \
   --gold benchmarks/goldsets/insert_tubes_gold.json
 ```
 
-`all` 负责从示范到已校验约束图；`compile` 先取得 `StageProgram`，再确定性生成 policy，并做静态检查和 fake dry-run。未通过 `validation.json` 的 graph 不会调用 compiler backend。
+`all` 负责从示范到已校验约束图；`compile` 让 backend 生成 `StageProgram`，再确定性生成 policy，并做静态检查和 fake dry-run。`--cap-mode` 控制生成代码能使用的约束范围。未通过 `validation.json` 的 graph 不会调用 compiler backend。
+
+固定同一 graph 做三组 CaP 代码生成消融：
+
+```bash
+dgl cap-ablate \
+  --graph runs/insert_tubes/<timestamp>/graph.json \
+  --output-dir /path/to/experiment \
+  --repeats 5
+```
+
+`vanilla` 不引用示范约束，`local` 只写当前阶段约束，`backchain` 额外把涉及同一 manipulated object 的下游约束写入 `require_future(...)`。三组共享 graph、primitive contract 和模型设置。
 
 只跑 planning-only 固定 replay：
 
@@ -215,7 +232,7 @@ dgl-oracle episode \
 
 ## 当前研究重点
 
-下一条真实主线是：在正确的 `insert_tubes` scene 上运行这条逐对象链 → 复核 tube mask 与 center/right/left hole 的 `PASS/UNKNOWN` 证据 → 补齐 lift-aware camera→robot-base 与 grasp→runtime-EEF 标定 → 实现可达、碰撞和夹爪宽度证书 → 建立第一份真实固定 replay。当前实现与离线测试只证明接口和证据链可追溯，不证明 Qwen/SAM3 识别准确，也不证明 grasp 可执行。完成真实 replay 和单 stage gate/abort 审查之前不连接控制；完整 episode 稳定后才加入跨阶段 `compat` 和向后检查。
+当前先验证方法论本身：在同一 graph 上跑 `vanilla / local / backchain` 的 CaP 代码生成有效率与代码差异；随后把 `require_future` 依赖的 synthetic `future_constraints` 换成真实几何/规划 compatibility，并比较同候选集上的长程成功率。现有测试已经证明接口因果路径和一个“局部最优、下游必死”的反例，不证明真实 grasp 或完整任务成功。
 
 详细内容：
 

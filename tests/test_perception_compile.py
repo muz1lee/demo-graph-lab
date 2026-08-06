@@ -59,6 +59,11 @@ def _stage_program() -> dict:
     return {"stages": [{
         "index": 0,
         "name": "insertion",
+        "selection": {
+            "grasp_hole": "peg_grasp_pose",
+            "current_constraints": [],
+            "downstream_constraints": [],
+        },
         "actions": [
             {"op": "grasp_at", "args": {
                 "grasp_pose": {"hole": "peg_grasp_pose"},
@@ -264,7 +269,15 @@ def test_compile_skips_the_perception_call_when_no_hole_is_publishable(
         hole for hole in graph["stages"][0]["holes"]
         if hole["name"] == "peg_grasp_pose"
     ]
-    grasp_only = {"stages": [{"index": 0, "name": "insertion", "actions": [
+    grasp_only = {"stages": [{
+        "index": 0,
+        "name": "insertion",
+        "selection": {
+            "grasp_hole": "peg_grasp_pose",
+            "current_constraints": [],
+            "downstream_constraints": [],
+        },
+        "actions": [
         {"op": "grasp_at", "args": {"grasp_pose": {"hole": "peg_grasp_pose"}}},
         {"op": "release", "args": {}},
     ]}]}

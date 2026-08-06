@@ -16,6 +16,7 @@ from ..common import artifacts
 from ..graph import validate as graph_validate, vocab
 from ..perception import program as perception_program
 from ..perception.fake_runtime import FakePerceptionRuntime
+from . import backchain
 from .program import (
     ARGUMENT_SPECS,
     PRIMITIVES,
@@ -133,7 +134,9 @@ def dry_run(code: str, graph: dict) -> dict:
     retry = run_policy(handlers, graph, rt2, strict_gates=False)
     return {"normal": normal, "retry_injection": retry,
             "n_calls": len(rt.calls),
-            "holes_solved": sorted({c["hole"] for c in rt.calls if c["op"] == "solve"}),
+            "holes_solved": sorted({
+                c["hole"] for c in rt.calls if c["op"] in {"solve", "choose"}
+            }),
             "gates_checked": sum(1 for c in rt.calls if c["op"] == "verify"),
             "calls": rt.calls}
 
@@ -302,22 +305,31 @@ def compile_perception(
     return section
 
 
-def compile_prompt(graph: dict) -> str:
+def compile_prompt(graph: dict, *, selection_mode: str = "backchain") -> str:
     """Assemble the StageProgram prompt: static text + rendered closed set + graph."""
     from . import api
 
+    context = backchain.selection_context(graph, mode=selection_mode)
     body = (artifacts.PROMPT_ROOT / "compile_policy.md").read_text().split("---", 1)[1]
     return (body
             + "\n\n## PRIMITIVE TABLE\nChain order (a stage's actions must be a "
             + "non-decreasing subsequence of):\n\n"
             + " → ".join(f"`{op}`" for op in PRIMITIVES) + "\n\n"
             + _render_primitive_table()
+            + "\n\n## SELECTION MODE\n`" + selection_mode + "`"
+            + "\n\n## SELECTION CONTEXT\nCopy each listed constraint ref into the "
+            + "matching selection field exactly; do not add or omit refs.\n```json\n"
+            + json.dumps(context, ensure_ascii=False, indent=1) + "\n```"
             + "\n\n## CONTRACT SOURCE\n```python\n" + inspect.getsource(api) + "```"
             + "\n\n## GRAPH JSON\n```json\n"
             + json.dumps(graph, ensure_ascii=False, indent=1) + "\n```")
 
 
-def run(task: str, model: str | None = None) -> Path:
+def run(
+    task: str,
+    model: str | None = None,
+    selection_mode: str = "backchain",
+) -> Path:
     from ..common import llm
     run_dir = artifacts.latest_run_dir(task)
     policy_path = run_dir / "policy.py"
@@ -336,6 +348,7 @@ def run(task: str, model: str | None = None) -> Path:
     validation_path = run_dir / "validation.json"
     report = {
         "task": task,
+        "selection_mode": selection_mode,
         "graph_validation": "passed",
         "program_violations": [],
         "static_violations": [],
@@ -373,7 +386,10 @@ def run(task: str, model: str | None = None) -> Path:
         return run_dir / "compile_report.json"
 
     tag = "compile"
-    messages = [{"role": "user", "content": compile_prompt(graph)}]
+    messages = [{
+        "role": "user",
+        "content": compile_prompt(graph, selection_mode=selection_mode),
+    }]
     input_refs = ["graph.json", "package:policy/api.py",
                   "package:policy/program.py",
                   "package:prompts/compile_policy.md"]
@@ -395,13 +411,15 @@ def run(task: str, model: str | None = None) -> Path:
         return run_dir / "compile_report.json"
 
     artifacts.write_json(program_path, program)
-    program_violations = validate_program(program, graph)
+    program_violations = validate_program(
+        program, graph, selection_mode=selection_mode,
+    )
     llm.record_result(
         run_dir, tag, parsed=program, validation_errors=program_violations)
     report["program_violations"] = program_violations
     if not program_violations:
         report["unwired_holes"] = unwired_holes(program, graph)
-        code = compile_program(program, graph)
+        code = compile_program(program, graph, selection_mode=selection_mode)
         violations = static_check(code)
         report["static_violations"] = violations
         if not violations:

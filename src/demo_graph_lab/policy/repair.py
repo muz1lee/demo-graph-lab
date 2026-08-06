@@ -186,6 +186,22 @@ def validate_reply(doc, program: dict, graph: dict) -> tuple[str, dict, list[str
     if not isinstance(revised, dict):
         return attribution, {}, violations + ["repair.program: 必须是 StageProgram 对象"]
     violations.extend(validate_program(revised, graph))
+    current_stages = {
+        stage.get("index"): stage
+        for stage in program.get("stages", [])
+        if isinstance(stage, dict)
+    }
+    revised_stages = {
+        stage.get("index"): stage
+        for stage in revised.get("stages", [])
+        if isinstance(stage, dict)
+    }
+    for index, current in current_stages.items():
+        if revised_stages.get(index, {}).get("selection") != current.get("selection"):
+            violations.append(
+                f"repair.program.stage {index}: selection is fixed by the "
+                "experiment arm and cannot change during action repair"
+            )
     if revised == program:
         violations.append("repair.program: 与当前 StageProgram 完全相同,没有提出修复")
     return attribution, revised, violations

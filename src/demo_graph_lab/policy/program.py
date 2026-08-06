@@ -12,6 +12,7 @@ import inspect
 import re
 
 from ..graph import vocab
+from . import backchain
 from .api import RuntimeAPI
 
 
@@ -191,7 +192,84 @@ def _validate_argument(
     return errors
 
 
-def validate_program(program: dict, graph: dict) -> list[str]:
+def _validate_selection(
+    selection,
+    *,
+    stage: dict,
+    context: dict | None,
+    path: str,
+    required: bool,
+) -> list[str]:
+    errors: list[str] = []
+    if selection is None:
+        if required:
+            errors.append(f"{path}: grasp stage 必须声明 selection")
+        return errors
+    if context is None:
+        return [f"{path}: 非 grasp stage 不得声明 selection"]
+    if not isinstance(selection, dict):
+        return [f"{path}: 必须是对象"]
+    expected_keys = {
+        "grasp_hole", "current_constraints", "downstream_constraints",
+    }
+    missing = sorted(expected_keys - set(selection))
+    extra = sorted(set(selection) - expected_keys)
+    if missing:
+        errors.append(f"{path}: 缺少字段 {missing}")
+    if extra:
+        errors.append(f"{path}: 未知字段 {extra}")
+
+    grasp_hole = selection.get("grasp_hole")
+    if grasp_hole not in context["grasp_holes"]:
+        errors.append(
+            f"{path}.grasp_hole: {grasp_hole!r} 不是本阶段 grasp_candidate hole;"
+            f"允许 {context['grasp_holes']}"
+        )
+    for key in ("current_constraints", "downstream_constraints"):
+        actual = selection.get(key)
+        expected = context[key]
+        if not isinstance(actual, list) or any(
+                not isinstance(item, str) or not item for item in actual):
+            errors.append(f"{path}.{key}: 必须是 constraint ref 字符串列表")
+            continue
+        if len(actual) != len(set(actual)):
+            errors.append(f"{path}.{key}: constraint ref 不得重复")
+        if actual != expected:
+            errors.append(
+                f"{path}.{key}: 必须逐项等于当前实验臂的约束上下文;"
+                f"expected={expected} got={actual}"
+            )
+    return errors
+
+
+def _matching_selection_modes(program_stages: list, graph: dict) -> list[str]:
+    """Infer which experiment arm an explicit selection program belongs to."""
+    by_index = {
+        stage.get("index"): stage
+        for stage in program_stages
+        if isinstance(stage, dict)
+    }
+    matches = []
+    for mode in backchain.MODES:
+        contexts = backchain.selection_context(graph, mode=mode)
+        if all(
+            isinstance(by_index.get(index, {}).get("selection"), dict)
+            and by_index[index]["selection"].get("current_constraints")
+            == context["current_constraints"]
+            and by_index[index]["selection"].get("downstream_constraints")
+            == context["downstream_constraints"]
+            for index, context in contexts.items()
+        ):
+            matches.append(mode)
+    return matches
+
+
+def validate_program(
+    program: dict,
+    graph: dict,
+    *,
+    selection_mode: str | None = None,
+) -> list[str]:
     """Return all StageProgram contract violations without executing anything."""
     errors: list[str] = []
     if not isinstance(program, dict):
@@ -229,6 +307,31 @@ def validate_program(program: dict, graph: dict) -> list[str]:
             f"got={actual_order}"
         )
 
+    if selection_mode is not None and selection_mode not in backchain.MODES:
+        errors.append(
+            f"program: 未知 selection_mode {selection_mode!r};"
+            f"允许 {backchain.MODES}"
+        )
+    has_selection = any(
+        isinstance(stage, dict) and stage.get("selection") is not None
+        for stage in program_stages
+    )
+    matching_modes = (
+        _matching_selection_modes(program_stages, graph)
+        if selection_mode is None and has_selection
+        else []
+    )
+    if selection_mode is None and has_selection and not matching_modes:
+        errors.append(
+            "program: selection constraint refs do not match any experiment arm"
+        )
+    mode = (
+        selection_mode if selection_mode in backchain.MODES
+        else matching_modes[0] if matching_modes
+        else "backchain"
+    )
+    selection_by_stage = backchain.selection_context(graph, mode=mode)
+
     seen: set[int] = set()
     release_seen = False
     for offset, stage_program in enumerate(program_stages):
@@ -236,7 +339,9 @@ def validate_program(program: dict, graph: dict) -> list[str]:
         if not isinstance(stage_program, dict):
             errors.append(f"{path}: 必须是对象")
             continue
-        extra = sorted(set(stage_program) - {"index", "name", "actions"})
+        extra = sorted(
+            set(stage_program) - {"index", "name", "selection", "actions"}
+        )
         missing = sorted({"index", "name", "actions"} - set(stage_program))
         if missing:
             errors.append(f"{path}: 缺少字段 {missing}")
@@ -263,6 +368,16 @@ def validate_program(program: dict, graph: dict) -> list[str]:
 
         holes = _hole_map(graph_stage, f"graph.s{index}", errors)
         objects = _stage_object_refs(graph_stage)
+        errors.extend(_validate_selection(
+            stage_program.get("selection"),
+            stage=graph_stage,
+            context=selection_by_stage.get(index),
+            path=f"{path}.selection",
+            required=(
+                (selection_mode is not None or has_selection)
+                and index in selection_by_stage
+            ),
+        ))
         actions = stage_program.get("actions")
         if not isinstance(actions, list):
             errors.append(f"{path}.actions: 必须是列表")
@@ -318,6 +433,21 @@ def validate_program(program: dict, graph: dict) -> list[str]:
                     args[arg_name], spec, holes, objects,
                     f"{action_path}.args.{arg_name}",
                 ))
+
+        selection = stage_program.get("selection")
+        if isinstance(selection, dict):
+            grasp_hole = selection.get("grasp_hole")
+            uses_selected_grasp = any(
+                isinstance(action, dict)
+                and action.get("op") == "grasp_at"
+                and isinstance(action.get("args"), dict)
+                and action["args"].get("grasp_pose") == {"hole": grasp_hole}
+                for action in actions
+            )
+            if not uses_selected_grasp:
+                errors.append(
+                    f"{path}.selection.grasp_hole: must feed grasp_at.grasp_pose"
+                )
 
     missing_stages = sorted(set(graph_by_index) - seen)
     if missing_stages:
@@ -387,9 +517,14 @@ def unwired_holes(program: dict, graph: dict) -> list[dict]:
     return report
 
 
-def compile_program(program: dict, graph: dict) -> str:
+def compile_program(
+    program: dict,
+    graph: dict,
+    *,
+    selection_mode: str | None = None,
+) -> str:
     """Compile a validated StageProgram into stable, model-free Python handlers."""
-    violations = validate_program(program, graph)
+    violations = validate_program(program, graph, selection_mode=selection_mode)
     if violations:
         raise ValueError(f"StageProgram validation failed: {violations[:3]}")
 
@@ -410,8 +545,21 @@ def compile_program(program: dict, graph: dict) -> str:
                         hole_vars[hole_name] = f"h{len(hole_vars)}"
 
         lines.append(f"def stage_{index}(rt):")
+        selection = stage_program.get("selection")
+        selected_hole = None
+        if isinstance(selection, dict):
+            selected_hole = selection["grasp_hole"]
+            lines.append(f"    rt.begin_candidates({selected_hole!r})")
+            for constraint in selection["current_constraints"]:
+                lines.append(f"    rt.rank_by({constraint!r})")
+            for constraint in selection["downstream_constraints"]:
+                lines.append(f"    rt.require_future({constraint!r})")
+            lines.append(
+                f"    {hole_vars[selected_hole]} = rt.choose({selected_hole!r})"
+            )
         for hole_name, variable in hole_vars.items():
-            lines.append(f"    {variable} = rt.solve({hole_name!r})")
+            if hole_name != selected_hole:
+                lines.append(f"    {variable} = rt.solve({hole_name!r})")
         for action in actions:
             op, args = action["op"], action["args"]
             _, _, arg_order = _primitive_parameters(op)

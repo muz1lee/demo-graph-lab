@@ -45,6 +45,8 @@ What you may not change:
 
 - the graph: its stages, names, holes, stage objects, constraints or acceptance
   conditions. They are not in your output and must not be described there either;
+- each stage's `selection` object: it is fixed by the experiment arm. Copy it exactly,
+  including `grasp_hole`, `current_constraints`, and `downstream_constraints`;
 - the closed set: only the primitives and arguments in the table below exist. Do not
   invent primitives, parameters, holes, objects, helper fields or explanations;
 - numbers: no coordinates, distances, angles, thresholds or any other numeric literal.

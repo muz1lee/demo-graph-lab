@@ -10,6 +10,7 @@
   dgl all       --task insert_tubes [--k 5] [--max-stages N]
   dgl metrics   --task insert_tubes --gold benchmarks/goldsets/insert_tubes_gold.json
   dgl repair    --run-dir runs/insert_tubes/<ts> --episode <episode_*.json> [--model slug]
+  dgl cap-ablate --graph <graph.json> --output-dir <dir> [--repeats 3]
   dgl planning-replay --graph <graph.json> --replay <replay.json> --output <comparison.json>
   dgl planning-record --record-dir <dir> \\
       [--step plan|capture|ground|segment|project|predict|programs]
@@ -36,6 +37,13 @@ def main(argv=None):
         p.add_argument("--task", required=True)
         if name in ("compile", "objects"):
             p.add_argument("--model", default=None)
+        if name == "compile":
+            p.add_argument(
+                "--cap-mode",
+                choices=("vanilla", "local", "backchain"),
+                default="backchain",
+                help="candidate-selection context exposed to the generated CaP program",
+            )
         if name in ("ingest", "all"):
             p.add_argument("--video")
             p.add_argument("--trace")
@@ -60,6 +68,14 @@ def main(argv=None):
         help="episode report written by `dgl-oracle episode`",
     )
     repair.add_argument("--model", default=None)
+    cap_ablate = sub.add_parser(
+        "cap-ablate",
+        help="generate paired vanilla/local/backchain CaP programs",
+    )
+    cap_ablate.add_argument("--graph", required=True)
+    cap_ablate.add_argument("--output-dir", required=True)
+    cap_ablate.add_argument("--repeats", type=int, default=3)
+    cap_ablate.add_argument("--model", default=None)
     replay = sub.add_parser(
         "planning-replay",
         help="compare demo/no-demo selection on one frozen, read-only replay",
@@ -113,6 +129,23 @@ def main(argv=None):
     record.add_argument("--allow-live-read", action="store_true")
     record.add_argument("--allow-model-read", action="store_true")
     args = parser.parse_args(argv)
+
+    if args.cmd == "cap-ablate":
+        artifacts.load_env()
+        from .policy import ablation
+
+        summary_path = ablation.run(
+            args.graph,
+            args.output_dir,
+            repeats=args.repeats,
+            model=args.model,
+        )
+        summary = artifacts.read_json(summary_path)
+        print(f"[cap-ablate] summary={summary_path}")
+        return 0 if all(
+            item["valid"] == item["attempts"]
+            for item in summary["modes"].values()
+        ) else 1
 
     if args.cmd == "repair":
         artifacts.load_env()
@@ -262,7 +295,7 @@ def main(argv=None):
         metrics.run(args.task, args.gold)
     elif args.cmd == "compile":
         from .policy import compiler
-        report_path = compiler.run(args.task, args.model)
+        report_path = compiler.run(args.task, args.model, args.cap_mode)
         compile_report = artifacts.read_json(report_path)
         return 0 if (compiler.report_ready(compile_report)
                      and (report_path.parent / "policy.py").exists()) else 1

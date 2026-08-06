@@ -19,6 +19,19 @@ class RuntimeAPI:
         """求解 graph 中声明的洞,返回不透明句柄(pose/axis/point/scalar/condition)。
         只能用图里该阶段 holes 列表出现过的 hole_name。"""
 
+    # ---- CaP 候选程序：模型显式组合，runtime 只执行 ----
+    def begin_candidates(self, grasp_hole: str):
+        """取得 grasp_hole 的候选集合；候选数值不暴露给 policy。"""
+
+    def rank_by(self, constraint_ref: str):
+        """按当前 stage 的 demo preference constraint 调整候选顺序。"""
+
+    def require_future(self, constraint_ref: str):
+        """删除不满足该下游 constraint 的候选，UNKNOWN 同样不保留。"""
+
+    def choose(self, grasp_hole: str):
+        """从当前候选集合选一个 grasp_hole，返回不透明位姿句柄。"""
+
     # ---- 控制原语(声明式) ----
     def approach(self, target, cone=None):
         """接近目标(target=物体名或句柄;cone=图中 approach_direction 的离散标签)。"""

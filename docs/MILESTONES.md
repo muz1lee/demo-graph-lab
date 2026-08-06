@@ -103,12 +103,18 @@
 
 ## 下游可行性选择
 
-状态：未开始，依赖完整 episode。
+状态：CaP 接口、三组代码生成消融和 synthetic 反例已完成；真实 compatibility 与效果实验未完成。
+
+已完成：
+
+- `StageProgram.selection` 显式保存当前与下游 constraint refs；
+- compiler 生成 `begin_candidates / rank_by / require_future / choose`；
+- `vanilla / local / backchain` 只改变生成代码可引用的约束范围；
+- planning-only synthetic 反例会淘汰局部最高分但下游 `FAIL` 的候选。
 
 验收条件：
 
-- 定义 `compat(current, next)` 的输入、成本和 `UNKNOWN`；
-- 构造当前可行但后续必死的候选对；
+- 用真实几何/规划结果替换 synthetic future labels，并定义成本和 `UNKNOWN`；
 - 比较当前阶段贪心与向后传播；
 - 消融区分候选质量和传播本身的收益。
 

@@ -536,6 +536,27 @@ class OracleRuntime:
         self._log("solve", hole=hole_name, kind=val["kind"])
         return val
 
+    def begin_candidates(self, grasp_hole: str):
+        """Oracle has one privileged debug solution, but preserves CaP's trace."""
+        self._log("begin_candidates", hole=grasp_hole, source="oracle_singleton")
+
+    def rank_by(self, constraint_ref: str):
+        self._log("rank_by", constraint=constraint_ref, source="oracle_singleton")
+
+    def require_future(self, constraint_ref: str):
+        # Oracle is an upper-bound debugger, not evidence for candidate
+        # backchaining.  Keep the generated call visible and leave its singleton
+        # untouched rather than pretending that a compatibility check ran.
+        self._log(
+            "require_future",
+            constraint=constraint_ref,
+            source="oracle_singleton_unchecked",
+        )
+
+    def choose(self, grasp_hole: str):
+        self._log("choose", hole=grasp_hole, source="oracle_singleton")
+        return self.solve(grasp_hole)
+
     # ---------- contract: 控制原语(pipeline ctrl 透传) ----------
     def _ctrl(self, fn: str, arm_id=None, **kw):
         """下发控制请求；调用方必须通过状态回读确认动作效果。"""

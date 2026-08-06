@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
 from ..perception import ObservationPacket
+from ..policy import backchain
 from ..selection.binding import validate_candidate_bindings
 from ..selection.candidates import (
     CandidateBundle,
@@ -184,6 +185,7 @@ class PlanningOnlyRuntime:
         stage_program: dict | None = None,
     ) -> None:
         required_holes_by_stage = None
+        explicit_selection_stages: frozenset[int] = frozenset()
         if stage_program is not None:
             from ..policy.program import validate_program, wired_holes_by_stage
 
@@ -193,6 +195,11 @@ class PlanningOnlyRuntime:
                     f"stage_program is invalid for this graph: {violations[:3]}"
                 )
             required_holes_by_stage = wired_holes_by_stage(stage_program)
+            explicit_selection_stages = frozenset(
+                stage["index"]
+                for stage in stage_program["stages"]
+                if isinstance(stage.get("selection"), dict)
+            )
 
         self.graph = graph
         self._observation_provider = observation_provider
@@ -200,6 +207,7 @@ class PlanningOnlyRuntime:
         self._hard_checks = tuple(hard_checks)
         self.decision_log_path = Path(decision_log_path)
         self.decisions: list[DecisionTrace] = []
+        self._explicit_selection_stages = explicit_selection_stages
 
         self._stages: dict[int, dict] = {}
         self._holes: dict[int, set[str]] = {}
@@ -242,9 +250,19 @@ class PlanningOnlyRuntime:
 
         self._active_stage_index: int | None = None
         self._active_observation: ObservationPacket | None = None
+        self._accepted: tuple[CandidateBundle, ...] = ()
         self._selected: CandidateBundle | None = None
         self._handles: dict[str, OpaqueHandle] = {}
         self._handle_values: dict[OpaqueHandle, object] = {}
+        self._constraint_table = backchain.constraint_table(graph)
+        self._selection_hole: str | None = None
+        self._selection_pool: tuple[CandidateBundle, ...] = ()
+        self._selection_region: str | None = None
+        self._selection_cone: str | None = None
+        self._selection_current: list[str] = []
+        self._selection_downstream: list[str] = []
+        self._selection_survivors: list[dict] = []
+        self._selection_checks: tuple[CandidateCheckTrace, ...] = ()
 
     def _append_decision(self, trace: DecisionTrace) -> None:
         record = trace.to_record()
@@ -261,9 +279,18 @@ class PlanningOnlyRuntime:
         # may leave the previous selection reachable through solve().
         self._active_stage_index = None
         self._active_observation = None
+        self._accepted = ()
         self._selected = None
         self._handles.clear()
         self._handle_values.clear()
+        self._selection_hole = None
+        self._selection_pool = ()
+        self._selection_region = None
+        self._selection_cone = None
+        self._selection_current = []
+        self._selection_downstream = []
+        self._selection_survivors = []
+        self._selection_checks = ()
 
         index = stage.get("index")
         if isinstance(index, bool) or not isinstance(index, int) or index < 0:
@@ -288,6 +315,19 @@ class PlanningOnlyRuntime:
             self._hard_checks,
             required_holes=self._required_holes[index],
         )
+        self._active_stage_index = index
+        self._active_observation = observation
+        self._accepted = filtered.accepted
+        self._selection_checks = filtered.traces
+        if index in self._explicit_selection_stages:
+            if not self._accepted:
+                raise NoFeasibleCandidate(
+                    f"stage {index} has no candidate that passed every hard check"
+                )
+            return
+
+        # Legacy programs without an explicit selection block retain the old
+        # deterministic default. New CaP programs make the choice in their handler.
         region, cone = stage_preferences(declared)
         selection = deterministic_select(filtered.accepted, region=region, cone=cone)
         trace = DecisionTrace(
@@ -307,13 +347,138 @@ class PlanningOnlyRuntime:
         )
         self._append_decision(trace)
 
-        self._active_stage_index = index
-        self._active_observation = observation
         self._selected = selection.selected
         if self._selected is None:
             raise NoFeasibleCandidate(
                 f"stage {index} has no candidate that passed every hard check"
             )
+
+    @property
+    def selected_candidate_id(self) -> str | None:
+        return None if self._selected is None else self._selected.candidate_id
+
+    def begin_candidates(self, grasp_hole: str) -> None:
+        """Start the candidate dataflow written explicitly by the CaP program."""
+        if self._active_stage_index is None or self._active_observation is None:
+            raise NoFeasibleCandidate("begin_stage must run before begin_candidates")
+        stage = self._stages[self._active_stage_index]
+        holes = {
+            hole["name"]: hole for hole in stage.get("holes", [])
+            if isinstance(hole, dict) and isinstance(hole.get("name"), str)
+        }
+        hole = holes.get(grasp_hole)
+        if (hole is None or hole.get("type") != "pose_se3"
+                or hole.get("resolver") != "grasp_candidate"):
+            raise ValueError(
+                f"{grasp_hole!r} is not a grasp_candidate pose hole in "
+                f"stage {self._active_stage_index}"
+            )
+        self._selection_hole = grasp_hole
+        self._selection_pool = self._accepted
+        self._selection_region = None
+        self._selection_cone = None
+        self._selection_current = []
+        self._selection_downstream = []
+        self._selection_survivors = []
+        self._selected = None
+        self._handles.clear()
+        self._handle_values.clear()
+
+    def _constraint(self, constraint_ref: str) -> tuple[int, dict]:
+        try:
+            return self._constraint_table[constraint_ref]
+        except KeyError as error:
+            raise ValueError(f"unknown constraint ref {constraint_ref!r}") from error
+
+    def rank_by(self, constraint_ref: str) -> None:
+        if self._selection_hole is None or self._active_stage_index is None:
+            raise NoFeasibleCandidate("begin_candidates must run before rank_by")
+        stage_index, constraint = self._constraint(constraint_ref)
+        if stage_index != self._active_stage_index:
+            raise ValueError(
+                f"rank_by only accepts current-stage constraints; got {constraint_ref!r}"
+            )
+        args = constraint.get("args") or {}
+        name = constraint.get("name")
+        if name == "region_grasp":
+            self._selection_region = args.get("region")
+        elif name == "approach_direction":
+            self._selection_cone = args.get("cone")
+        else:
+            raise ValueError(
+                f"constraint {constraint_ref!r} is not a ranking preference"
+            )
+        self._selection_current.append(constraint_ref)
+
+    def require_future(self, constraint_ref: str) -> None:
+        if self._selection_hole is None or self._active_stage_index is None:
+            raise NoFeasibleCandidate(
+                "begin_candidates must run before require_future"
+            )
+        stage_index, _ = self._constraint(constraint_ref)
+        if stage_index <= self._active_stage_index:
+            raise ValueError(
+                f"require_future needs a later-stage constraint; got {constraint_ref!r}"
+            )
+        before = [item.candidate_id for item in self._selection_pool]
+        kept = []
+        outcomes = {}
+        for candidate in self._selection_pool:
+            support = candidate.features.get("future_constraints", {})
+            status = support.get(constraint_ref) if isinstance(support, Mapping) else None
+            outcomes[candidate.candidate_id] = status or "UNKNOWN"
+            if status == CheckStatus.PASS.value:
+                kept.append(candidate)
+        self._selection_pool = tuple(kept)
+        self._selection_downstream.append(constraint_ref)
+        self._selection_survivors.append({
+            "constraint": constraint_ref,
+            "before": before,
+            "outcomes": outcomes,
+            "after": [item.candidate_id for item in kept],
+        })
+
+    def choose(self, grasp_hole: str) -> OpaqueHandle:
+        if self._selection_hole != grasp_hole:
+            raise ValueError(
+                f"choose hole {grasp_hole!r} does not match active candidate source "
+                f"{self._selection_hole!r}"
+            )
+        selection = deterministic_select(
+            self._selection_pool,
+            region=self._selection_region,
+            cone=self._selection_cone,
+        )
+        self._selected = selection.selected
+        stage = self._stages[self._active_stage_index]
+        trace = DecisionTrace(
+            stage_index=self._active_stage_index,
+            stage_name=str(stage["name"]),
+            observation=self._active_observation,
+            checks=self._selection_checks,
+            ranking=tuple(item.candidate_id for item in selection.ranked),
+            selected_candidate_id=self.selected_candidate_id,
+            preferences={
+                "region": self._selection_region,
+                "cone": self._selection_cone,
+            },
+            ranking_meta={
+                "region": selection.region_meta,
+                "cone": selection.cone_meta,
+                "cap_program": {
+                    "current_constraints": list(self._selection_current),
+                    "downstream_constraints": list(self._selection_downstream),
+                    "future_filter": list(self._selection_survivors),
+                },
+            },
+        )
+        self._append_decision(trace)
+        if self._selected is None:
+            raise NoFeasibleCandidate(
+                f"stage {self._active_stage_index} has no candidate satisfying "
+                "the generated downstream constraints"
+            )
+        return self.solve(grasp_hole)
 
     def solve(self, hole_name: str) -> OpaqueHandle:
         """Return an identity-only handle for a value on the selected candidate."""
